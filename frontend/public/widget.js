@@ -15,6 +15,17 @@
     window.MRNWEBDESIGNS_CHATBOT_CONFIG?.chatbotInitialText || null;
   const chatbotHeaderTitle =
     window.MRNWEBDESIGNS_CHATBOT_CONFIG?.chatbotHeaderTitle || null;
+
+  function postOpenChatConfig(iframe) {
+    if (!iframe || !iframe.contentWindow) return;
+    iframe.contentWindow.postMessage({
+      action: 'open-chat',
+      apiUrl: apiUrl,
+      tenantPublicKey: tenantPublicKey,
+      chatbotInitialText: chatbotInitialText,
+      chatbotHeaderTitle: chatbotHeaderTitle
+    }, '*');
+  }
   
   // Create iframe for the widget
   function createChatbotIframe() {
@@ -96,14 +107,10 @@
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
       `;
-      // Send message to iframe to open chat
-      iframe.contentWindow.postMessage({
-        action: 'open-chat',
-        apiUrl: apiUrl,
-        tenantPublicKey: tenantPublicKey,
-        chatbotInitialText: chatbotInitialText,
-        chatbotHeaderTitle: chatbotHeaderTitle
-      }, '*');
+      // Send message to iframe to open chat.
+      // Retry shortly to handle slower iframe bootstrap on production.
+      postOpenChatConfig(iframe);
+      setTimeout(() => postOpenChatConfig(iframe), 250);
     } else {
       closeChat();
     }
@@ -148,6 +155,11 @@
     
     // Create and append iframe
     const iframe = createChatbotIframe();
+    iframe.addEventListener('load', function() {
+      // Ensure config reaches iframe even if first open click happens
+      // before the embedded app has attached its message listener.
+      postOpenChatConfig(iframe);
+    });
     document.body.appendChild(iframe);
     
     // Create and append toggle button
