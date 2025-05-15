@@ -88,7 +88,7 @@ QDRANT_HOST=localhost
 QDRANT_PORT=6333
 COLLECTION_NAME=migraine_content
 API_HOST=0.0.0.0
-API_PORT=8000
+API_PORT=8013
 ...
 ```
 
@@ -149,7 +149,7 @@ For development or testing:
 
 ```bash
 cd backend
-python -m uvicorn main:app --host 0.0.0.0 --port 8000
+python -m uvicorn main:app --host 0.0.0.0 --port 8013
 ```
 
 For production, we'll use Gunicorn:
@@ -160,7 +160,7 @@ pip install gunicorn
 
 # Start the API with Gunicorn
 cd backend
-gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app -b 0.0.0.0:8000
+gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app -b 0.0.0.0:8013
 ```
 
 ### Create a Systemd Service for the Backend
@@ -182,7 +182,7 @@ Group=www-data
 WorkingDirectory=/var/www/migraine-ai-chatbot/backend
 Environment="PATH=/var/www/migraine-ai-chatbot/venv/bin"
 EnvironmentFile=/var/www/migraine-ai-chatbot/backend/.env
-ExecStart=/var/www/migraine-ai-chatbot/venv/bin/gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app -b 0.0.0.0:8000
+ExecStart=/var/www/migraine-ai-chatbot/venv/bin/gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app -b 0.0.0.0:8013
 Restart=always
 
 [Install]
@@ -251,7 +251,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://localhost:8000/;
+        proxy_pass http://localhost:8013/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';

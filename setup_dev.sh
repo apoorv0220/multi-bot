@@ -61,7 +61,7 @@ QDRANT_HOST=localhost
 QDRANT_PORT=6333
 COLLECTION_NAME=migraine_content
 API_HOST=0.0.0.0
-API_PORT=8000
+API_PORT=8013
 EOF
   fi
 else
@@ -72,7 +72,7 @@ fi
 if [ ! -f "frontend/.env" ]; then
   echo -e "${YELLOW}Creating frontend/.env${NC}"
   cat > frontend/.env << EOF
-REACT_APP_API_URL=http://localhost:8000
+REACT_APP_API_URL=http://localhost:8013
 EOF
 else
   echo -e "${YELLOW}frontend/.env already exists, skipping${NC}"

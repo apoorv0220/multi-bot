@@ -42,7 +42,7 @@ class MigraineChatbot {
         $default_options = array(
             'chatbot_enabled' => true,
             'custom_urls_enabled' => true,
-            'api_url' => 'http://localhost:8000',
+            'api_url' => 'http://localhost:8013',
         );
         
         update_option('migraine_chatbot_settings', $default_options);
@@ -152,7 +152,7 @@ class MigraineChatbot {
         $options = get_option('migraine_chatbot_settings', array(
             'chatbot_enabled' => true,
             'custom_urls_enabled' => true,
-            'api_url' => 'http://localhost:8000',
+            'api_url' => 'http://localhost:8013',
         ));
         
         ?>
@@ -364,7 +364,7 @@ class MigraineChatbot {
         // Get settings
         $options = get_option('migraine_chatbot_settings', array(
             'chatbot_enabled' => true,
-            'api_url' => 'http://localhost:8000',
+            'api_url' => 'http://localhost:8013',
         ));
         
         // Don't render if disabled

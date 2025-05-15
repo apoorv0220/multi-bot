@@ -1,7 +1,7 @@
 (function() {
   // Configuration - set this to your actual deployed URL in production
-  const widgetUrl = window.MIGRAINE_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3000';
-  const apiUrl = window.MIGRAINE_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8000';
+  const widgetUrl = window.MIGRAINE_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3013';
+  const apiUrl = window.MIGRAINE_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8013';
   const primaryColor = window.MIGRAINE_CHATBOT_CONFIG?.primaryColor || '#5762d5';
   
   // Create iframe for the widget

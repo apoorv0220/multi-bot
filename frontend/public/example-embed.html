@@ -85,8 +85,8 @@
   <pre>&lt;script&gt;
   // Optional configuration
   window.MIGRAINE_CHATBOT_CONFIG = {
-    baseUrl: 'http://localhost:3000',       // URL where the chatbot widget is hosted
-    apiUrl: 'http://localhost:8000',        // URL of the backend API
+    baseUrl: 'http://localhost:3013',       // URL where the chatbot widget is hosted
+    apiUrl: 'http://localhost:8013',        // URL of the backend API
     primaryColor: '#5762d5'                 // Primary color for the chatbot
   };
   
@@ -131,7 +131,7 @@
         buttonElement.disabled = true;
         
         // Get API URL from configuration
-        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'http://localhost:8000';
+        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'http://localhost:8013';
         
         // Call the reindex API endpoint
         fetch(`${apiUrl}/api/reindex`, {
@@ -160,8 +160,8 @@
   <script>
     // Optional configuration
     window.MIGRAINE_CHATBOT_CONFIG = {
-      baseUrl: 'http://localhost:3000',
-      apiUrl: 'http://localhost:8000',
+      baseUrl: 'http://localhost:3013',
+      apiUrl: 'http://localhost:8013',
       primaryColor: '#5762d5'
     };
     

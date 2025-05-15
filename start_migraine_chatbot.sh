@@ -73,21 +73,21 @@ fi
 echo -e "\n${GREEN}=== STARTING BACKEND API ===${NC}"
 echo "Starting FastAPI backend..."
 
-# Check if the service is already running on port 8000
-if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null ; then
-  echo -e "${YELLOW}Warning: Something is already running on port 8000.${NC}"
+# Check if the service is already running on port 8013
+if lsof -Pi :8013 -sTCP:LISTEN -t >/dev/null ; then
+  echo -e "${YELLOW}Warning: Something is already running on port 8013.${NC}"
   echo "Please close that process first or change the API_PORT in .env"
   exit 1
 fi
 
 # Start backend in the background
 cd backend
-python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000 &
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8013 &
 BACKEND_PID=$!
 cd ..
 
 echo "Backend running with PID: $BACKEND_PID"
-echo "You can access the API documentation at: http://localhost:8000/docs"
+echo "You can access the API documentation at: http://localhost:8013/docs"
 
 # Optionally start the frontend
 echo -e "\n${GREEN}=== FRONTEND INFORMATION ===${NC}"
@@ -98,7 +98,7 @@ echo -e "${YELLOW}npm start${NC}"
 
 echo -e "\n${GREEN}=== ALL SERVICES STARTED ===${NC}"
 echo "The Migraine.ie AI Chatbot is now running!"
-echo "Backend API: http://localhost:8000"
+echo "Backend API: http://localhost:8013"
 echo "Qdrant Dashboard: http://localhost:6333/dashboard"
 echo
 echo -e "${YELLOW}Press Ctrl+C to stop all services...${NC}"
