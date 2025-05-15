@@ -136,7 +136,7 @@ npm install
 npm start
 ```
 
-The chatbot widget will be available at http://localhost:3013
+The chatbot widget will be available at http://144.217.68.58:3001
 
 #### Step 5: Test the Qdrant connection
 
@@ -170,7 +170,7 @@ docker-compose down
 
 ## 📄 API Documentation
 
-The backend API endpoints can be viewed at http://localhost:8013/docs when the backend is running.
+The backend API endpoints can be viewed at http://144.217.68.58:8013/docs when the backend is running.
 
 ## 📊 Customization Options
 

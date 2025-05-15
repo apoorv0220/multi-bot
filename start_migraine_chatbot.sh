@@ -87,7 +87,7 @@ BACKEND_PID=$!
 cd ..
 
 echo "Backend running with PID: $BACKEND_PID"
-echo "You can access the API documentation at: http://localhost:8013/docs"
+echo "You can access the API documentation at: http://144.217.68.58:8013/docs"
 
 # Optionally start the frontend
 echo -e "\n${GREEN}=== FRONTEND INFORMATION ===${NC}"
@@ -98,8 +98,8 @@ echo -e "${YELLOW}npm start${NC}"
 
 echo -e "\n${GREEN}=== ALL SERVICES STARTED ===${NC}"
 echo "The Migraine.ie AI Chatbot is now running!"
-echo "Backend API: http://localhost:8013"
-echo "Qdrant Dashboard: http://localhost:6333/dashboard"
+echo "Backend API: http://144.217.68.58:8013"
+echo "Qdrant Dashboard: http://144.217.68.58:6333/dashboard"
 echo
 echo -e "${YELLOW}Press Ctrl+C to stop all services...${NC}"
 

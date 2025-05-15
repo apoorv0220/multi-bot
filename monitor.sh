@@ -124,7 +124,7 @@ fi
 
 # Check API endpoint health
 log_message "${YELLOW}Checking API health endpoint...${NC}"
-API_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8013/health)
+API_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://144.217.68.58:8013/health)
 
 if [ "$API_RESPONSE" == "200" ]; then
   log_message "${GREEN}API health check successful${NC}"
@@ -135,7 +135,7 @@ else
   docker-compose restart backend
   sleep 5
   
-  NEW_API_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8013/health)
+  NEW_API_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://144.217.68.58:8013/health)
   if [ "$NEW_API_RESPONSE" == "200" ]; then
     log_message "${GREEN}API health check now successful after restart${NC}"
   else

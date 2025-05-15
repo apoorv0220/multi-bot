@@ -72,7 +72,7 @@ fi
 if [ ! -f "frontend/.env" ]; then
   echo -e "${YELLOW}Creating frontend/.env${NC}"
   cat > frontend/.env << EOF
-REACT_APP_API_URL=http://localhost:8013
+REACT_APP_API_URL=http://144.217.68.58:8013
 EOF
 else
   echo -e "${YELLOW}frontend/.env already exists, skipping${NC}"

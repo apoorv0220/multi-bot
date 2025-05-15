@@ -95,7 +95,7 @@ server {
     server_name $DOMAIN;
 
     location / {
-        proxy_pass http://localhost:80;
+        proxy_pass http://144.217.68.58:80;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -104,7 +104,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://localhost:8013/;
+        proxy_pass http://144.217.68.58:8013/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';

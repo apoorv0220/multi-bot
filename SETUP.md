@@ -53,7 +53,7 @@ This guide will help you set up and run the Migraine.ie AI chatbot on your local
    cd backend
    python -m uvicorn main:app --host 0.0.0.0 --port 8013 --reload
    ```
-   This will run the API server at http://localhost:8013
+   This will run the API server at http://144.217.68.58:8013
 
 6. **Initialize the database** (optional):
    - If you need to populate the vector database with content:
@@ -74,10 +74,10 @@ This guide will help you set up and run the Migraine.ie AI chatbot on your local
    ```bash
    npm start
    ```
-   This will run the React app at http://localhost:3013
+   This will run the React app at http://144.217.68.58:3001
 
 3. **Test the example embed page**:
-   - Open http://localhost:3013/example-embed.html in your browser
+   - Open http://144.217.68.58:3001/example-embed.html in your browser
 
 ## Embedding the Chatbot in Your Website
 
@@ -87,8 +87,8 @@ Add this script to any website where you want to embed the chatbot:
 <script>
   // Optional configuration
   window.MIGRAINE_CHATBOT_CONFIG = {
-    baseUrl: 'http://localhost:3013',       // URL where the chatbot widget is hosted
-    apiUrl: 'http://localhost:8013',        // URL of the backend API
+    baseUrl: 'http://144.217.68.58:3001',       // URL where the chatbot widget is hosted
+    apiUrl: 'http://144.217.68.58:8013',        // URL of the backend API
     primaryColor: '#5762d5'                 // Primary color for the chatbot
   };
   
@@ -142,7 +142,7 @@ For production deployment, use Docker Compose:
 ## Troubleshooting
 
 1. **Backend API not responding**:
-   - Verify the backend is running on http://localhost:8013
+   - Verify the backend is running on http://144.217.68.58:8013
    - Check the console for CORS errors (you may need to update the allowed origins in main.py)
 
 2. **Widget not showing on your site**:
@@ -159,4 +159,4 @@ For production deployment, use Docker Compose:
 
 ## API Documentation
 
-Access the interactive API documentation at http://localhost:8013/docs when the backend is running. 
+Access the interactive API documentation at http://144.217.68.58:8013/docs when the backend is running. 
