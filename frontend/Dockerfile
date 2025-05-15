@@ -5,17 +5,26 @@ WORKDIR /app
 # Copy package.json and package-lock.json
 COPY package*.json ./
 
-# Copy the rest of the frontend code
-COPY . .
-
 # Install dependencies
 RUN npm install
 
-# Build the app
-RUN npm run build
-
-# Expose port 80
-EXPOSE 3001
+# Copy the rest of the frontend code
+COPY . .
 
 # Build for production
-CMD npm start
+RUN npm run build
+
+# Production image stage
+FROM nginx:alpine
+
+# Copy the built app from the build stage
+COPY --from=build /app/build /usr/share/nginx/html
+
+# Copy custom nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose port 3001
+EXPOSE 3001
+
+# Start Nginx server
+CMD ["nginx", "-g", "daemon off;"] 

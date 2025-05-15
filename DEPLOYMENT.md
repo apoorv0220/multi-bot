@@ -241,7 +241,7 @@ Add the following configuration:
 
 ```nginx
 server {
-    listen 80;
+    listen 3001;
     server_name your-domain.com;
 
     location / {

@@ -91,11 +91,11 @@ echo -e "${YELLOW}=== Setting up Nginx ===${NC}"
 # Create Nginx configuration
 cat > /etc/nginx/sites-available/migraine-chatbot << EOF
 server {
-    listen 80;
+    listen 3001;
     server_name $DOMAIN;
 
     location / {
-        proxy_pass http://144.217.68.58:80;
+        proxy_pass http://144.217.68.58:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
