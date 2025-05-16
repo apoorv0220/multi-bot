@@ -6,15 +6,15 @@ This project is a smart, self-hosted AI chatbot that can be embedded into the Mi
 
 ## 🔧 Tech Stack
 
-| Layer           | Technology                                 |
-|----------------|---------------------------------------------|
-| Frontend        | React.js (JavaScript Widget)               |
-| Backend         | Python (FastAPI / Flask)                   |
-| Vector DB       | Self-hosted Qdrant                         |
-| Embeddings      | OpenAI `text-embedding-3-small`            |
-| Content Source  | WordPress MySQL DB + External URLs         |
-| Scraping        | Python (Requests, BeautifulSoup, Playwright) |
-| Deployment      | Docker + Cron Jobs (for scheduled indexing) |
+| Layer          | Technology                                   |
+| -------------- | -------------------------------------------- |
+| Frontend       | React.js (JavaScript Widget)                 |
+| Backend        | Python (FastAPI / Flask)                     |
+| Vector DB      | Self-hosted Qdrant                           |
+| Embeddings     | OpenAI `text-embedding-3-small`              |
+| Content Source | WordPress MySQL DB + External URLs           |
+| Scraping       | Python (Requests, BeautifulSoup, Playwright) |
+| Deployment     | Docker + Cron Jobs (for scheduled indexing)  |
 
 ---
 
@@ -51,10 +51,6 @@ ai-chatbot/
 │   └── build/              # Build for embedding
 │
 ├── qdrant_data/            # Persistent storage for Qdrant
-├── start_migraine_chatbot.sh # Main startup script
-├── start_qdrant_docker.sh  # Script to start Qdrant server
-├── stop_qdrant_docker.sh   # Script to stop Qdrant server
-├── test_qdrant_connection.py # Script to test Qdrant connectivity
 ├── docker-compose.yml      # Full stack orchestration
 ├── README.md
 └── requirements.txt        # Python dependencies
@@ -80,6 +76,7 @@ The easiest way to start the entire application is using the provided startup sc
 ```
 
 This script will:
+
 1. Start the Qdrant vector database container
 2. Set up a Python virtual environment if needed
 3. Launch the backend API server
@@ -138,14 +135,6 @@ npm start
 
 The chatbot widget will be available at http://144.217.68.58:3001
 
-#### Step 5: Test the Qdrant connection
-
-To verify that Qdrant is working correctly:
-
-```bash
-python test_qdrant_connection.py
-```
-
 ### WordPress Integration
 
 1. Upload `frontend/public/migraine-chatbot.php` to your WordPress plugins directory.
@@ -182,35 +171,9 @@ The backend API endpoints can be viewed at http://144.217.68.58:8013/docs when t
 
 - If the chatbot fails to connect to the WordPress database, check your `.env` credentials.
 - If the embedding process fails, verify your OpenAI API key and subscription status.
-- For Qdrant connectivity issues, run `test_qdrant_connection.py` to diagnose problems.
 - Check the logs in `app.log` and `scheduler.log` for detailed error messages.
 - Make sure Docker is running before starting the Qdrant container.
 
 ## 🛠️ Database Management Tools
 
 Several utility scripts are provided to help manage and inspect the Qdrant vector database:
-
-### Database Inspection
-```bash
-# Show database contents
-./inspect_qdrant_db.py
-
-# Show WordPress content only
-./inspect_qdrant_db.py --wp
-
-# Search for specific content
-./inspect_qdrant_db.py --search "migraine"
-```
-
-### Content Length Issues
-If you encounter "context length exceeded" errors when querying:
-
-```bash
-# Identify large content
-./fix_large_content.py --dry-run
-
-# Fix large content by truncating it
-./fix_large_content.py
-```
-
-For full documentation of all available database tools, see [QDRANT_TOOLS.md](QDRANT_TOOLS.md).
