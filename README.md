@@ -174,6 +174,45 @@ The backend API endpoints can be viewed at http://144.217.68.58:8013/docs when t
 - Check the logs in `app.log` and `scheduler.log` for detailed error messages.
 - Make sure Docker is running before starting the Qdrant container.
 
+### Common Errors
+
+#### Error: "Error searching Qdrant: [Errno 61] Connection refused"
+
+This error occurs when the backend cannot connect to the Qdrant vector database. Follow these steps to fix it:
+
+1. **Check if Docker is running**
+   ```bash
+   docker info
+   ```
+   If you see an error, start Docker Desktop or the Docker daemon.
+
+2. **Start Qdrant using the provided script**
+   ```bash
+   # From the project root directory
+   ./start_qdrant_docker.sh
+   ```
+   This will start a Qdrant server in a Docker container.
+
+3. **Verify Qdrant is running**
+   ```bash
+   curl http://localhost:6333/health
+   ```
+   You should see a successful response.
+
+4. **Restart the backend service**
+   ```bash
+   cd backend
+   python -m uvicorn main:app --reload
+   ```
+
+5. **Test the reindexing process**
+   Open the example embed page and click the "Reindex All Content" button, or use:
+   ```bash
+   curl -X POST http://localhost:8013/api/reindex
+   ```
+
+If you're still experiencing issues, check the `backend/.env` file to ensure your `QDRANT_HOST` and `QDRANT_PORT` settings are correct (should be `localhost` and `6333` respectively).
+
 ## 🛠️ Database Management Tools
 
 Several utility scripts are provided to help manage and inspect the Qdrant vector database:

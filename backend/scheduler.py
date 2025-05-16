@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 # Configure logging
 logging.basicConfig(
@@ -35,21 +36,51 @@ class IndexingScheduler:
         self.scheduler = AsyncIOScheduler()
         
         # Set up Qdrant client
-        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-        qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
-        logger.info(f"Connecting to Qdrant at {qdrant_host}:{qdrant_port}")
+        self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        self.qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
+        logger.info(f"Connecting to Qdrant at {self.qdrant_host}:{self.qdrant_port}")
         
-        # Initialize Qdrant client
-        self.qdrant_client = QdrantClient(host=qdrant_host, port=qdrant_port)
+        # Initialize Qdrant client with retry logic
+        self._initialize_qdrant_client()
         
         # Initialize embedder with client
         self.embedder = Embedder(client=self.qdrant_client)
+    
+    def _initialize_qdrant_client(self, max_retries=3, retry_delay=5):
+        """Initialize Qdrant client with retry logic"""
+        attempt = 0
+        while attempt < max_retries:
+            try:
+                self.qdrant_client = QdrantClient(host=self.qdrant_host, port=self.qdrant_port)
+                # Test connection
+                self.qdrant_client.get_collections()
+                logger.info("Successfully connected to Qdrant server")
+                return
+            except (ConnectionRefusedError, UnexpectedResponse) as e:
+                attempt += 1
+                logger.warning(f"Failed to connect to Qdrant (attempt {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                else:
+                    logger.error("Max retries reached. Unable to connect to Qdrant server.")
+                    raise
     
     async def run_indexing(self):
         """Run the reindexing process"""
         logger.info("Starting scheduled reindexing...")
         
         try:
+            # Test connection before reindexing
+            try:
+                self.qdrant_client.get_collections()
+            except Exception as e:
+                logger.warning(f"Connection to Qdrant failed: {e}. Attempting to reconnect...")
+                self._initialize_qdrant_client()
+                # Update embedder with new client
+                self.embedder = Embedder(client=self.qdrant_client)
+            
+            # Run the reindexing
             await self.embedder.reindex_all_content()
             logger.info("Scheduled reindexing completed successfully!")
         except Exception as e:
@@ -78,15 +109,6 @@ class IndexingScheduler:
 # For running the scheduler as a standalone process
 if __name__ == "__main__":
     try:
-        # Test Qdrant connection before starting scheduler
-        qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-        qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
-        test_client = QdrantClient(host=qdrant_host, port=qdrant_port)
-        
-        # Check connection by listing collections
-        collections = test_client.get_collections().collections
-        logger.info(f"Successfully connected to Qdrant. Found {len(collections)} collections.")
-        
         # Start the scheduler
         scheduler = IndexingScheduler()
         scheduler.start()
@@ -96,5 +118,5 @@ if __name__ == "__main__":
     except (KeyboardInterrupt, SystemExit):
         logger.info("Scheduler shutting down...")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.error(f"Unexpected error in scheduler: {e}")
         raise 

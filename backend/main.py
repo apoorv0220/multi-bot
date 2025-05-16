@@ -1,8 +1,9 @@
 import os
 import json
 import uuid
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import openai
@@ -38,10 +39,10 @@ load_dotenv()
 app = FastAPI(title="Migraine.ie AI Chatbot API", 
               description="API for AI-powered search across Migraine.ie content")
 
-# Add CORS middleware
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with actual origins
+    allow_origins=["*"],  # For development - update for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -284,6 +285,17 @@ async def health_check():
 async def trigger_reindex(background_tasks: BackgroundTasks):
     """Trigger a full content reindexing in the background"""
     try:
+        # First check if Qdrant is accessible
+        try:
+            collections = qdrant_client.get_collections().collections
+            logger.info(f"Successfully connected to Qdrant. Found {len(collections)} collections.")
+        except Exception as e:
+            logger.error(f"Error connecting to Qdrant before reindexing: {e}")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Cannot connect to Qdrant database. Please ensure Qdrant is running: {e}"
+            )
+        
         # Create function to run in background
         async def run_reindex():
             try:
@@ -302,9 +314,30 @@ async def trigger_reindex(background_tasks: BackgroundTasks):
             "status": "success", 
             "message": "Content reindexing started in the background"
         }
+    except HTTPException:
+        # Re-raise HTTP exceptions as they already have proper status codes and details
+        raise
     except Exception as e:
         logger.error(f"Error starting reindexing: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to start reindexing: {e}")
+
+# Add global exception handler middleware
+@app.middleware("http")
+async def exception_handling_middleware(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except ConnectionError as e:
+        logger.error(f"Connection error: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"detail": f"Database connection error: {str(e)}"}
+        )
+    except Exception as e:
+        logger.error(f"Unhandled exception: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Internal server error: {str(e)}"}
+        )
 
 # Run the app
 if __name__ == "__main__":

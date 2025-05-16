@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Migraine.ie Chatbot - Embed Example</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #5762d5;
+    }
+    pre {
+      background-color: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    .note {
+      background-color: #fffde7;
+      padding: 15px;
+      border-left: 4px solid #ffd600;
+      margin: 20px 0;
+    }
+    .admin-panel {
+      background-color: #f5f5f5;
+      padding: 20px;
+      border-radius: 5px;
+      margin: 30px 0;
+      border: 1px solid #ddd;
+    }
+    .admin-panel h2 {
+      margin-top: 0;
+      color: #333;
+    }
+    button {
+      background-color: #5762d5;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover {
+      background-color: #4550c0;
+    }
+    #reindex-status {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 4px;
+      display: none;
+    }
+    .success {
+      background-color: #e8f5e9;
+      color: #2e7d32;
+      border: 1px solid #a5d6a7;
+    }
+    .error {
+      background-color: #ffebee;
+      color: #c62828;
+      border: 1px solid #ef9a9a;
+    }
+    .loading {
+      background-color: #e3f2fd;
+      color: #1565c0;
+      border: 1px solid #90caf9;
+    }
+  </style>
+</head>
+<body>
+  <h1>Migraine.ie Chatbot - Embed Example</h1>
+  
+  <p>This page demonstrates how to embed the Migraine.ie AI chatbot into any website.</p>
+  
+  <h2>How to Embed the Chatbot</h2>
+  
+  <p>To embed the chatbot on your website, add the following code before the closing <code>&lt;/body&gt;</code> tag:</p>
+  
+  <pre>&lt;script&gt;
+  // Optional configuration
+  window.MIGRAINE_CHATBOT_CONFIG = {
+    baseUrl: 'http://144.217.68.58:3001',       // URL where the chatbot widget is hosted
+    apiUrl: 'http://144.217.68.58:8013',        // URL of the backend API
+    primaryColor: '#5762d5'                 // Primary color for the chatbot
+  };
+  
+  // Load the widget script
+  (function() {
+    const script = document.createElement('script');
+    script.src = window.MIGRAINE_CHATBOT_CONFIG.baseUrl + '/widget.js';
+    script.async = true;
+    document.body.appendChild(script);
+  })();
+&lt;/script&gt;</pre>
+
+  <div class="note">
+    <strong>Note:</strong> When deploying to production, update the URLs to your actual hosted domain.
+  </div>
+  
+  <h2>Features</h2>
+  <ul>
+    <li>AI-powered search across your content</li>
+    <li>Include external sources in search results</li>
+    <li>Automatic reindexing of content</li>
+    <li>Source citations with confidence scores</li>
+    <li>Responsive design (works on mobile and desktop)</li>
+  </ul>
+  
+  <!-- Admin Panel for Reindexing -->
+  <div class="admin-panel">
+    <h2>Admin Controls</h2>
+    <p>Use the button below to manually trigger content reindexing from WordPress and external URLs.</p>
+    <button id="reindex-button" onclick="triggerReindex()">Reindex All Content</button>
+    <div id="reindex-status"></div>
+    
+    <script>
+      function triggerReindex() {
+        const statusElement = document.getElementById('reindex-status');
+        const buttonElement = document.getElementById('reindex-button');
+        
+        // Update UI
+        statusElement.className = 'loading';
+        statusElement.style.display = 'block';
+        statusElement.innerText = 'Reindexing in progress. This may take several minutes...';
+        buttonElement.disabled = true;
+        
+        // Get API URL from configuration
+        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'http://144.217.68.58:8013';
+        
+        // Call the reindex API endpoint
+        fetch(`${apiUrl}/api/reindex`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        })
+        .then(response => {
+          if (!response.ok) {
+            return response.json().then(errorData => {
+              throw new Error(errorData.detail || `Server returned ${response.status}: ${response.statusText}`);
+            });
+          }
+          return response.json();
+        })
+        .then(data => {
+          statusElement.className = 'success';
+          statusElement.innerText = 'Reindexing started successfully! This process will continue in the background.';
+        })
+        .catch(error => {
+          statusElement.className = 'error';
+          
+          // Handle specific error messages
+          let errorMessage = error.message || 'Failed to trigger reindexing';
+          
+          // Check for connection refused error
+          if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError') || 
+              errorMessage.includes('Connection refused')) {
+            errorMessage = 'Connection error: The server appears to be offline or unavailable. Please ensure the backend server is running.';
+          } else if (errorMessage.includes('Cannot connect to Qdrant')) {
+            errorMessage = 'Database connection error: Qdrant database is not accessible. Please ensure Qdrant is running.';
+          }
+          
+          statusElement.innerText = `Error: ${errorMessage}`;
+        })
+        .finally(() => {
+          buttonElement.disabled = false;
+        });
+      }
+    </script>
+  </div>
+  
+  <!-- Example of how to embed the chatbot -->
+  <script>
+    // Optional configuration
+    window.MIGRAINE_CHATBOT_CONFIG = {
+      baseUrl: 'http://144.217.68.58:3001',
+      apiUrl: 'http://144.217.68.58:8013',
+      primaryColor: '#5762d5'
+    };
+    
+    // Load the widget script
+    (function() {
+      const script = document.createElement('script');
+      script.src = window.MIGRAINE_CHATBOT_CONFIG.baseUrl + '/widget.js';
+      script.async = true;
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html> 

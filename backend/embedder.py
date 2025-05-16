@@ -7,8 +7,10 @@ import openai
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
+from qdrant_client.http.exceptions import UnexpectedResponse
 import uuid
 import logging
+import time
 
 # Configure proper logging
 logging.basicConfig(
@@ -47,7 +49,7 @@ class Embedder:
         if self.qdrant_client is None:
             # Connect to Qdrant server if no client provided
             logger.info(f"Creating new Qdrant client connecting to {QDRANT_HOST}:{QDRANT_PORT}")
-            self.qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+            self._connect_to_qdrant()
         
         # Collection name for Qdrant
         self.collection_name = os.getenv("COLLECTION_NAME", "migraine_content")
@@ -60,6 +62,30 @@ class Embedder:
         
         # Ensure collection exists
         self._ensure_collection_exists()
+    
+    def _connect_to_qdrant(self, max_retries=3, retry_delay=5):
+        """Attempt to connect to Qdrant with retries"""
+        attempt = 0
+        last_error = None
+        
+        while attempt < max_retries:
+            try:
+                self.qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+                # Test the connection
+                self.qdrant_client.get_collections()
+                logger.info(f"Successfully connected to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
+                return
+            except (ConnectionRefusedError, UnexpectedResponse) as e:
+                last_error = e
+                attempt += 1
+                logger.warning(f"Failed to connect to Qdrant (attempt {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+        
+        # If we reached here, we failed to connect after all retries
+        logger.error(f"Failed to connect to Qdrant after {max_retries} attempts")
+        raise ConnectionError(f"Cannot connect to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}: {last_error}")
     
     def _ensure_collection_exists(self):
         """Ensure that the Qdrant collection exists, create it if it doesn't"""
