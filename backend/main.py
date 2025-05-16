@@ -212,7 +212,7 @@ async def generate_answer(query, context_texts):
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant specialized in migraines. You provide accurate, concise, and compassionate information based on reliable sources. When answering, rely on the provided context. If the context doesn't contain the information needed, simply say you don't have enough information."},
+                {"role": "system", "content": "You are a helpful assistant specialized in migraines. Your role is to format information found in the context to provide accurate, concise, and compassionate information. Present this information as if it's directly from the source materials, not as your own analysis. Use a factual tone like a medical publication. Structure your response to reflect the information from the context in a coherent, organized manner. If the context doesn't contain the information needed, simply say the information isn't available."},
                 {"role": "user", "content": f"Question: {query}\n\nContext: {context}"}
             ]
         )
@@ -237,18 +237,35 @@ async def query(request: QueryRequest):
 
     logger.info(f"Search results: {len(search_results)}")
     
-    for result in search_results:
+    # Filter out low confidence results (less than 30%)
+    filtered_results = [result for result in search_results if result.score >= 0.3]
+    logger.info(f"Filtered results (confidence ≥ 30%): {len(filtered_results)}")
+    
+    # If no results have confidence above 30%, don't use any context
+    if not filtered_results:
+        logger.info("No high-confidence results found. Returning empty response.")
+        return QueryResponse(
+            answer="I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?", 
+            sources=[]
+        )
+    
+    # Only include sources with confidence >= 30%
+    for result in filtered_results:
         # Add only first 3000 chars of content to avoid context length issues
         content_preview = result.payload['content']
         context_texts.append(f"Source: {result.payload['source']}\nURL: {result.payload['url']}\n{content_preview}")
+    
+    # Only include the top confidence source in the response if it meets the threshold
+    if filtered_results:
+        top_result = filtered_results[0]
         sources.append(SearchResult(
-            content=result.payload['content'][:200] + "...",  # First 200 chars as preview
-            source=result.payload['source'],
-            url=result.payload['url'],
-            score=result.score
+            content=top_result.payload['content'][:200] + "...",  # First 200 chars as preview
+            source=top_result.payload['source'],
+            url=top_result.payload['url'],
+            score=top_result.score
         ))
 
-    logger.info(f"Context texts: {context_texts}")
+    logger.info(f"Context texts: {len(context_texts)}")
     
     # Generate answer using OpenAI
     logger.info(f"Generating answer for query: {request.query}")

@@ -12,6 +12,10 @@ function App() {
     setIsOpen(!isOpen);
   };
 
+  const closeChat = () => {
+    setIsOpen(false);
+  };
+
   // Listen for messages from parent window if embedded as widget
   useEffect(() => {
     const handleMessage = (event) => {
@@ -35,8 +39,8 @@ function App() {
   }, []);
 
   return (
-    <AppContainer id="migraine-chatbot-widget">
-      {isOpen && <ChatWidget onClose={() => setIsOpen(false)} apiUrl={apiUrl} />}
+    <AppContainer id="migraine-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
+      {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
       <ChatButton onClick={toggleChat} isOpen={isOpen} />
     </AppContainer>
   );

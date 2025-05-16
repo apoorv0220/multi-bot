@@ -4,7 +4,6 @@ import axios from 'axios';
 import { FaTimes } from 'react-icons/fa';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
-import SourceCitation from './SourceCitation';
 
 const ChatWidget = ({ onClose, apiUrl }) => {
   const [messages, setMessages] = useState([
@@ -81,7 +80,24 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     <ChatContainer>
       <Header>
         <Title>Migraine AI Assistant</Title>
-        <CloseButton onClick={onClose}>
+        <CloseButton onClick={() => {
+          // Properly clean up and close the chatbot
+          setMessages([{
+            type: 'bot',
+            text: 'Hello! I\'m your Migraine Assistant. How can I help you today?',
+            timestamp: new Date(),
+          }]);
+          setInput('');
+          setIsLoading(false);
+          setError(null);
+          
+          // Send message to parent window if in iframe
+          if (window.parent && window !== window.parent) {
+            window.parent.postMessage('close-widget', '*');
+          }
+          
+          onClose();
+        }}>
           <FaTimes />
         </CloseButton>
       </Header>
@@ -90,13 +106,6 @@ const ChatWidget = ({ onClose, apiUrl }) => {
         {messages.map((message, index) => (
           <div key={index}>
             <Message message={message} />
-            {message.sources && message.sources.length > 0 && (
-              <SourceList>
-                {message.sources.map((source, idx) => (
-                  <SourceCitation key={idx} source={source} />
-                ))}
-              </SourceList>
-            )}
           </div>
         ))}
         {isLoading && (
@@ -141,6 +150,19 @@ const ChatContainer = styled.div`
   flex-direction: column;
   margin-bottom: 20px;
   overflow: hidden;
+  transition: all 0.3s ease;
+  animation: fadeIn 0.3s ease;
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
   
   @media (max-width: 480px) {
     width: 100vw;
@@ -195,14 +217,6 @@ const MessageList = styled.div`
   padding: 20px;
   display: flex;
   flex-direction: column;
-`;
-
-const SourceList = styled.div`
-  margin-top: 5px;
-  margin-bottom: 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
 `;
 
 const InputForm = styled.form`

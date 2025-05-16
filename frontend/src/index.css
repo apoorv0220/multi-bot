@@ -35,4 +35,17 @@ code {
   bottom: 20px;
   right: 20px;
   z-index: 999999;
+  transition: all 0.3s ease;
+}
+
+/* Container when closed - ensure no shadows or remnants */
+.closed-container {
+  opacity: 1;
+}
+
+/* Ensure cleanup on exit */
+.closed {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
 } 

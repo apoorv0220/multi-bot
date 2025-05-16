@@ -1,7 +1,7 @@
 (function() {
   // Configuration - set this to your actual deployed URL in production
-  const widgetUrl = window.MIGRAINE_CHATBOT_CONFIG?.baseUrl || 'http://144.217.68.58:3001';
-  const apiUrl = window.MIGRAINE_CHATBOT_CONFIG?.apiUrl || 'http://144.217.68.58:8013';
+  const widgetUrl = window.MIGRAINE_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3000';
+  const apiUrl = window.MIGRAINE_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8000';
   const primaryColor = window.MIGRAINE_CHATBOT_CONFIG?.primaryColor || '#5762d5';
   
   // Create iframe for the widget
@@ -19,6 +19,8 @@
     iframe.style.boxShadow = '0 4px 25px rgba(0, 0, 0, 0.1)';
     iframe.style.zIndex = '999998';
     iframe.style.display = 'none';
+    iframe.style.opacity = '0';
+    iframe.style.transition = 'opacity 0.3s ease';
     iframe.setAttribute('allowtransparency', 'true');
     
     // Add responsiveness for mobile
@@ -69,7 +71,13 @@
     const button = document.getElementById('migraine-chatbot-toggle');
     
     if (iframe.style.display === 'none') {
+      // Show iframe with transition
       iframe.style.display = 'block';
+      // Use setTimeout to allow the display change to take effect before changing opacity
+      setTimeout(() => {
+        iframe.style.opacity = '1';
+      }, 10);
+      
       button.innerHTML = `
         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -82,15 +90,38 @@
         apiUrl: apiUrl
       }, '*');
     } else {
-      iframe.style.display = 'none';
-      button.innerHTML = `
-        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-        </svg>
-      `;
-      // Send message to iframe to close chat
-      iframe.contentWindow.postMessage('close-chat', '*');
+      closeChat();
     }
+  }
+  
+  // Function to close the chat
+  function closeChat() {
+    const iframe = document.getElementById('migraine-chatbot-iframe');
+    const button = document.getElementById('migraine-chatbot-toggle');
+    
+    // Hide with transition
+    iframe.style.opacity = '0';
+    
+    // Reset button icon
+    button.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>
+    `;
+    
+    // Send message to iframe to close chat
+    iframe.contentWindow.postMessage('close-chat', '*');
+    
+    // Wait for transition to complete before hiding the element
+    setTimeout(() => {
+      iframe.style.display = 'none';
+      
+      // Clean up any potential shadows or remnants
+      const shadows = document.querySelectorAll('.chatbot-shadow-element');
+      shadows.forEach(el => {
+        document.body.removeChild(el);
+      });
+    }, 300); // Match the transition duration
   }
   
   // Initialize widget
@@ -110,6 +141,14 @@
     
     // Add event listener to toggle button
     button.addEventListener('click', toggleChatbot);
+    
+    // Listen for messages from the iframe
+    window.addEventListener('message', function(event) {
+      // Accept messages from the chatbot iframe
+      if (event.data === 'close-widget') {
+        closeChat();
+      }
+    });
   }
   
   // Wait for DOM to be fully loaded

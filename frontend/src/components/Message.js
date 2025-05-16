@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
 
 const Message = ({ message }) => {
-  const { type, text, timestamp, isError } = message;
+  const { type, text, timestamp, isError, sources } = message;
   const isBot = type === 'bot';
   
   // Format timestamp
@@ -14,10 +14,24 @@ const Message = ({ message }) => {
     }).format(date);
   };
 
+  // Check if any sources have a score of at least 30%
+  const hasHighConfidenceSource = sources && 
+    sources.length > 0 && 
+    sources.some(source => source.score >= 0.3);
+
   return (
     <MessageContainer isBot={isBot} isError={isError}>
-      <MessageContent isBot={isBot}>
+      <MessageContent isBot={isBot} isError={isError}>
         <ReactMarkdown>{text}</ReactMarkdown>
+        {isBot && hasHighConfidenceSource && (
+          <ReadMoreButton 
+            href={sources[0].url} 
+            target="_blank" 
+            rel="noopener noreferrer"
+          >
+            Read More
+          </ReadMoreButton>
+        )}
       </MessageContent>
       <MessageTime>{formatTime(timestamp)}</MessageTime>
     </MessageContainer>
@@ -60,6 +74,23 @@ const MessageContent = styled.div`
     margin-top: 8px;
     margin-bottom: 8px;
     padding-left: 20px;
+  }
+`;
+
+const ReadMoreButton = styled.a`
+  display: inline-block;
+  margin-top: 10px;
+  padding: 5px 10px;
+  background-color: var(--primary-color);
+  color: white !important;
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  
+  &:hover {
+    background-color: var(--primary-dark);
+    text-decoration: none !important;
   }
 `;
 
