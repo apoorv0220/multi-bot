@@ -6,7 +6,7 @@ import reportWebVitals from './reportWebVitals';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://144.217.68.58:8013');
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://144.217.68.58:8013');
 
   const toggleChat = () => {
     setIsOpen(!isOpen);

@@ -131,7 +131,7 @@
         buttonElement.disabled = true;
         
         // Get API URL from configuration
-        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'http://144.217.68.58:8013';
+        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'https://144.217.68.58:8013';
         
         // Call the reindex API endpoint
         fetch(`${apiUrl}/api/reindex`, {
@@ -179,8 +179,8 @@
   <script>
     // Optional configuration
     window.MIGRAINE_CHATBOT_CONFIG = {
-      baseUrl: 'http://144.217.68.58:3001',
-      apiUrl: 'http://144.217.68.58:8013',
+      baseUrl: 'https://144.217.68.58:3001',
+      apiUrl: 'https://144.217.68.58:8013',
       primaryColor: '#5762d5'
     };
     
