@@ -86,7 +86,7 @@
   // Optional configuration
   window.MIGRAINE_CHATBOT_CONFIG = {
     baseUrl: 'https://migraine.softdemonew.info',       // URL where the chatbot widget is hosted
-    apiUrl: 'https://migraine.softdemonew.info',       // URL of the backend API
+    apiUrl: 'https://migraine.softdemonew.info/api',       // URL of the backend API
     primaryColor: '#72b519'                 // Primary color for the chatbot
   };
   
@@ -131,7 +131,7 @@
         buttonElement.disabled = true;
         
         // Get API URL from configuration
-        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'https://migraine.softdemonew.info';
+        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'https://migraine.softdemonew.info/api';
         
         // Call the reindex API endpoint
         fetch(`${apiUrl}/api/reindex`, {
@@ -180,7 +180,7 @@
     // Optional configuration
     window.MIGRAINE_CHATBOT_CONFIG = {
       baseUrl: 'https://migraine.softdemonew.info',
-      apiUrl: 'https://migraine.softdemonew.info',
+      apiUrl: 'https://migraine.softdemonew.info/api',
       primaryColor: '#72b519'
     };
     
