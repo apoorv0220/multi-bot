@@ -89,7 +89,7 @@ Add this script to any website where you want to embed the chatbot:
   window.MIGRAINE_CHATBOT_CONFIG = {
     baseUrl: 'http://144.217.68.58:3001',       // URL where the chatbot widget is hosted
     apiUrl: 'http://144.217.68.58:8013',        // URL of the backend API
-    primaryColor: '#5762d5'                 // Primary color for the chatbot
+    primaryColor: '#72b519'                 // Primary color for the chatbot
   };
   
   // Load the widget script
@@ -127,7 +127,7 @@ For production deployment, use Docker Compose:
      window.MIGRAINE_CHATBOT_CONFIG = {
        baseUrl: 'https://your-production-frontend-url.com',
        apiUrl: 'https://your-production-backend-url.com',
-       primaryColor: '#5762d5'
+       primaryColor: '#72b519'
      };
      
      (function() {

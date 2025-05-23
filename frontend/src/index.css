@@ -14,9 +14,9 @@ code {
 
 /* Global styles for the chatbot widget */
 :root {
-  --primary-color: #5762d5;
-  --primary-dark: #4351c8;
-  --secondary-color: #f5f7ff;
+  --primary-color: #72b519;
+  --primary-dark: #72b519;
+  --secondary-color: #e4efdf;
   --text-color: #333;
   --light-text: #777;
   --error-color: #e74c3c;
