@@ -2,10 +2,7 @@ import React from 'react';
 import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
 
-const Message = ({ message }) => {
-  const { type, text, timestamp, isError, sources } = message;
-  const isBot = type === 'bot';
-  
+const Message = ({ type, text, timestamp, sources = [], isError, source }) => {
   // Format timestamp
   const formatTime = (date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -20,10 +17,10 @@ const Message = ({ message }) => {
     sources.some(source => source.score >= 0.3);
 
   return (
-    <MessageContainer isBot={isBot} isError={isError}>
-      <MessageContent isBot={isBot} isError={isError}>
+    <MessageContainer isError={isError} type={type}>
+      <MessageContent isError={isError} type={type}>
         <ReactMarkdown>{text}</ReactMarkdown>
-        {isBot && hasHighConfidenceSource && (
+        {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
           <ReadMoreButton 
             href={sources[0].url} 
             target="_blank" 
@@ -33,7 +30,7 @@ const Message = ({ message }) => {
           </ReadMoreButton>
         )}
       </MessageContent>
-      <MessageTime>{formatTime(timestamp)}</MessageTime>
+      <MessageTime type={type}>{formatTime(timestamp)}</MessageTime>
     </MessageContainer>
   );
 };
@@ -41,22 +38,22 @@ const Message = ({ message }) => {
 const MessageContainer = styled.div`
   display: flex;
   flex-direction: column;
-  align-items: ${props => props.isBot ? 'flex-start' : 'flex-end'};
+  align-items: ${props => props.type !== 'user' ? 'flex-start' : 'flex-end'};
   margin-bottom: 15px;
   max-width: 85%;
-  align-self: ${props => props.isBot ? 'flex-start' : 'flex-end'};
+  align-self: ${props => props.type !== 'user' ? 'flex-start' : 'flex-end'};
 `;
 
 const MessageContent = styled.div`
   background-color: ${props => {
     if (props.isError) return 'var(--error-color)';
-    return props.isBot ? 'var(--secondary-color)' : 'var(--primary-color)';
+    return props.type !== 'user' ? 'var(--secondary-color)' : 'var(--primary-color)';
   }};
-  color: ${props => props.isBot ? 'var(--text-color)' : 'white'};
+  color: ${props => props.type !== 'user' ? 'var(--text-color)' : 'white'};
   padding: 12px 16px;
   border-radius: 18px;
-  border-bottom-left-radius: ${props => props.isBot ? '4px' : '18px'};
-  border-bottom-right-radius: ${props => props.isBot ? '18px' : '4px'};
+  border-bottom-left-radius: ${props => props.type !== 'user' ? '4px' : '18px'};
+  border-bottom-right-radius: ${props => props.type !== 'user' ? '18px' : '4px'};
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   word-break: break-word;
   
@@ -66,7 +63,7 @@ const MessageContent = styled.div`
   }
   
   a {
-    color: ${props => props.isBot ? 'var(--primary-color)' : 'white'};
+    color: ${props => props.type !== 'user' ? 'var(--primary-color)' : 'white'};
     text-decoration: underline;
   }
   

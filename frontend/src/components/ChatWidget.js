@@ -45,18 +45,20 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     setError(null);
 
     try {
-      // Call API
-      const response = await axios.post(`${apiUrl}/api/query`, {
-        query: input,
+      // Call API with the new chat endpoint
+      const response = await axios.post(`${apiUrl}/api/chat`, {
+        message: input,
         max_results: 3,
       });
 
-      // Add bot response
+      // Add bot response with the new response format
       const botMessage = {
         type: 'bot',
-        text: response.data.answer,
+        text: response.data.response,
         timestamp: new Date(),
         sources: response.data.sources || [],
+        confidence: response.data.confidence,
+        source: response.data.source,
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
     } catch (err) {
@@ -77,238 +79,162 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   };
 
   return (
-    <ChatContainer>
-      <Header>
-        <Title>Migraine AI Assistant</Title>
-        <CloseButton onClick={() => {
-          // Properly clean up and close the chatbot
-          setMessages([{
-            type: 'bot',
-            text: 'Hello! I\'m your Migraine Assistant. How can I help you today?',
-            timestamp: new Date(),
-          }]);
-          setInput('');
-          setIsLoading(false);
-          setError(null);
-          
-          // Send message to parent window if in iframe
-          if (window.parent && window !== window.parent) {
-            window.parent.postMessage('close-widget', '*');
-          }
-          
-          onClose();
-        }}>
-          <FaTimes />
-        </CloseButton>
-      </Header>
-
-      <MessageList>
+    <WidgetContainer>
+      <WidgetHeader>
+        <WidgetTitle>Migraine Assistant</WidgetTitle>
+      </WidgetHeader>
+      
+      <MessageContainer>
         {messages.map((message, index) => (
-          <div key={index}>
-            <Message message={message} />
-          </div>
+          <Message
+            key={index}
+            type={message.type}
+            text={message.text}
+            timestamp={message.timestamp}
+            sources={message.sources}
+            isError={message.isError}
+            confidence={message.confidence}
+            source={message.source}
+          />
         ))}
         {isLoading && (
-          <LoadingIndicator>
-            <div></div>
-            <div></div>
-            <div></div>
-          </LoadingIndicator>
+          <LoadingMessage>
+            <LoadingDots>
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </LoadingDots>
+          </LoadingMessage>
         )}
         <div ref={messageEndRef} />
-      </MessageList>
+      </MessageContainer>
 
       <InputForm onSubmit={handleSubmit}>
         <Input
+          ref={inputRef}
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Type your question here..."
+          placeholder="Type your message..."
           disabled={isLoading}
-          ref={inputRef}
         />
         <SendButton type="submit" disabled={isLoading || !input.trim()}>
           <BsSend />
         </SendButton>
       </InputForm>
-
-      <Footer>
-        <PoweredBy>Powered by Migraine.ie</PoweredBy>
-      </Footer>
-    </ChatContainer>
+    </WidgetContainer>
   );
 };
 
-// Styled Components
-const ChatContainer = styled.div`
-  width: 380px;
-  height: 600px;
-  background-color: white;
-  border-radius: var(--border-radius);
-  box-shadow: var(--shadow);
+// Styled components
+const WidgetContainer = styled.div`
   display: flex;
   flex-direction: column;
-  margin-bottom: 20px;
+  width: 380px;
+  height: 600px;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   overflow: hidden;
-  transition: all 0.3s ease;
-  animation: fadeIn 0.3s ease;
-  
-  @keyframes fadeIn {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  
-  @media (max-width: 480px) {
-    width: 100vw;
-    height: 100vh;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    border-radius: 0;
-    margin-bottom: 0;
-  }
 `;
 
-const Header = styled.div`
-  background-color: var(--primary-color);
-  color: white;
-  padding: 15px 20px;
+const WidgetHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 15px;
+  background: #72b519;
+  color: white;
 `;
 
-const Title = styled.h2`
+const WidgetTitle = styled.h2`
   margin: 0;
-  font-size: 18px;
-  font-weight: 500;
+  font-size: 1.2rem;
 `;
 
 const CloseButton = styled.button`
   background: none;
   border: none;
   color: white;
-  font-size: 18px;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 1.2rem;
+  padding: 5px;
   
   &:hover {
     opacity: 0.8;
   }
-  
-  &:focus {
-    outline: none;
-  }
 `;
 
-const MessageList = styled.div`
+const MessageContainer = styled.div`
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 15px;
   display: flex;
   flex-direction: column;
+  gap: 10px;
 `;
 
 const InputForm = styled.form`
   display: flex;
   padding: 15px;
+  gap: 10px;
   border-top: 1px solid #eee;
 `;
 
 const Input = styled.input`
   flex: 1;
-  padding: 12px 15px;
+  padding: 10px;
   border: 1px solid #ddd;
   border-radius: 20px;
-  font-size: 14px;
+  outline: none;
   
   &:focus {
-    outline: none;
-    border-color: var(--primary-color);
-  }
-  
-  &:disabled {
-    background-color: #f9f9f9;
+    border-color: #72b519;
   }
 `;
 
 const SendButton = styled.button`
-  background-color: var(--primary-color);
+  background: #72b519;
   color: white;
   border: none;
   border-radius: 50%;
   width: 40px;
   height: 40px;
-  margin-left: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   
-  &:hover:not(:disabled) {
-    background-color: var(--primary-dark);
-  }
-  
   &:disabled {
-    background-color: #ccc;
+    background: #ccc;
     cursor: not-allowed;
   }
   
-  &:focus {
-    outline: none;
+  &:hover:not(:disabled) {
+    background: #5a8f15;
   }
 `;
 
-const Footer = styled.div`
-  padding: 10px;
-  text-align: center;
-  border-top: 1px solid #eee;
-`;
-
-const PoweredBy = styled.div`
-  font-size: 12px;
-  color: var(--light-text);
-`;
-
-const LoadingIndicator = styled.div`
+const LoadingMessage = styled.div`
   display: flex;
   justify-content: center;
-  margin: 10px 0;
+  padding: 10px;
+  color: #666;
+`;
+
+const LoadingDots = styled.div`
+  display: flex;
+  gap: 2px;
   
-  div {
-    width: 8px;
-    height: 8px;
-    margin: 0 5px;
-    background-color: var(--primary-color);
-    border-radius: 50%;
-    animation: bounce 1.4s infinite ease-in-out both;
-
-    &:nth-child(1) {
-      animation-delay: -0.32s;
-    }
-
-    &:nth-child(2) {
-      animation-delay: -0.16s;
-    }
+  span {
+    animation: loading 1.4s infinite;
+    &:nth-child(2) { animation-delay: 0.2s; }
+    &:nth-child(3) { animation-delay: 0.4s; }
   }
-
-  @keyframes bounce {
-    0%, 80%, 100% {
-      transform: scale(0);
-    }
-    40% {
-      transform: scale(1);
-    }
+  
+  @keyframes loading {
+    0%, 80%, 100% { opacity: 0; }
+    40% { opacity: 1; }
   }
 `;
 

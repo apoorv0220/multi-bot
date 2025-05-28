@@ -11,6 +11,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams
 import logging
+from fuzzy_matcher import FuzzyMatcher
+from typing import Optional, Dict, Any, List
 
 # Configure logging
 logging.basicConfig(
@@ -54,41 +56,43 @@ logger.info("Initializing services...")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 logger.info(f"OpenAI API key configured: {openai.api_key[:5]}...{openai.api_key[-4:] if openai.api_key else 'NOT_SET'}")
 
-# Define Qdrant connection parameters from environment or use defaults
-QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
-COLLECTION_NAME = os.getenv("COLLECTION_NAME", "migraine_content")
-
-# Create a shared Qdrant client instance
-logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
-qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+# Try to import Qdrant and related modules, but do not crash if unavailable
+qdrant_client = None
+try:
+    # Define Qdrant connection parameters from environment or use defaults
+    QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+    QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
+    COLLECTION_NAME = os.getenv("COLLECTION_NAME", "migraine_content")
+    logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
+    qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+    # Check if collection exists, create if not
+    collections = qdrant_client.get_collections().collections
+    collection_names = [collection.name for collection in collections]
+    if COLLECTION_NAME not in collection_names:
+        logger.info(f"Creating collection '{COLLECTION_NAME}'...")
+        qdrant_client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(
+                size=1536,  # Dimension for text-embedding-3-small
+                distance=Distance.COSINE
+            )
+        )
+        qdrant_client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="source_type",
+            field_schema=models.PayloadSchemaType.KEYWORD
+        )
+        logger.info(f"Collection '{COLLECTION_NAME}' created")
+except Exception as e:
+    logger.error(f"Qdrant unavailable or error initializing: {e}")
+    qdrant_client = None
 
 # Share the client with the embedder module
 import embedder as embedder_module
 embedder_module.qdrant_client = qdrant_client
 
-# Check if collection exists, create if not
-logger.info(f"Using collection name: {COLLECTION_NAME}")
-collections = qdrant_client.get_collections().collections
-collection_names = [collection.name for collection in collections]
-if COLLECTION_NAME not in collection_names:
-    logger.info(f"Creating collection '{COLLECTION_NAME}'...")
-    qdrant_client.create_collection(
-        collection_name=COLLECTION_NAME,
-        vectors_config=VectorParams(
-            size=1536,  # Dimension for text-embedding-3-small
-            distance=Distance.COSINE
-        )
-    )
-    
-    # Create index for source_type field
-    qdrant_client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="source_type",
-        field_schema=models.PayloadSchemaType.KEYWORD
-    )
-    
-    logger.info(f"Collection '{COLLECTION_NAME}' created")
+# Initialize fuzzy matcher
+fuzzy_matcher = FuzzyMatcher(threshold=80)
 
 # Define request models
 class QueryRequest(BaseModel):
@@ -106,8 +110,19 @@ class QueryResponse(BaseModel):
     answer: str
     sources: list[SearchResult] = []
 
+class ChatRequest(BaseModel):
+    message: str
+    session_id: Optional[str] = None
+    max_results: int = 5
+
+class ChatResponse(BaseModel):
+    response: str
+    source: Optional[str] = None
+    confidence: Optional[float] = None
+    sources: Optional[List[SearchResult]] = None
+
 # Helper function to generate embeddings
-async def generate_embedding(text):
+async def generate_embedding(text: str) -> List[float]:
     try:
         response = openai.embeddings.create(
             model="text-embedding-3-small",
@@ -119,7 +134,10 @@ async def generate_embedding(text):
         raise HTTPException(status_code=500, detail="Failed to generate embedding")
 
 # Helper function to search in Qdrant
-async def search_qdrant(embedding, limit=5):
+async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
+    if qdrant_client is None:
+        raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
+    
     try:
         # First try to search in Migraine.ie content (prioritized)
         migraine_results = qdrant_client.search(
@@ -177,7 +195,7 @@ def truncate_text_for_context(text, max_chars=3000):
     return text[:begin_portion] + "\n...[content truncated]...\n" + text[-end_portion:]
 
 # Helper function to generate AI answer
-async def generate_answer(query, context_texts):
+async def generate_answer(query: str, context_texts: List[str]) -> str:
     try:
         # Set a maximum total context length (in chars) to prevent errors
         max_total_context = 14000  # Safe limit for gpt-3.5-turbo (16k tokens)
@@ -223,79 +241,99 @@ async def generate_answer(query, context_texts):
         raise HTTPException(status_code=500, detail="Failed to generate answer")
 
 # API endpoint for the chat query
-@app.post("/api/query", response_model=QueryResponse)
-async def query(request: QueryRequest):
-    # Generate embedding for the query
-    embedding = await generate_embedding(request.query)
-    
-    # Search in Qdrant
-    search_results = await search_qdrant(embedding, request.max_results)
-    
-    # Prepare context for OpenAI
-    context_texts = []
-    sources = []
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(request: ChatRequest) -> Dict[str, Any]:
+    """
+    Handle chat requests with fuzzy matching for common queries.
+    Falls back to vector search if no fuzzy match is found.
+    """
+    try:
+        # Try fuzzy matching first
+        fuzzy_response = fuzzy_matcher.get_response(request.message)
+        if fuzzy_response:
+            logger.info(f"Fuzzy match found for query: {request.message}")
+            return {
+                "response": fuzzy_response,
+                "source": "fuzzy_match",
+                "confidence": 1.0,
+                "sources": []
+            }
+        
+        # If no fuzzy match, proceed with vector search
+        if qdrant_client is None:
+            logger.warning("Qdrant is not available, cannot perform vector search.")
+            return {
+                "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                "source": "unavailable",
+                "confidence": 0.0,
+                "sources": []
+            }
 
-    logger.info(f"Search results: {len(search_results)}")
-    
-    # Filter out low confidence results (less than 30%)
-    filtered_results = [result for result in search_results if result.score >= 0.3]
-    logger.info(f"Filtered results (confidence ≥ 30%): {len(filtered_results)}")
-    
-    # If no results have confidence above 30%, don't use any context
-    if not filtered_results:
-        logger.info("No high-confidence results found. Returning empty response.")
-        return QueryResponse(
-            answer="I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?", 
-            sources=[]
+        # Generate embedding for the query
+        embedding = await generate_embedding(request.message)
+        
+        # Search in Qdrant
+        search_results = await search_qdrant(embedding, request.max_results)
+        
+        # Prepare context for OpenAI
+        context_texts = []
+        sources = []
+
+        logger.info(f"Search results: {len(search_results)}")
+        
+        # Filter out low confidence results (less than 30%)
+        filtered_results = [result for result in search_results if result.score >= 0.3]
+        logger.info(f"Filtered results (confidence ≥ 30%): {len(filtered_results)}")
+        
+        # If no results have confidence above 30%, don't use any context
+        if not filtered_results:
+            logger.info("No high-confidence results found. Returning empty response.")
+            return ChatResponse(
+                response="I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
+                source="vector_search",
+                confidence=0.0,
+                sources=[]
+            )
+        
+        # Process results
+        for result in filtered_results:
+            content_preview = result.payload['content']
+            context_texts.append(f"Source: {result.payload['source']}\nURL: {result.payload['url']}\n{content_preview}")
+            sources.append(SearchResult(
+                content=result.payload['content'][:200] + "...",
+                source=result.payload['source'],
+                url=result.payload['url'],
+                score=result.score
+            ))
+
+        # Generate answer using OpenAI
+        logger.info(f"Generating answer for query: {request.message}")
+        answer = await generate_answer(request.message, context_texts)
+        
+        return ChatResponse(
+            response=answer,
+            source="vector_search",
+            confidence=filtered_results[0].score if filtered_results else 0.0,
+            sources=sources
         )
-    
-    # Only include sources with confidence >= 30%
-    for result in filtered_results:
-        # Add only first 3000 chars of content to avoid context length issues
-        content_preview = result.payload['content']
-        context_texts.append(f"Source: {result.payload['source']}\nURL: {result.payload['url']}\n{content_preview}")
-    
-    # Only include the top confidence source in the response if it meets the threshold
-    if filtered_results:
-        top_result = filtered_results[0]
-        sources.append(SearchResult(
-            content=top_result.payload['content'][:200] + "...",  # First 200 chars as preview
-            source=top_result.payload['source'],
-            url=top_result.payload['url'],
-            score=top_result.score
-        ))
 
-    logger.info(f"Context texts: {len(context_texts)}")
-    
-    # Generate answer using OpenAI
-    logger.info(f"Generating answer for query: {request.query}")
-    answer = await generate_answer(request.query, context_texts)
-    
-    return QueryResponse(answer=answer, sources=sources)
+    except Exception as e:
+        logger.error(f"Error processing chat request: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    try:
-        # Check Qdrant connection
-        collections = qdrant_client.get_collections().collections
-        collection_names = [collection.name for collection in collections]
-        
-        # Check if our collection exists
-        collection_status = "available" if COLLECTION_NAME in collection_names else "not found"
-        
-        # Check if OpenAI API key is configured
-        openai_status = "configured" if openai.api_key else "not configured"
-        
-        return {
-            "status": "ok",
-            "qdrant": "connected", 
-            "collection": collection_status,
-            "openai": openai_status
-        }
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Health check failed: {e}")
+    status = {"status": "healthy"}
+    if qdrant_client is not None:
+        try:
+            collections = qdrant_client.get_collections().collections
+            status["qdrant"] = "connected"
+        except Exception as e:
+            status["qdrant"] = f"error: {e}"
+    else:
+        status["qdrant"] = "not available"
+    return status
 
 # Add a new endpoint to trigger content indexing
 @app.post("/api/reindex")

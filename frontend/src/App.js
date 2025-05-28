@@ -41,7 +41,7 @@ function App() {
   return (
     <AppContainer id="migraine-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
       {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
-      <ChatButton onClick={toggleChat} isOpen={isOpen} />
+      {/* <ChatButton onClick={toggleChat} isOpen={isOpen} /> */}
     </AppContainer>
   );
 }
