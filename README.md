@@ -42,7 +42,7 @@ WORDPRESS_DB_PASSWORD=your_db_password
 WORDPRESS_DB_NAME=your_db_name
 
 # Qdrant Configuration
-QDRANT_HOST=qdrant
+QDRANT_HOST=houseoftiles-qdrant
 QDRANT_PORT=6333  # Internal Docker port (always 6333)
 COLLECTION_NAME=houseoftiles_content
 
@@ -177,7 +177,7 @@ To use the same Qdrant instance (port 6333) for both projects:
 1. **Remove the Qdrant service** from this docker-compose.yml
 2. **Update environment variables:**
    ```env
-   QDRANT_HOST=localhost
+   QDRANT_HOST=houseoftiles-qdrant
    QDRANT_PORT=6333
    COLLECTION_NAME=houseoftiles_content  # Different collection name
    ```

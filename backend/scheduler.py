@@ -36,7 +36,7 @@ class IndexingScheduler:
         self.scheduler = AsyncIOScheduler()
         
         # Set up Qdrant client
-        self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
+        self.qdrant_host = os.getenv("QDRANT_HOST", "houseoftiles-qdrant")
         self.qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
         logger.info(f"Connecting to Qdrant at {self.qdrant_host}:{self.qdrant_port}")
         

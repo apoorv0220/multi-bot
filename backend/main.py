@@ -60,7 +60,7 @@ logger.info(f"OpenAI API key configured: {openai.api_key[:5]}...{openai.api_key[
 qdrant_client = None
 try:
     # Define Qdrant connection parameters from environment or use defaults
-    QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+    QDRANT_HOST = os.getenv("QDRANT_HOST", "houseoftiles-qdrant")
     QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "houseoftiles_content")
     logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
