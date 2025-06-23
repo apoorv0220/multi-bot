@@ -86,7 +86,7 @@
   // Optional configuration
   window.HOUSEOFTILES_CHATBOT_CONFIG = {
     baseUrl: 'http://144.217.68.58:3023',       // URL where the chatbot widget is hosted
-    apiUrl: 'http://144.217.68.58:3023',       // URL of the backend API
+    apiUrl: 'http://144.217.68.58:8023',       // URL of the backend API
     primaryColor: '#bd1d73'                 // Primary color for the chatbot
   };
   
@@ -131,7 +131,7 @@
         buttonElement.disabled = true;
         
         // Get API URL from configuration
-        const apiUrl = window.HOUSEOFTILES_CHATBOT_CONFIG.apiUrl || 'http://144.217.68.58:3023';
+        const apiUrl = window.HOUSEOFTILES_CHATBOT_CONFIG.apiUrl || 'http://144.217.68.58:8023';
         
         // Call the reindex API endpoint
         fetch(`${apiUrl}/api/reindex`, {
@@ -180,7 +180,7 @@
     // Optional configuration
     window.HOUSEOFTILES_CHATBOT_CONFIG = {
       baseUrl: 'http://144.217.68.58:3023',
-      apiUrl: 'http://144.217.68.58:3023',
+      apiUrl: 'http://144.217.68.58:8023',
       primaryColor: '#bd1d73'
     };
     
