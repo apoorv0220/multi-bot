@@ -61,7 +61,7 @@ qdrant_client = None
 try:
     # Define Qdrant connection parameters from environment or use defaults
     QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-    QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6023))
+    QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "houseoftiles_content")
     logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
     qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)

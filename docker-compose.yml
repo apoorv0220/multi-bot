@@ -16,7 +16,7 @@ services:
       - ./backend/.env
     environment:
       - QDRANT_HOST=houseoftiles-qdrant
-      - QDRANT_PORT=6023
+      - QDRANT_PORT=6333
       - ENVIRONMENT=production
     networks:
       - houseoftiles-net
@@ -42,7 +42,7 @@ services:
       - ./backend/.env
     environment:
       - QDRANT_HOST=houseoftiles-qdrant
-      - QDRANT_PORT=6023
+      - QDRANT_PORT=6333
       - ENVIRONMENT=production
     networks:
       - houseoftiles-net
@@ -52,12 +52,12 @@ services:
   houseoftiles-qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6023:6023"  # REST API
-      - "6024:6024"  # gRPC API
+      - "6333:6333"  # REST API
+      - "6334:6334"  # gRPC API
     volumes:
       - ./qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://144.217.68.58:6023/readiness"]
+      test: ["CMD", "curl", "-f", "http://144.217.68.58:6333/readiness"]
       interval: 30s
       timeout: 10s
       retries: 3

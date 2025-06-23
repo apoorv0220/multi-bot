@@ -37,7 +37,7 @@ class IndexingScheduler:
         
         # Set up Qdrant client
         self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-        self.qdrant_port = int(os.getenv("QDRANT_PORT", 6023))
+        self.qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
         logger.info(f"Connecting to Qdrant at {self.qdrant_host}:{self.qdrant_port}")
         
         # Initialize Qdrant client with retry logic

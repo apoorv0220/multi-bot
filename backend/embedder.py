@@ -36,7 +36,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Define Qdrant connection parameters from environment or use defaults
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6023))
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 
 # Create a shared QdrantClient instance - will be set by main.py
 qdrant_client = None

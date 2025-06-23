@@ -43,7 +43,7 @@ WORDPRESS_DB_NAME=your_db_name
 
 # Qdrant Configuration
 QDRANT_HOST=qdrant
-QDRANT_PORT=6023
+QDRANT_PORT=6333
 COLLECTION_NAME=houseoftiles_content
 
 # Environment
@@ -65,7 +65,7 @@ docker-compose logs -f
 ### 4. Verify Installation
 - **Frontend**: Open http://localhost:3023
 - **Backend API**: Open http://localhost:8023/docs
-- **Qdrant Health**: `curl http://localhost:6023/health`
+- **Qdrant Health**: `curl http://localhost:6333/health`
 
 ### 5. Initialize Content (Optional)
 ```bash
@@ -145,7 +145,7 @@ ai_chatbot/
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key (required) | - |
 | `QDRANT_HOST` | Qdrant database host | `qdrant` |
-| `QDRANT_PORT` | Qdrant database port | `6023` |
+| `QDRANT_PORT` | Qdrant database port | `6333` |
 | `COLLECTION_NAME` | Vector collection name | `houseoftiles_content` |
 
 ### Ports
@@ -153,7 +153,7 @@ ai_chatbot/
 |---------|------|-------------|
 | Frontend | 3023 | React chatbot widget |
 | Backend | 8023 | FastAPI server |
-| Qdrant | 6023 | Vector database |
+| Qdrant | 6333 | Vector database |
 
 ## 🔧 Troubleshooting
 
@@ -163,7 +163,7 @@ ai_chatbot/
 docker --version
 
 # Check ports aren't in use
-netstat -tlnp | grep -E '(3023|8023|6023)'
+netstat -tlnp | grep -E '(3023|8023|6333)'
 
 # Reset everything
 docker-compose down -v
@@ -177,7 +177,7 @@ docker-compose up --build -d
 
 ### No Chat Responses
 1. Ensure `OPENAI_API_KEY` is set correctly
-2. Check Qdrant is healthy: `curl http://localhost:6023/health`
+2. Check Qdrant is healthy: `curl http://localhost:6333/health`
 3. Initialize content: `curl -X POST http://localhost:8023/api/reindex`
 
 ## 📚 API Documentation
