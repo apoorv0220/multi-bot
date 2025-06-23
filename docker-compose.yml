@@ -52,12 +52,12 @@ services:
   houseoftiles-qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC API
+      - "6023:6333"  # Map external 6023 to internal 6333
+      - "6024:6334"  # Map external 6024 to internal 6334
     volumes:
       - ./qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://144.217.68.58:6333/readiness"]
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
       interval: 30s
       timeout: 10s
       retries: 3

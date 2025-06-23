@@ -43,7 +43,7 @@ WORDPRESS_DB_NAME=your_db_name
 
 # Qdrant Configuration
 QDRANT_HOST=qdrant
-QDRANT_PORT=6333
+QDRANT_PORT=6333  # Internal Docker port (always 6333)
 COLLECTION_NAME=houseoftiles_content
 
 # Environment
@@ -65,7 +65,7 @@ docker-compose logs -f
 ### 4. Verify Installation
 - **Frontend**: Open http://localhost:3023
 - **Backend API**: Open http://localhost:8023/docs
-- **Qdrant Health**: `curl http://localhost:6333/health`
+- **Qdrant Health**: `curl http://localhost:6023/health`
 
 ### 5. Initialize Content (Optional)
 ```bash
@@ -145,7 +145,7 @@ ai_chatbot/
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key (required) | - |
 | `QDRANT_HOST` | Qdrant database host | `qdrant` |
-| `QDRANT_PORT` | Qdrant database port | `6333` |
+| `QDRANT_PORT` | Qdrant database port (internal) | `6333` |
 | `COLLECTION_NAME` | Vector collection name | `houseoftiles_content` |
 
 ### Ports
@@ -153,9 +153,36 @@ ai_chatbot/
 |---------|------|-------------|
 | Frontend | 3023 | React chatbot widget |
 | Backend | 8023 | FastAPI server |
-| Qdrant | 6333 | Vector database |
+| Qdrant | 6023 | Vector database |
 
 ## 🔧 Troubleshooting
+
+### **Qdrant Port Conflicts**
+
+If you're running multiple projects with Qdrant, you have two options:
+
+#### 🔍 **Understanding Docker Port Mapping**
+Our configuration uses: `6023:6333`
+- **External access** (from host machine): `localhost:6023`
+- **Internal Docker communication**: `houseoftiles-qdrant:6333`
+- **Why:** Qdrant always runs on port 6333 inside containers, we just map it externally
+
+#### Option 1: Separate Qdrant Instances (Current Setup)
+- House of Tiles uses port `6023` externally (maps to internal `6333`)
+- Complete isolation between projects
+
+#### Option 2: Shared Qdrant Instance (Alternative)
+To use the same Qdrant instance (port 6333) for both projects:
+
+1. **Remove the Qdrant service** from this docker-compose.yml
+2. **Update environment variables:**
+   ```env
+   QDRANT_HOST=localhost
+   QDRANT_PORT=6333
+   COLLECTION_NAME=houseoftiles_content  # Different collection name
+   ```
+3. **Benefits:** Resource efficient, single Qdrant management
+4. **Note:** Both projects share the same Qdrant but use different collections
 
 ### Services Won't Start
 ```bash
@@ -163,7 +190,7 @@ ai_chatbot/
 docker --version
 
 # Check ports aren't in use
-netstat -tlnp | grep -E '(3023|8023|6333)'
+netstat -tlnp | grep -E '(3023|8023|6023)'
 
 # Reset everything
 docker-compose down -v
@@ -177,7 +204,7 @@ docker-compose up --build -d
 
 ### No Chat Responses
 1. Ensure `OPENAI_API_KEY` is set correctly
-2. Check Qdrant is healthy: `curl http://localhost:6333/health`
+2. Check Qdrant is healthy: `curl http://localhost:6023/health`
 3. Initialize content: `curl -X POST http://localhost:8023/api/reindex`
 
 ## 📚 API Documentation
