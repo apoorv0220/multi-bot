@@ -13,7 +13,7 @@ class WordPressFetcher:
         self.password = os.getenv("WORDPRESS_DB_PASSWORD")
         self.database = os.getenv("WORDPRESS_DB_NAME")
         self.url_table = os.getenv("WORDPRESS_URL_TABLE")
-        self.table_prefix = os.getenv("WORDPRESS_TABLE_PREFIX", "wp_")
+        self.table_prefix = os.getenv("WORDPRESS_TABLE_PREFIX", "afn_")
 
     def get_connection(self):
         """Establish a connection to the WordPress database"""
@@ -58,6 +58,8 @@ class WordPressFetcher:
                 ORDER BY 
                     p.post_date DESC
                 """
+
+                print(f"Query: {query}")
                 
                 # Website URL with trailing slash
                 site_url = self._get_site_url()
