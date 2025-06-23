@@ -13,6 +13,7 @@ class WordPressFetcher:
         self.password = os.getenv("WORDPRESS_DB_PASSWORD")
         self.database = os.getenv("WORDPRESS_DB_NAME")
         self.url_table = os.getenv("WORDPRESS_URL_TABLE")
+        self.table_prefix = os.getenv("WORDPRESS_TABLE_PREFIX", "wp_")
 
     def get_connection(self):
         """Establish a connection to the WordPress database"""
@@ -40,7 +41,7 @@ class WordPressFetcher:
         try:
             with connection.cursor() as cursor:
                 # Query to get published posts and pages with their metadata
-                query = """
+                query = f"""
                 SELECT 
                     p.ID as id,
                     p.post_title as title,
@@ -49,7 +50,7 @@ class WordPressFetcher:
                     p.post_date as date,
                     CONCAT(%s, p.post_name) as url
                 FROM 
-                    wp_posts p
+                    {self.table_prefix}posts p
                 WHERE 
                     p.post_status = 'publish' AND
                     p.post_type IN ('post', 'page') AND
@@ -121,11 +122,11 @@ class WordPressFetcher:
         
         try:
             with connection.cursor() as cursor:
-                query = """
+                query = f"""
                 SELECT 
                     option_value
                 FROM 
-                    wp_options
+                    {self.table_prefix}options
                 WHERE 
                     option_name = 'siteurl'
                 LIMIT 1

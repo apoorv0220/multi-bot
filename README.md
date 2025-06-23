@@ -40,6 +40,8 @@ WORDPRESS_DB_HOST=your_wordpress_host
 WORDPRESS_DB_USER=your_db_username
 WORDPRESS_DB_PASSWORD=your_db_password
 WORDPRESS_DB_NAME=your_db_name
+WORDPRESS_URL_TABLE=wp_custom_urls
+WORDPRESS_TABLE_PREFIX=wp_
 
 # Qdrant Configuration
 QDRANT_HOST=houseoftiles-qdrant
@@ -144,6 +146,12 @@ ai_chatbot/
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key (required) | - |
+| `WORDPRESS_DB_HOST` | WordPress database host | - |
+| `WORDPRESS_DB_USER` | WordPress database user | - |
+| `WORDPRESS_DB_PASSWORD` | WordPress database password | - |
+| `WORDPRESS_DB_NAME` | WordPress database name | - |
+| `WORDPRESS_URL_TABLE` | Custom URLs table name | `wp_custom_urls` |
+| `WORDPRESS_TABLE_PREFIX` | WordPress table prefix | `wp_` |
 | `QDRANT_HOST` | Qdrant database host | `qdrant` |
 | `QDRANT_PORT` | Qdrant database port (internal) | `6333` |
 | `COLLECTION_NAME` | Vector collection name | `houseoftiles_content` |
