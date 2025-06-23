@@ -117,7 +117,7 @@ class WordPressFetcher:
         """Get the WordPress site URL from options table"""
         connection = self.get_connection()
         if not connection:
-            return "https://migraine.ie/"
+            return "https://houseoftiles.ie/"
         
         try:
             with connection.cursor() as cursor:
@@ -140,10 +140,10 @@ class WordPressFetcher:
                         site_url += '/'
                     return site_url
                 else:
-                    return "https://migraine.ie/"
+                    return "https://houseoftiles.ie/"
         except Exception as e:
             print(f"Error fetching site URL: {e}")
-            return "https://migraine.ie/"
+            return "https://houseoftiles.ie/"
         finally:
             connection.close()
     

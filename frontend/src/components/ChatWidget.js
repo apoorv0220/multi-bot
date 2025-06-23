@@ -1,15 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
 import axios from 'axios';
-import { FaTimes } from 'react-icons/fa';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
 
-const ChatWidget = ({ onClose, apiUrl }) => {
+const ChatWidget = ({ apiUrl }) => {
   const [messages, setMessages] = useState([
     {
       type: 'bot',
-      text: 'Hello! I\'m your Migraine Assistant. How can I help you today?',
+      text: 'Hello! I\'m your House of Tiles Assistant. How can I help you with tiles, flooring, or bathroom solutions today?',
       timestamp: new Date(),
     },
   ]);
@@ -81,7 +80,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   return (
     <WidgetContainer>
       <WidgetHeader>
-        <WidgetTitle>Migraine Assistant</WidgetTitle>
+        <WidgetTitle>House of Tiles Assistant</WidgetTitle>
       </WidgetHeader>
       
       <MessageContainer>
@@ -143,7 +142,7 @@ const WidgetHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  background: #72b519;
+  background: #bd1d73;
   color: white;
 `;
 
@@ -189,12 +188,12 @@ const Input = styled.input`
   outline: none;
   
   &:focus {
-    border-color: #72b519;
+    border-color: #bd1d73;
   }
 `;
 
 const SendButton = styled.button`
-  background: #72b519;
+  background: #bd1d73;
   color: white;
   border: none;
   border-radius: 50%;

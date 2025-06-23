@@ -18,7 +18,7 @@ logging.basicConfig(
         logging.FileHandler("scheduler.log")
     ]
 )
-logger = logging.getLogger("migraine-scheduler")
+logger = logging.getLogger("houseoftiles-scheduler")
 
 # Local imports - use relative imports
 try:
@@ -37,7 +37,7 @@ class IndexingScheduler:
         
         # Set up Qdrant client
         self.qdrant_host = os.getenv("QDRANT_HOST", "localhost")
-        self.qdrant_port = int(os.getenv("QDRANT_PORT", 6333))
+        self.qdrant_port = int(os.getenv("QDRANT_PORT", 6023))
         logger.info(f"Connecting to Qdrant at {self.qdrant_host}:{self.qdrant_port}")
         
         # Initialize Qdrant client with retry logic

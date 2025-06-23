@@ -177,7 +177,7 @@ async def scrape_urls(urls):
 if __name__ == "__main__":
     async def test_scraper():
         scraper = WebScraper()
-        url = "https://www.migraine.ie/about-migraine/what-is-migraine/"
+        url = "https://www.houseoftiles.ie"
         result = await scraper.scrape_url(url)
         print(f"Title: {result['title']}")
         print(f"Content length: {len(result['content'])} characters")

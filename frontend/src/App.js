@@ -1,16 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import ChatWidget from './components/ChatWidget';
-import ChatButton from './components/ChatButton';
-import reportWebVitals from './reportWebVitals';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://migraine.softdemonew.info/api');
-
-  const toggleChat = () => {
-    setIsOpen(!isOpen);
-  };
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://houseoftiles.softdemonew.info/api');
 
   const closeChat = () => {
     setIsOpen(false);
@@ -39,9 +33,8 @@ function App() {
   }, []);
 
   return (
-    <AppContainer id="migraine-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
+    <AppContainer id="houseoftiles-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
       {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
-      {/* <ChatButton onClick={toggleChat} isOpen={isOpen} /> */}
     </AppContainer>
   );
 }

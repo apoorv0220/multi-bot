@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Migraine.ie Chatbot - Embed Example</title>
+  <title>House of Tiles Chatbot - Embed Example</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -13,7 +13,7 @@
       line-height: 1.6;
     }
     h1 {
-      color: #72b519;
+      color: #bd1d73;
     }
     pre {
       background-color: #f5f5f5;
@@ -39,7 +39,7 @@
       color: #333;
     }
     button {
-      background-color: #72b519;
+      background-color: #bd1d73;
       color: white;
       border: none;
       padding: 10px 15px;
@@ -74,9 +74,9 @@
   </style>
 </head>
 <body>
-  <h1>Migraine.ie Chatbot - Embed Example</h1>
+  <h1>House of Tiles Chatbot - Embed Example</h1>
   
-  <p>This page demonstrates how to embed the Migraine.ie AI chatbot into any website.</p>
+  <p>This page demonstrates how to embed the House of Tiles AI chatbot into any website.</p>
   
   <h2>How to Embed the Chatbot</h2>
   
@@ -84,16 +84,16 @@
   
   <pre>&lt;script&gt;
   // Optional configuration
-  window.MIGRAINE_CHATBOT_CONFIG = {
-    baseUrl: 'https://migraine.softdemonew.info',       // URL where the chatbot widget is hosted
-    apiUrl: 'https://migraine.softdemonew.info/api',       // URL of the backend API
-    primaryColor: '#72b519'                 // Primary color for the chatbot
+  window.HOUSEOFTILES_CHATBOT_CONFIG = {
+    baseUrl: 'https://houseoftiles.softdemonew.info',       // URL where the chatbot widget is hosted
+    apiUrl: 'https://houseoftiles.softdemonew.info/api',       // URL of the backend API
+    primaryColor: '#bd1d73'                 // Primary color for the chatbot
   };
   
   // Load the widget script
   (function() {
     const script = document.createElement('script');
-    script.src = window.MIGRAINE_CHATBOT_CONFIG.baseUrl + '/widget.js';
+    script.src = window.HOUSEOFTILES_CHATBOT_CONFIG.baseUrl + '/widget.js';
     script.async = true;
     document.body.appendChild(script);
   })();
@@ -131,7 +131,7 @@
         buttonElement.disabled = true;
         
         // Get API URL from configuration
-        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'https://migraine.softdemonew.info/api';
+        const apiUrl = window.HOUSEOFTILES_CHATBOT_CONFIG.apiUrl || 'https://houseoftiles.softdemonew.info/api';
         
         // Call the reindex API endpoint
         fetch(`${apiUrl}/api/reindex`, {
@@ -178,16 +178,16 @@
   <!-- Example of how to embed the chatbot -->
   <script>
     // Optional configuration
-    window.MIGRAINE_CHATBOT_CONFIG = {
-      baseUrl: 'https://migraine.softdemonew.info',
-      apiUrl: 'https://migraine.softdemonew.info/api',
-      primaryColor: '#72b519'
+    window.HOUSEOFTILES_CHATBOT_CONFIG = {
+      baseUrl: 'https://houseoftiles.softdemonew.info',
+      apiUrl: 'https://houseoftiles.softdemonew.info/api',
+      primaryColor: '#bd1d73'
     };
     
     // Load the widget script
     (function() {
       const script = document.createElement('script');
-      script.src = window.MIGRAINE_CHATBOT_CONFIG.baseUrl + '/widget.js';
+      script.src = window.HOUSEOFTILES_CHATBOT_CONFIG.baseUrl + '/widget.js';
       script.async = true;
       document.body.appendChild(script);
     })();

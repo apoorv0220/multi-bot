@@ -36,7 +36,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Define Qdrant connection parameters from environment or use defaults
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6023))
 
 # Create a shared QdrantClient instance - will be set by main.py
 qdrant_client = None
@@ -52,7 +52,7 @@ class Embedder:
             self._connect_to_qdrant()
         
         # Collection name for Qdrant
-        self.collection_name = os.getenv("COLLECTION_NAME", "migraine_content")
+        self.collection_name = os.getenv("COLLECTION_NAME", "houseoftiles_content")
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -188,8 +188,8 @@ class Embedder:
                     "url": post['url'],
                     "type": post['type'],
                     "date": str(post['date']),
-                    "source": "Migraine.ie",
-                    "source_type": "migraine_ie"  # Used for filtering
+                    "source": "House of Tiles",
+                    "source_type": "houseoftiles_ie"  # Used for filtering
                 }
                 
                 # Create point with UUID format
@@ -213,7 +213,7 @@ class Embedder:
                         must=[
                             models.FieldCondition(
                                 key="source_type",
-                                match=models.MatchValue(value="migraine_ie")
+                                match=models.MatchValue(value="houseoftiles_ie")
                             )
                         ]
                     )
@@ -314,7 +314,7 @@ class Embedder:
 async def test_embedder():
     """Test the Embedder class by connecting to the local Qdrant server and testing a simple embedding"""
     embedder = Embedder()
-    test_text = "This is a test of the embedding system for Migraine.ie"
+    test_text = "This is a test of the embedding system for House of Tiles"
     embedding = await embedder.generate_embedding(test_text)
     
     if embedding:

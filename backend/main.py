@@ -23,7 +23,7 @@ logging.basicConfig(
         logging.FileHandler("app.log")
     ]
 )
-logger = logging.getLogger("migraine-chatbot")
+logger = logging.getLogger("houseoftiles-chatbot")
 
 # Local imports - use relative imports
 try:
@@ -38,8 +38,8 @@ except ImportError:
 load_dotenv()
 
 # Initialize FastAPI app
-app = FastAPI(title="Migraine.ie AI Chatbot API", 
-              description="API for AI-powered search across Migraine.ie content")
+app = FastAPI(title="House of Tiles AI Chatbot API", 
+              description="API for AI-powered search across House of Tiles content")
 
 # Configure CORS
 app.add_middleware(
@@ -61,8 +61,8 @@ qdrant_client = None
 try:
     # Define Qdrant connection parameters from environment or use defaults
     QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-    QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
-    COLLECTION_NAME = os.getenv("COLLECTION_NAME", "migraine_content")
+    QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6023))
+    COLLECTION_NAME = os.getenv("COLLECTION_NAME", "houseoftiles_content")
     logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
     qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     # Check if collection exists, create if not
@@ -139,25 +139,26 @@ async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
         raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
     
     try:
-        # First try to search in Migraine.ie content (prioritized)
-        migraine_results = qdrant_client.search(
+        # First try to search in House of Tiles content (prioritized)
+        houseoftiles_results = qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=embedding,
+            limit=limit,
+            score_threshold=0.6,
             query_filter=models.Filter(
                 must=[
                     models.FieldCondition(
                         key="source_type",
-                        match=models.MatchValue(value="migraine_ie")
+                        match=models.MatchValue(value="houseoftiles_ie")
                     )
                 ]
-            ),
-            limit=limit
+            )
         )
-
-        logger.info(f"Found {len(migraine_results)} migraine.ie results")
         
-        # If we don't have enough results with high confidence, search in external sources
-        if len(migraine_results) < limit or max([r.score for r in migraine_results] + [0]) < 0.7:
+        logger.info(f"Found {len(houseoftiles_results)} houseoftiles.ie results")
+        
+        # If we don't have enough results from House of Tiles, search external sources
+        if len(houseoftiles_results) < limit or max([r.score for r in houseoftiles_results] + [0]) < 0.7:
             external_results = qdrant_client.search(
                 collection_name=COLLECTION_NAME,
                 query_vector=embedding,
@@ -173,12 +174,12 @@ async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
             )
             
             # Combine and sort results
-            all_results = migraine_results + external_results
+            all_results = houseoftiles_results + external_results
             all_results.sort(key=lambda x: x.score, reverse=True)
             logger.info(f"Added {len(external_results)} external results, total: {len(all_results)}")
             return all_results[:limit]
         
-        return migraine_results
+        return houseoftiles_results
     except Exception as e:
         logger.error(f"Error searching Qdrant: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to search knowledge base: {e}")
@@ -230,7 +231,7 @@ async def generate_answer(query: str, context_texts: List[str]) -> str:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant specialized in migraines. Your role is to format information found in the context to provide accurate, concise, and compassionate information. Present this information as if it's directly from the source materials, not as your own analysis. Use a factual tone like a medical publication. Structure your response to reflect the information from the context in a coherent, organized manner. If the context doesn't contain the information needed, simply say the information isn't available."},
+                {"role": "system", "content": "You are a helpful assistant specialized in tiles, flooring, and home improvement. Your role is to format information found in the context to provide accurate, helpful, and professional information about tiles, flooring solutions, bathroom design, and home renovation. Present this information as if it's directly from House of Tiles, a trusted tile and flooring retailer in Dublin. Focus on product knowledge, design advice, installation guidance, and helping customers make informed decisions for their home or commercial projects."},
                 {"role": "user", "content": f"Question: {query}\n\nContext: {context}"}
             ]
         )
@@ -289,7 +290,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         if not filtered_results:
             logger.info("No high-confidence results found. Returning empty response.")
             return ChatResponse(
-                response="I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
+                response="I apologize, but I couldn't find specific information about that in our House of Tiles knowledge base. Please rephrase or ask about tiles, flooring, bathroom solutions, or other home improvement topics.",
                 source="vector_search",
                 confidence=0.0,
                 sources=[]
@@ -400,6 +401,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app", 
         host=os.getenv("API_HOST", "0.0.0.0"), 
-        port=int(os.getenv("API_PORT", 8013)),
+        port=int(os.getenv("API_PORT", 8023)),
         reload=False
     ) 
