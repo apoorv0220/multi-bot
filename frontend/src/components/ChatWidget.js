@@ -7,8 +7,9 @@ import Message from './Message';
 const ChatWidget = ({ apiUrl }) => {
   const [messages, setMessages] = useState([
     {
-      type: 'bot',
-      text: 'Hello! I\'m your House of Tiles Assistant. How can I help you with tiles, flooring, or bathroom solutions today?',
+      id: 1,
+      text: 'Hello! I\'m your Medical Optics Assistant. How can I help you with eye care, vision health, or optical services today?',
+      isBot: true,
       timestamp: new Date(),
     },
   ]);
@@ -80,7 +81,7 @@ const ChatWidget = ({ apiUrl }) => {
   return (
     <WidgetContainer>
       <WidgetHeader>
-        <WidgetTitle>House of Tiles Assistant</WidgetTitle>
+        <WidgetTitle>Medical Optics Assistant</WidgetTitle>
       </WidgetHeader>
       
       <MessageContainer>
@@ -142,7 +143,7 @@ const WidgetHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  background: #bd1d73;
+  background: #017764;
   color: white;
 `;
 
@@ -188,12 +189,12 @@ const Input = styled.input`
   outline: none;
   
   &:focus {
-    border-color: #bd1d73;
+    border-color: #017764;
   }
 `;
 
 const SendButton = styled.button`
-  background: #bd1d73;
+  background: #017764;
   color: white;
   border: none;
   border-radius: 50%;

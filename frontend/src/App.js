@@ -4,7 +4,7 @@ import ChatWidget from './components/ChatWidget';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://houseoftiles.softdemonew.info/api');
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://medical-optics.softdemonew.info/api');
 
   const closeChat = () => {
     setIsOpen(false);
@@ -33,7 +33,7 @@ function App() {
   }, []);
 
   return (
-    <AppContainer id="houseoftiles-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
+    <AppContainer id="medicaloptics-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
       {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
     </AppContainer>
   );

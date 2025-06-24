@@ -14,9 +14,9 @@ code {
 
 /* Global styles for the chatbot widget */
 :root {
-  --primary-color: #bd1d73;
-  --primary-dark: #bd1d73;
-  --secondary-color: #ffd5eb;
+  --primary-color: #017764;
+  --primary-dark: #017764;
+  --secondary-color: #c1e7e0;
   --text-color: #333;
   --light-text: #777;
   --error-color: #e74c3c;
@@ -30,7 +30,7 @@ code {
 }
 
 /* Ensure the widget is only visible when included in another site */
-#houseoftiles-chatbot-widget {
+#medicaloptics-chatbot-widget {
   position: fixed;
   z-index: 999999;
   transition: all 0.3s ease;

@@ -1,6 +1,6 @@
 {
-  "short_name": "House of Tiles Chat",
-  "name": "House of Tiles AI Chatbot",
+  "short_name": "Medical Optics Chat",
+  "name": "Medical Optics AI Chatbot",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,6 +20,6 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#bd1d73",
+  "theme_color": "#017764",
   "background_color": "#ffffff"
 } 

@@ -2,33 +2,33 @@ version: '3.8'
 
 services:
   # Backend API service
-  houseoftiles-backend:
+  medicaloptics-backend:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
     ports:
-      - "8023:8023"
+      - "8033:8033"
     volumes:
       - ./backend:/app
     depends_on:
-      - houseoftiles-qdrant
+      - medicaloptics-qdrant
     env_file:
       - ./backend/.env
     environment:
-      - QDRANT_HOST=houseoftiles-qdrant
+      - QDRANT_HOST=medicaloptics-qdrant
       - QDRANT_PORT=6333
       - ENVIRONMENT=production
     networks:
-      - houseoftiles-net
+      - medicaloptics-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "https://houseoftiles.softdemonew.info/api/health"]
+      test: ["CMD", "curl", "-f", "https://medical-optics.softdemonew.info/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
 
   # Scheduler service for regular reindexing
-  houseoftiles-scheduler:
+  medicaloptics-scheduler:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
@@ -36,24 +36,24 @@ services:
     volumes:
       - ./backend:/app
     depends_on:
-      - houseoftiles-qdrant
-      - houseoftiles-backend
+      - medicaloptics-qdrant
+      - medicaloptics-backend
     env_file:
       - ./backend/.env
     environment:
-      - QDRANT_HOST=houseoftiles-qdrant
+      - QDRANT_HOST=medicaloptics-qdrant
       - QDRANT_PORT=6333
       - ENVIRONMENT=production
     networks:
-      - houseoftiles-net
+      - medicaloptics-net
     restart: unless-stopped
 
   # Qdrant vector database
-  houseoftiles-qdrant:
+  medicaloptics-qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6023:6333"  # Map external 6023 to internal 6333
-      - "6024:6334"  # Map external 6024 to internal 6334
+      - "6033:6333"  # Map external 6033 to internal 6333
+      - "6034:6334"  # Map external 6034 to internal 6334
     volumes:
       - ./qdrant_data:/qdrant/storage
     healthcheck:
@@ -62,26 +62,26 @@ services:
       timeout: 10s
       retries: 3
     networks:
-      - houseoftiles-net
+      - medicaloptics-net
     restart: unless-stopped
 
   # Frontend service (production build with Nginx)
-  houseoftiles-frontend:
+  medicaloptics-frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3023:3023"
+      - "3033:3033"
     depends_on:
-      - houseoftiles-backend
+      - medicaloptics-backend
     environment:
       - REACT_APP_API_URL=/api
     networks:
-      - houseoftiles-net
+      - medicaloptics-net
     restart: unless-stopped
 
   # Nginx reverse proxy (optional, alternative to built-in Nginx in frontend)
-  # houseoftiles-nginx:
+  # medicaloptics-nginx:
   #   image: nginx:alpine
   #   ports:
   #     - "80:80"
@@ -90,14 +90,14 @@ services:
   #     - ./nginx.conf:/etc/nginx/conf.d/default.conf
   #     - ./ssl:/etc/nginx/ssl
   #   depends_on:
-  #     - houseoftiles-backend
-  #     - houseoftiles-frontend
+  #     - medicaloptics-backend
+  #     - medicaloptics-frontend
   #   networks:
-  #     - houseoftiles-net
+  #     - medicaloptics-net
   #   restart: unless-stopped
 
 networks:
-  houseoftiles-net:
+  medicaloptics-net:
     driver: bridge
 
 volumes:
