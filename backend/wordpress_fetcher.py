@@ -1,6 +1,14 @@
 import os
+from fastapi import logging
 import pymysql
 from dotenv import load_dotenv
+
+# Configure proper logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("embedder")
 
 # Load environment variables
 load_dotenv()
@@ -59,10 +67,12 @@ class WordPressFetcher:
                     p.post_date DESC
                 """
 
-                print(f"Query: {query}")
+                logger.info(f"Query: {query}")
                 
                 # Website URL with trailing slash
                 site_url = self._get_site_url()
+
+                logger.info(f"Site URL: {site_url}")
                 
                 cursor.execute(query, (site_url,))
                 results = cursor.fetchall()
