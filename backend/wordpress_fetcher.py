@@ -1,5 +1,5 @@
 import os
-from fastapi import logging
+import logging
 import pymysql
 from dotenv import load_dotenv
 
