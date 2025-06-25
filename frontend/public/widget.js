@@ -1,135 +1,157 @@
 (function() {
-  // Widget integration script
-  const widgetUrl = window.MEDICALOPTICS_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3033';
-  const apiUrl = window.MEDICALOPTICS_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8033';
+  // Configuration - set this to your actual deployed URL in production
+  const widgetUrl = window.MEDICALOPTICS_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3023';
+  const apiUrl = window.MEDICALOPTICS_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8023';
   const primaryColor = window.MEDICALOPTICS_CHATBOT_CONFIG?.primaryColor || '#017764';
   
-  // Create the iframe
-  function createIframe() {
+  // Create iframe for the widget
+  function createChatbotIframe() {
     const iframe = document.createElement('iframe');
-    iframe.src = widgetUrl;
     iframe.id = 'medicaloptics-chatbot-iframe';
-    iframe.style.cssText = `
-      position: fixed;
-      bottom: 100px;
-      right: 20px;
-      width: 400px;
-      height: 500px;
-      border: none;
-      z-index: 999999;
-      border-radius: 10px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      display: none;
-      background: white;
-    `;
+    iframe.src = widgetUrl;
+    iframe.style.position = 'fixed';
+    iframe.style.bottom = '90px';
+    iframe.style.right = '20px';
+    iframe.style.width = '380px';
+    iframe.style.height = '600px';
+    iframe.style.border = 'none';
+    iframe.style.borderRadius = '12px';
+    iframe.style.boxShadow = '0 4px 25px rgba(0, 0, 0, 0.1)';
+    iframe.style.zIndex = '999998';
+    iframe.style.display = 'none';
+    iframe.style.opacity = '0';
+    iframe.style.transition = 'opacity 0.3s ease';
+    iframe.setAttribute('allowtransparency', 'true');
     
-    // Handle messages from the iframe
-    window.addEventListener('message', function(event) {
-      if (event.origin !== widgetUrl) return;
-      
-      if (event.data.type === 'closeChat') {
-        hideWidget();
-      }
-      if (event.data.type === 'resizeWidget') {
-        iframe.style.height = event.data.height + 'px';
-      }
-    });
+    // Add responsiveness for mobile
+    const mediaQuery = window.matchMedia('(max-width: 480px)');
+    if (mediaQuery.matches) {
+      iframe.style.width = '100%';
+      iframe.style.height = '100%';
+      iframe.style.bottom = '0';
+      iframe.style.right = '0';
+      iframe.style.borderRadius = '0';
+    }
     
-    document.body.appendChild(iframe);
     return iframe;
   }
   
-  // Create the toggle button
+  // Create toggle button
   function createToggleButton() {
     const button = document.createElement('button');
     button.id = 'medicaloptics-chatbot-toggle';
     button.innerHTML = `
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
       </svg>
     `;
+    button.style.position = 'fixed';
+    button.style.bottom = '20px';
+    button.style.right = '20px';
+    button.style.width = '60px';
+    button.style.height = '60px';
+    button.style.borderRadius = '50%';
+    button.style.backgroundColor = primaryColor;
+    button.style.color = 'white';
+    button.style.border = 'none';
+    button.style.boxShadow = '0 4px 25px rgba(0, 0, 0, 0.1)';
+    button.style.cursor = 'pointer';
+    button.style.zIndex = '999999';
+    button.style.display = 'flex';
+    button.style.alignItems = 'center';
+    button.style.justifyContent = 'center';
+    button.style.transition = 'all 0.3s ease';
     
-    button.style.cssText = `
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      width: 60px;
-      height: 60px;
-      border-radius: 50%;
-      background-color: ${primaryColor};
-      color: white;
-      border: none;
-      cursor: pointer;
-      z-index: 999999;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: all 0.3s ease;
-    `;
-    
-    button.addEventListener('click', toggleWidget);
-    document.body.appendChild(button);
     return button;
   }
   
-  // Show widget
-  function showWidget() {
+  // Toggle chatbot visibility
+  function toggleChatbot() {
     const iframe = document.getElementById('medicaloptics-chatbot-iframe');
     const button = document.getElementById('medicaloptics-chatbot-toggle');
     
-    if (iframe) {
+    if (iframe.style.display === 'none') {
+      // Show iframe with transition
       iframe.style.display = 'block';
-    }
-    if (button) {
+      // Use setTimeout to allow the display change to take effect before changing opacity
+      setTimeout(() => {
+        iframe.style.opacity = '1';
+      }, 10);
+      
       button.innerHTML = `
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <line x1="18" y1="6" x2="6" y2="18" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <line x1="6" y1="6" x2="18" y2="18" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
       `;
+      // Send message to iframe to open chat
+      iframe.contentWindow.postMessage({
+        action: 'open-chat',
+        apiUrl: apiUrl
+      }, '*');
+    } else {
+      closeChat();
     }
   }
   
-  // Hide widget
-  function hideWidget() {
+  // Function to close the chat
+  function closeChat() {
     const iframe = document.getElementById('medicaloptics-chatbot-iframe');
     const button = document.getElementById('medicaloptics-chatbot-toggle');
     
-    if (iframe) {
+    // Hide with transition
+    iframe.style.opacity = '0';
+    
+    // Reset button icon
+    button.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+      </svg>
+    `;
+    
+    // Send message to iframe to close chat
+    iframe.contentWindow.postMessage('close-chat', '*');
+    
+    // Wait for transition to complete before hiding the element
+    setTimeout(() => {
       iframe.style.display = 'none';
-    }
-    if (button) {
-      button.innerHTML = `
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      `;
-    }
+      
+      // Clean up any potential shadows or remnants
+      const shadows = document.querySelectorAll('.chatbot-shadow-element');
+      shadows.forEach(el => {
+        document.body.removeChild(el);
+      });
+    }, 300); // Match the transition duration
   }
   
-  // Toggle widget
-  function toggleWidget() {
-    const iframe = document.getElementById('medicaloptics-chatbot-iframe');
-    if (iframe && iframe.style.display === 'block') {
-      hideWidget();
-    } else {
-      showWidget();
-    }
-  }
-  
-  // Initialize the widget
+  // Initialize widget
   function initWidget() {
-    // Prevent multiple widgets from being created
+    // Check if widget already exists
     if (document.getElementById('medicaloptics-chatbot-iframe')) {
       return;
     }
-
-    createIframe();
-    createToggleButton();
+    
+    // Create and append iframe
+    const iframe = createChatbotIframe();
+    document.body.appendChild(iframe);
+    
+    // Create and append toggle button
+    const button = createToggleButton();
+    document.body.appendChild(button);
+    
+    // Add event listener to toggle button
+    button.addEventListener('click', toggleChatbot);
+    
+    // Listen for messages from the iframe
+    window.addEventListener('message', function(event) {
+      // Accept messages from the chatbot iframe
+      if (event.data === 'close-widget') {
+        closeChat();
+      }
+    });
   }
   
-  // Load the widget when the DOM is ready
+  // Wait for DOM to be fully loaded
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initWidget);
   } else {
