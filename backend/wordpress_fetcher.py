@@ -61,7 +61,6 @@ class WordPressFetcher:
                     {self.table_prefix}posts p
                 WHERE 
                     p.post_status = 'publish' AND
-                    p.post_type IN ('post', 'page', 'services', 'conditions') AND
                     p.post_content != ''
                 ORDER BY 
                     p.post_date DESC

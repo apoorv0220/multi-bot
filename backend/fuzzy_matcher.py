@@ -10,6 +10,7 @@ GREETING_RESPONSES = {
     "good afternoon": "Good afternoon! What eye care questions can I help you with?",
     "good evening": "Good evening! How can I assist you with your vision needs tonight?",
     "how are you": "I'm functioning well and ready to help with your eye care and vision health questions!",
+    "hello how are you": "I'm functioning well and ready to help with your eye care and vision health questions!",
     "how are you doing": "I'm doing great and ready to assist with your optical service queries!",
     "what's up": "I'm here to help with eye care, vision health, and optical service information. What would you like to know?",
     "how's it going": "I'm doing well and ready to assist with your eye care and vision health queries!",
