@@ -15,6 +15,7 @@ from qdrant_client.http.models import Distance, VectorParams
 import logging
 from fuzzy_matcher import FuzzyMatcher
 from typing import Optional, Dict, Any, List
+from url_utils import validate_and_fix_url, get_base_url
 
 # Configure logging
 logging.basicConfig(
@@ -282,7 +283,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         context_texts = []
         sources = []
 
-        logger.info(f"Search results: {search_results}")
+        logger.info(f"Search results: {len(search_results)}")
         
         # Filter out low confidence results (less than 30%)
         filtered_results = [result for result in search_results if result.score >= 0.3]
@@ -298,16 +299,47 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
                 sources=[]
             )
         
-        # Process results
+        # Process results and validate URLs
         for result in filtered_results:
             content_preview = result.payload['content']
-            context_texts.append(f"Source: {result.payload['source']}\nURL: {result.payload['url']}\n{content_preview}")
+            original_url = result.payload['url']
+            
+            # Validate and fix URL before adding to response
+            validated_url = validate_and_fix_url(original_url)
+            
+            # If URL was fixed, log the change
+            if validated_url != original_url:
+                logger.warning(f"Fixed URL in response: {original_url} -> {validated_url}")
+            
+            # If no valid URL could be constructed, skip this source or use base URL
+            if not validated_url:
+                # Try to get base URL from the original
+                base_url = get_base_url(original_url)
+                if base_url:
+                    validated_url = base_url
+                    logger.info(f"Using base URL fallback for source: {base_url}")
+                else:
+                    # Skip this source if no valid URL can be constructed
+                    logger.warning(f"Skipping source with invalid URL: {original_url}")
+                    continue
+            
+            context_texts.append(f"Source: {result.payload['source']}\nURL: {validated_url}\n{content_preview}")
             sources.append(SearchResult(
                 content=result.payload['content'][:200] + "...",
                 source=result.payload['source'],
-                url=result.payload['url'],
+                url=validated_url,  # Use validated URL
                 score=result.score
             ))
+
+        # If all sources were filtered out due to invalid URLs, return appropriate response
+        if not sources:
+            logger.warning("All sources filtered out due to invalid URLs")
+            return ChatResponse(
+                response="I found some relevant information, but the source links are currently unavailable. Please contact Medical Optics directly for more details about eye care and vision health services.",
+                source="vector_search",
+                confidence=filtered_results[0].score if filtered_results else 0.0,
+                sources=[]
+            )
 
         # Generate answer using OpenAI
         logger.info(f"Generating answer for query: {request.message}")

@@ -2,13 +2,14 @@ import os
 import logging
 import pymysql
 from dotenv import load_dotenv
+from url_utils import clean_wordpress_url, validate_and_fix_url
 
 # Configure proper logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("embedder")
+logger = logging.getLogger("wordpress_fetcher")
 
 # Load environment variables
 load_dotenv()
@@ -56,7 +57,7 @@ class WordPressFetcher:
                     p.post_content as content,
                     p.post_type as type,
                     p.post_date as date,
-                    CONCAT(%s, p.post_name) as url
+                    p.post_name as post_name
                 FROM 
                     {self.table_prefix}posts p
                 WHERE 
@@ -68,18 +69,28 @@ class WordPressFetcher:
 
                 logger.info(f"Query: {query}")
                 
-                # Website URL with trailing slash
-                site_url = self._get_site_url()
-
-                logger.info(f"Site URL: {site_url}")
-                
-                cursor.execute(query, (site_url,))
+                cursor.execute(query)
                 results = cursor.fetchall()
                 
-                # Process results to clean content
+                # Get site URL for URL construction
+                site_url = self._get_site_url()
+                logger.info(f"Site URL: {site_url}")
+                
+                # Process results to clean content and construct valid URLs
                 for post in results:
-                    # Basic HTML cleaning (you might want to improve this)
+                    # Basic HTML cleaning
                     post['content'] = self._clean_html_content(post['content'])
+                    
+                    # Construct and validate URL using the new utility
+                    post['url'] = clean_wordpress_url(
+                        site_url, 
+                        post['post_name'], 
+                        post['id']
+                    )
+                    
+                    # Log URL issues for debugging
+                    if post['url'] == site_url:
+                        logger.warning(f"Post {post['id']} '{post['title']}' using fallback URL due to invalid post_name: {post['post_name']}")
                 
                 return results
         except Exception as e:
@@ -109,13 +120,23 @@ class WordPressFetcher:
                 cursor.execute(query)
                 results = cursor.fetchall()
                 
-                # Add missing fields that the embedder expects
+                # Add missing fields that the embedder expects and validate URLs
                 processed_results = []
                 for result in results:
                     processed_result = result.copy()
+                    
+                    # Validate and fix the URL
+                    original_url = result['url']
+                    fixed_url = validate_and_fix_url(original_url)
+                    
+                    if fixed_url != original_url:
+                        logger.warning(f"Fixed external URL: {original_url} -> {fixed_url}")
+                    
+                    processed_result['url'] = fixed_url
+                    
                     # Add default title and description based on URL
-                    processed_result['title'] = f"External content from {result['url']}"
-                    processed_result['description'] = f"External content fetched from {result['url']}"
+                    processed_result['title'] = f"External content from {fixed_url}"
+                    processed_result['description'] = f"External content fetched from {fixed_url}"
                     processed_results.append(processed_result)
                 
                 return processed_results
