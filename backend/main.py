@@ -1,6 +1,8 @@
 import os
 import json
 import uuid
+import asyncio
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -336,12 +338,43 @@ async def health_check():
         status["qdrant"] = "not available"
     return status
 
-# Add a new endpoint to trigger content indexing
-@app.post("/api/reindex")
-async def trigger_reindex(background_tasks: BackgroundTasks):
-    """Trigger a full content reindexing in the background"""
+# Global variable to track reindexing jobs
+active_reindexing_jobs = {}
+job_counter = 0
+
+class ReindexRequest(BaseModel):
+    force_restart: Optional[bool] = False
+    chunk_size: Optional[int] = None
+    batch_size: Optional[int] = None
+
+class ReindexResponse(BaseModel):
+    job_id: str
+    status: str
+    message: str
+    estimated_duration: Optional[str] = None
+
+class ReindexStatusResponse(BaseModel):
+    job_id: Optional[str]
+    status: str
+    progress: Optional[Dict[str, Any]] = None
+    message: str
+    start_time: Optional[str] = None
+    elapsed_time: Optional[float] = None
+
+# Replace the old reindex endpoint with an improved version
+@app.post("/api/reindex", response_model=ReindexResponse)
+async def trigger_reindex(request: ReindexRequest = ReindexRequest()):
+    """Trigger a full content reindexing with improved job management"""
+    global job_counter, active_reindexing_jobs
+    
     try:
-        # First check if Qdrant is accessible
+        # Check if Qdrant is accessible
+        if qdrant_client is None:
+            raise HTTPException(
+                status_code=503, 
+                detail="Qdrant service is not available. Please ensure Qdrant is running."
+            )
+        
         try:
             collections = qdrant_client.get_collections().collections
             logger.info(f"Successfully connected to Qdrant. Found {len(collections)} collections.")
@@ -349,33 +382,280 @@ async def trigger_reindex(background_tasks: BackgroundTasks):
             logger.error(f"Error connecting to Qdrant before reindexing: {e}")
             raise HTTPException(
                 status_code=503, 
-                detail=f"Cannot connect to Qdrant database. Please ensure Qdrant is running: {e}"
+                detail=f"Cannot connect to Qdrant database: {e}"
             )
         
-        # Create function to run in background
-        async def run_reindex():
+        # Check if there's already an active job
+        active_jobs = [job for job in active_reindexing_jobs.values() if job["status"] in ["running", "starting"]]
+        if active_jobs and not request.force_restart:
+            active_job = active_jobs[0]
+            return ReindexResponse(
+                job_id=active_job["job_id"],
+                status="already_running",
+                message=f"A reindexing job is already running (ID: {active_job['job_id']}). Use force_restart=true to stop it and start a new one."
+            )
+        
+        # Stop existing jobs if force_restart is True
+        if request.force_restart and active_jobs:
+            for job in active_jobs:
+                job["status"] = "cancelled"
+                logger.info(f"Cancelled existing job {job['job_id']}")
+        
+        # Create new job
+        job_counter += 1
+        job_id = f"reindex_{job_counter}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        job_info = {
+            "job_id": job_id,
+            "status": "starting",
+            "start_time": datetime.now().isoformat(),
+            "message": "Initializing reindexing process...",
+            "progress": None,
+            "error": None
+        }
+        
+        active_reindexing_jobs[job_id] = job_info
+        
+        # Create and start the reindexing task
+        async def run_reindex_job():
             try:
-                logger.info("Starting content reindexing process...")
+                job_info["status"] = "running"
+                job_info["message"] = "Reindexing in progress..."
+                logger.info(f"Starting reindexing job {job_id}")
+                
+                # Create embedder instance with custom settings if provided
                 embedder_instance = Embedder(client=qdrant_client)
-                await embedder_instance.reindex_all_content()
-                logger.info("Content reindexing process completed!")
+                if request.chunk_size:
+                    embedder_instance.chunk_size = request.chunk_size
+                if request.batch_size:
+                    embedder_instance.batch_size = request.batch_size
+                
+                # Run the reindexing
+                result = await embedder_instance.reindex_all_content()
+                
+                # Update job status
+                job_info["status"] = "completed"
+                job_info["message"] = "Reindexing completed successfully"
+                job_info["result"] = result
+                job_info["end_time"] = datetime.now().isoformat()
+                
+                logger.info(f"Reindexing job {job_id} completed successfully")
                 
             except Exception as e:
-                logger.error(f"Error during reindexing process: {e}")
+                job_info["status"] = "failed"
+                job_info["message"] = f"Reindexing failed: {str(e)}"
+                job_info["error"] = str(e)
+                job_info["end_time"] = datetime.now().isoformat()
+                logger.error(f"Reindexing job {job_id} failed: {e}")
         
-        # Add the task to run in the background
-        background_tasks.add_task(run_reindex)
+        # Start the job as a background task
+        asyncio.create_task(run_reindex_job())
         
-        return {
-            "status": "success", 
-            "message": "Content reindexing started in the background"
-        }
+        # Estimate duration based on typical processing
+        try:
+            wp_fetcher = WordPressFetcher()
+            posts = wp_fetcher.get_all_posts()
+            estimated_minutes = max(1, len(posts) // 20)  # Rough estimate: 20 posts per minute
+            estimated_duration = f"~{estimated_minutes} minutes"
+        except:
+            estimated_duration = "Unknown"
+        
+        return ReindexResponse(
+            job_id=job_id,
+            status="started",
+            message="Reindexing job started successfully",
+            estimated_duration=estimated_duration
+        )
+        
     except HTTPException:
         # Re-raise HTTP exceptions as they already have proper status codes and details
         raise
     except Exception as e:
-        logger.error(f"Error starting reindexing: {e}")
+        logger.error(f"Error starting reindexing job: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to start reindexing: {e}")
+
+@app.get("/api/reindex/status", response_model=ReindexStatusResponse)
+async def get_reindex_status(job_id: Optional[str] = None):
+    """Get the status of reindexing jobs"""
+    try:
+        if job_id:
+            # Get specific job status
+            if job_id not in active_reindexing_jobs:
+                raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+            
+            job_info = active_reindexing_jobs[job_id]
+            
+            # Get detailed progress if job is running
+            progress = None
+            if job_info["status"] == "running":
+                try:
+                    embedder_instance = Embedder(client=qdrant_client)
+                    status_info = embedder_instance.get_indexing_status()
+                    progress = status_info.get("progress")
+                except Exception as e:
+                    logger.warning(f"Could not get detailed progress: {e}")
+            
+            # Calculate elapsed time
+            elapsed_time = None
+            if "start_time" in job_info:
+                start_time = datetime.fromisoformat(job_info["start_time"])
+                elapsed_time = (datetime.now() - start_time).total_seconds()
+            
+            return ReindexStatusResponse(
+                job_id=job_id,
+                status=job_info["status"],
+                progress=progress,
+                message=job_info["message"],
+                start_time=job_info.get("start_time"),
+                elapsed_time=elapsed_time
+            )
+        else:
+            # Get status of most recent job or overall status
+            if not active_reindexing_jobs:
+                return ReindexStatusResponse(
+                    job_id=None,
+                    status="idle",
+                    message="No reindexing jobs found"
+                )
+            
+            # Get the most recent job
+            recent_job = max(active_reindexing_jobs.values(), key=lambda x: x["start_time"])
+            
+            # Get detailed progress if job is running
+            progress = None
+            if recent_job["status"] == "running":
+                try:
+                    embedder_instance = Embedder(client=qdrant_client)
+                    status_info = embedder_instance.get_indexing_status()
+                    progress = status_info.get("progress")
+                except Exception as e:
+                    logger.warning(f"Could not get detailed progress: {e}")
+            
+            # Calculate elapsed time
+            elapsed_time = None
+            if "start_time" in recent_job:
+                start_time = datetime.fromisoformat(recent_job["start_time"])
+                if recent_job["status"] in ["running", "starting"]:
+                    elapsed_time = (datetime.now() - start_time).total_seconds()
+                elif "end_time" in recent_job:
+                    end_time = datetime.fromisoformat(recent_job["end_time"])
+                    elapsed_time = (end_time - start_time).total_seconds()
+            
+            return ReindexStatusResponse(
+                job_id=recent_job["job_id"],
+                status=recent_job["status"],
+                progress=progress,
+                message=recent_job["message"],
+                start_time=recent_job.get("start_time"),
+                elapsed_time=elapsed_time
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting reindex status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get status: {e}")
+
+@app.get("/api/reindex/jobs")
+async def list_reindex_jobs():
+    """List all reindexing jobs"""
+    try:
+        jobs = []
+        for job_id, job_info in active_reindexing_jobs.items():
+            # Calculate elapsed time
+            elapsed_time = None
+            if "start_time" in job_info:
+                start_time = datetime.fromisoformat(job_info["start_time"])
+                if job_info["status"] in ["running", "starting"]:
+                    elapsed_time = (datetime.now() - start_time).total_seconds()
+                elif "end_time" in job_info:
+                    end_time = datetime.fromisoformat(job_info["end_time"])
+                    elapsed_time = (end_time - start_time).total_seconds()
+            
+            jobs.append({
+                "job_id": job_id,
+                "status": job_info["status"],
+                "start_time": job_info.get("start_time"),
+                "end_time": job_info.get("end_time"),
+                "elapsed_time": elapsed_time,
+                "message": job_info["message"]
+            })
+        
+        # Sort by start time (most recent first)
+        jobs.sort(key=lambda x: x["start_time"] or "", reverse=True)
+        
+        return {
+            "jobs": jobs,
+            "total_jobs": len(jobs),
+            "active_jobs": len([j for j in jobs if j["status"] in ["running", "starting"]])
+        }
+    
+    except Exception as e:
+        logger.error(f"Error listing reindex jobs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list jobs: {e}")
+
+@app.delete("/api/reindex/jobs/{job_id}")
+async def cancel_reindex_job(job_id: str):
+    """Cancel a specific reindexing job"""
+    try:
+        if job_id not in active_reindexing_jobs:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        
+        job_info = active_reindexing_jobs[job_id]
+        
+        if job_info["status"] not in ["running", "starting"]:
+            return {
+                "job_id": job_id,
+                "status": job_info["status"],
+                "message": f"Job {job_id} is not running (status: {job_info['status']})"
+            }
+        
+        # Mark job as cancelled
+        job_info["status"] = "cancelled"
+        job_info["message"] = "Job cancelled by user"
+        job_info["end_time"] = datetime.now().isoformat()
+        
+        logger.info(f"Cancelled reindexing job {job_id}")
+        
+        return {
+            "job_id": job_id,
+            "status": "cancelled",
+            "message": f"Job {job_id} has been cancelled"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel job: {e}")
+
+# Cleanup old jobs periodically (keep last 10 jobs)
+@app.on_event("startup")
+async def cleanup_old_jobs():
+    """Clean up old job records to prevent memory leaks"""
+    async def periodic_cleanup():
+        while True:
+            try:
+                await asyncio.sleep(3600)  # Clean up every hour
+                
+                if len(active_reindexing_jobs) > 10:
+                    # Keep only the 10 most recent jobs
+                    jobs_by_time = sorted(
+                        active_reindexing_jobs.items(),
+                        key=lambda x: x[1].get("start_time", ""),
+                        reverse=True
+                    )
+                    
+                    # Remove old jobs
+                    for job_id, _ in jobs_by_time[10:]:
+                        del active_reindexing_jobs[job_id]
+                        logger.info(f"Cleaned up old job record: {job_id}")
+                        
+            except Exception as e:
+                logger.error(f"Error during job cleanup: {e}")
+    
+    # Start cleanup task
+    asyncio.create_task(periodic_cleanup())
 
 # Add global exception handler middleware
 @app.middleware("http")
