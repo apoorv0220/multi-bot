@@ -1,6 +1,6 @@
 """
 URL validation and fallback utilities for Medical Optics chatbot.
-Handles invalid URLs by falling back to base URLs.
+Handles invalid URLs by falling back to contact-us page.
 """
 
 import re
@@ -34,7 +34,7 @@ def is_valid_url(url: str) -> bool:
         if not parsed.scheme or not parsed.netloc:
             return False
             
-        # Check for field IDs or other invalid patterns
+        # Check for field IDs or other invalid patterns in path
         invalid_patterns = [
             r'field_[a-f0-9]+',  # Field IDs like field_6846a4e998b80
             r'[a-f0-9]{13,}',    # Long hex strings
@@ -43,6 +43,12 @@ def is_valid_url(url: str) -> bool:
         
         for pattern in invalid_patterns:
             if re.search(pattern, parsed.path):
+                return False
+        
+        # Check for invalid query parameters
+        if parsed.query:
+            # URLs with ?p= parameters are considered invalid (WordPress permalink issues)
+            if re.search(r'\bp=\d+', parsed.query):
                 return False
                 
         return True
@@ -73,6 +79,30 @@ def get_base_url(url: str) -> str:
         return base_url
     except Exception as e:
         logger.warning(f"Error extracting base URL from {url}: {e}")
+        return ""
+
+def get_contact_url(url: str) -> str:
+    """
+    Extract the contact-us page URL from a given URL.
+    
+    Args:
+        url (str): Full URL
+        
+    Returns:
+        str: Contact-us page URL (protocol + domain + /contact-us/)
+    """
+    if not url:
+        return ""
+    
+    # Remove @ prefix if present
+    clean_url = url.lstrip('@')
+    
+    try:
+        parsed = urlparse(clean_url)
+        contact_url = f"{parsed.scheme}://{parsed.netloc}/contact-us/"
+        return contact_url
+    except Exception as e:
+        logger.warning(f"Error extracting contact URL from {url}: {e}")
         return ""
 
 async def check_url_accessibility(url: str, timeout: int = 5) -> bool:
@@ -108,7 +138,7 @@ def validate_and_fix_url(url: str, fallback_base: Optional[str] = None) -> str:
         fallback_base (str, optional): Base URL to fall back to
         
     Returns:
-        str: Valid URL or fallback base URL
+        str: Valid URL or fallback contact-us page URL
     """
     if not url:
         return fallback_base or ""
@@ -122,7 +152,13 @@ def validate_and_fix_url(url: str, fallback_base: Optional[str] = None) -> str:
     
     logger.warning(f"Invalid URL detected: {url}")
     
-    # Try to extract base URL as fallback
+    # Use contact-us page as primary fallback
+    contact_url = get_contact_url(clean_url)
+    if contact_url and is_valid_url(contact_url):
+        logger.info(f"Using contact-us page fallback: {contact_url}")
+        return contact_url
+    
+    # Try to extract base URL as secondary fallback
     base_url = get_base_url(clean_url)
     if base_url and is_valid_url(base_url):
         logger.info(f"Using base URL fallback: {base_url}")
@@ -133,14 +169,15 @@ def validate_and_fix_url(url: str, fallback_base: Optional[str] = None) -> str:
         logger.info(f"Using provided fallback: {fallback_base}")
         return fallback_base
     
-    # Last resort: return empty string
-    logger.warning(f"No valid fallback found for URL: {url}")
-    return ""
+    # Last resort: return contact-us page for the Medical Optics site
+    default_contact_url = "https://mornew.newsoftdemo.info/contact-us/"
+    logger.info(f"Using default contact-us fallback: {default_contact_url}")
+    return default_contact_url
 
 def clean_wordpress_url(site_url: str, post_name: str, post_id: int = None) -> str:
     """
     Create a clean WordPress URL from site URL and post name.
-    Handles corrupted post names with field IDs.
+    Handles corrupted post names with field IDs and invalid permalinks.
     
     Args:
         site_url (str): WordPress site base URL
@@ -148,10 +185,10 @@ def clean_wordpress_url(site_url: str, post_name: str, post_id: int = None) -> s
         post_id (int, optional): Post ID for fallback
         
     Returns:
-        str: Clean URL or base URL fallback
+        str: Clean URL or contact-us page fallback
     """
     if not site_url or not post_name:
-        return site_url or ""
+        return get_contact_url(site_url) if site_url else "https://mornew.newsoftdemo.info/contact-us/"
     
     # Ensure site_url has trailing slash
     if not site_url.endswith('/'):
@@ -167,12 +204,8 @@ def clean_wordpress_url(site_url: str, post_name: str, post_id: int = None) -> s
     for pattern in invalid_patterns:
         if re.search(pattern, post_name):
             logger.warning(f"Corrupted post_name detected: {post_name}")
-            # If we have a post ID, try using ?p=ID format
-            if post_id:
-                return f"{site_url}?p={post_id}"
-            else:
-                # Fall back to base URL
-                return site_url
+            # Fall back to contact-us page instead of ?p= URLs
+            return get_contact_url(site_url)
     
     # Construct normal URL
     try:
@@ -185,11 +218,11 @@ def clean_wordpress_url(site_url: str, post_name: str, post_id: int = None) -> s
             return full_url
         else:
             logger.warning(f"Constructed invalid URL: {full_url}")
-            return site_url
+            return get_contact_url(site_url)
             
     except Exception as e:
         logger.error(f"Error constructing URL for {post_name}: {e}")
-        return site_url
+        return get_contact_url(site_url)
 
 def batch_validate_urls(urls: list, fallback_base: Optional[str] = None) -> list:
     """
