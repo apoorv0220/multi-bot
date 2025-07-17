@@ -282,7 +282,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         context_texts = []
         sources = []
 
-        logger.info(f"Search results: {len(search_results)}")
+        logger.info(f"Search results: {search_results}")
         
         # Filter out low confidence results (less than 30%)
         filtered_results = [result for result in search_results if result.score >= 0.3]
