@@ -8,7 +8,7 @@ const ChatWidget = ({ apiUrl }) => {
   const [messages, setMessages] = useState([
     {
       id: 1,
-      text: 'Hello! I\'m your Medical Optics Assistant. How can I help you with eye care, vision health, or optical services today?',
+      text: 'Hello! I\'m Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?',
       isBot: true,
       timestamp: new Date(),
     },
@@ -79,12 +79,12 @@ const ChatWidget = ({ apiUrl }) => {
   };
 
   return (
-    <WidgetContainer>
-      <WidgetHeader>
-        <WidgetTitle>Medical Optics Assistant</WidgetTitle>
+    <WidgetContainer className="medicaloptics-chatbot-widget-container">
+      <WidgetHeader className="medicaloptics-chatbot-widget-header">
+        <WidgetTitle>Hello, I'm Eyelene</WidgetTitle>
       </WidgetHeader>
       
-      <MessageContainer>
+      <MessageContainer className="medicaloptics-chatbot-widget-message-container">
         {messages.map((message, index) => (
           <Message
             key={index}

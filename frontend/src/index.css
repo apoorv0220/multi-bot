@@ -47,3 +47,26 @@ code {
   opacity: 0 !important;
   visibility: hidden !important;
 } 
+
+/* @media (max-width:600px) {
+  .medicaloptics-chatbot-widget-container {
+    width: 300px !important;
+  }
+  .medicaloptics-chatbot-widget-header {
+    padding: 10px !important;
+  }
+  .medicaloptics-chatbot-widget-header h2 {
+    margin: 0px !important;
+    font-size: 1rem !important;
+  }
+  .medicaloptics-chatbot-widget-message-content {
+    padding: 8px 12px !important;
+  }
+  .medicaloptics-chatbot-widget-message-content p {
+    font-size: 14px !important;
+  }
+  #medicaloptics-chatbot-iframe {
+    right: 10px !important;
+    width: 300px !important;
+  }
+} */

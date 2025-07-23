@@ -3,9 +3,9 @@ from typing import Dict, Optional, Tuple, List
 
 # Expanded hardcoded responses for common queries
 GREETING_RESPONSES = {
-    "hi": "Hi, I'm your Medical Optics Assistant. How can I help you with eye care, vision health, or optical services today?",
-    "hello": "Hello! Welcome to Medical Optics. How can I assist you with your vision needs today?",
-    "hey": "Hey there! I'm your Medical Optics assistant. What can I help you with?",
+    "hi": "Hello! I'm Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?",
+    "hello": "Hello! I'm Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?",
+    "hey": "Hey there! I'm Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?",
     "good morning": "Good morning! How can Medical Optics assist you with your vision health today?",
     "good afternoon": "Good afternoon! What eye care questions can I help you with?",
     "good evening": "Good evening! How can I assist you with your vision needs tonight?",
