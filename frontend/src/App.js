@@ -4,7 +4,7 @@ import ChatWidget from './components/ChatWidget';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://mrnwebdesigns.softdemonew.info/api');
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://144.217.68.58:8043');
 
   const closeChat = () => {
     setIsOpen(false);

@@ -85,8 +85,8 @@
   <pre>&lt;script&gt;
   // Optional configuration
   window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-    baseUrl: 'https://mrnwebdesigns.softdemonew.info',       // URL where the chatbot widget is hosted
-    apiUrl: 'https://mrnwebdesigns.softdemonew.info/api',       // URL of the backend API
+    baseUrl: 'http://144.217.68.58:3043',       // URL where the chatbot widget is hosted
+    apiUrl: 'http://144.217.68.58:8043',       // URL of the backend API
     primaryColor: '#bf362e',                    // Chatbot theme color  
     position: 'bottom-right'                    // Position on page (bottom-right, bottom-left)
   };
@@ -132,7 +132,7 @@
         buttonElement.disabled = true;
         
         // Get API URL from configuration
-        const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG.apiUrl || 'https://mrnwebdesigns.softdemonew.info/api';
+        const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG.apiUrl || 'http://144.217.68.58:8043';
         
         // Call the reindex API endpoint
         fetch(`${apiUrl}/api/reindex`, {
@@ -180,8 +180,8 @@
   <script>
     // Optional configuration
     window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-      baseUrl: 'https://mrnwebdesigns.softdemonew.info',
-      apiUrl: 'https://mrnwebdesigns.softdemonew.info/api',
+      baseUrl: 'http://144.217.68.58:3043',
+      apiUrl: 'http://144.217.68.58:8043',
       primaryColor: '#bf362e',
       position: 'bottom-right'
     };
