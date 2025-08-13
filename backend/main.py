@@ -257,10 +257,10 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         if fuzzy_response:
             logger.info(f"Fuzzy match found for query: {request.message}")
             return {
-                "response": fuzzy_response,
-                "source": "fuzzy_match",
-                "confidence": 1.0,
-                "sources": []
+                "response": fuzzy_response["response"],
+                "source": fuzzy_response["source"],
+                "confidence": fuzzy_response["confidence"],
+                "sources": fuzzy_response["sources"]
             }
         
         # If no fuzzy match, proceed with vector search
