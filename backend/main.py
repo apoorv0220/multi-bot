@@ -198,6 +198,56 @@ def truncate_text_for_context(text, max_chars=3000):
     end_portion = max_chars - begin_portion
     return text[:begin_portion] + "\n...[content truncated]...\n" + text[-end_portion:]
 
+# Helper function to preprocess and enhance query using OpenAI
+async def preprocess_query(original_query: str) -> str:
+    """
+    Use OpenAI to normalize and enhance queries for better search results.
+    Converts questions like "your office address" to "MRN Web Designs office address".
+    """
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": """You are a query preprocessor for MRN Web Designs chatbot. Your job is to normalize and enhance user queries to make them more searchable in a knowledge base.
+
+Rules:
+1. Replace pronouns like "your", "you", "yours" with "MRN Web Designs"
+2. Add relevant keywords that would help find information
+3. Expand abbreviations and make queries more specific
+4. Keep the original intent and meaning
+5. Output only the enhanced query, nothing else
+
+Examples:
+- "your office address" → "MRN Web Designs office address location contact information"
+- "what services do you offer" → "MRN Web Designs services web design development SEO digital marketing"
+- "your pricing" → "MRN Web Designs pricing cost website development packages"
+- "do you work with small businesses" → "MRN Web Designs small business services web design"
+- "your experience" → "MRN Web Designs experience portfolio company background"
+- "how can you help me" → "MRN Web Designs services help assistance web design digital marketing"
+- "your phone number" → "MRN Web Designs phone number contact telephone call"
+- "what is your contact number" → "MRN Web Designs contact phone number telephone"
+- "how to reach you" → "MRN Web Designs contact phone address reach"
+"""
+                },
+                {
+                    "role": "user", 
+                    "content": f"Original query: {original_query}"
+                }
+            ],
+            max_tokens=100,
+            temperature=0.1  # Low temperature for consistent results
+        )
+        
+        enhanced_query = response.choices[0].message.content.strip()
+        logger.info(f"Query enhanced: '{original_query}' → '{enhanced_query}'")
+        return enhanced_query
+        
+    except Exception as e:
+        logger.warning(f"Query preprocessing failed: {e}. Using original query.")
+        return original_query
+
 # Helper function to generate AI answer
 async def generate_answer(query: str, context_texts: List[str]) -> str:
     try:
@@ -273,8 +323,11 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
                 "sources": []
             }
 
-        # Generate embedding for the query
-        embedding = await generate_embedding(request.message)
+        # Preprocess and enhance the query for better search results
+        enhanced_query = await preprocess_query(request.message)
+        
+        # Generate embedding for the enhanced query
+        embedding = await generate_embedding(enhanced_query)
         
         # Search in Qdrant
         search_results = await search_qdrant(embedding, request.max_results)

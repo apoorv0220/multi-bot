@@ -92,9 +92,16 @@ SIMPLE_RESPONSES = {
     "free": "We offer free consultations to discuss your web design and digital marketing needs. Would you like to schedule one?",
     "quote": "I'd be happy to help you get a custom quote! Could you tell me more about your project requirements and goals?",
     "estimate": "For an accurate estimate, we'd need to understand your specific needs. What type of website or marketing services are you looking for?",
-    "contact": "You can contact MRN Web Designs through our website contact form, by phone, or email. How would you prefer to get in touch?",
-    "location": "MRN Web Designs serves clients nationwide. Where is your business located?",
-    "hours": "Our team is available during standard business hours, but we're flexible for client needs. When would be the best time to discuss your project?",
+    "contact": "You can contact MRN Web Designs at (919) 324-1563, through our website contact form, or email. How would you prefer to get in touch?",
+    "phone": "You can reach MRN Web Designs at (919) 324-1563. We're available during business hours and flexible for client needs.",
+    "phone number": "Our phone number is (919) 324-1563. Feel free to call us to discuss your web design and digital marketing needs!",
+    "call": "Please call us at (919) 324-1563. We'd love to discuss your project requirements!",
+    "telephone": "Our telephone number is (919) 324-1563. We're here to help with your web design and digital marketing needs.",
+    "number": "You can reach us at (919) 324-1563 for any questions about web design, development, or digital marketing services.",
+    "location": "MRN Web Designs is located at 401 Harrison Oaks Boulevard, Suite 230, Cary, North Carolina 27513. We also serve clients nationwide.",
+    "address": "Our office is located at 401 Harrison Oaks Boulevard, Suite 230, Cary, North Carolina 27513. You can also call us at (919) 324-1563.",
+    "office": "Our office is at 401 Harrison Oaks Boulevard, Suite 230, Cary, North Carolina 27513. Phone: (919) 324-1563.",
+    "hours": "Our team is available during standard business hours, but we're flexible for client needs. Call us at (919) 324-1563 to schedule a consultation.",
 }
 
 EMERGENCY_RESPONSES = {
