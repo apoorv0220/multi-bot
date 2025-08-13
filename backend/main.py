@@ -95,7 +95,7 @@ import embedder as embedder_module
 embedder_module.qdrant_client = qdrant_client
 
 # Initialize fuzzy matcher
-fuzzy_matcher = FuzzyMatcher(threshold=80)
+fuzzy_matcher = FuzzyMatcher()
 
 # Define request models
 class QueryRequest(BaseModel):

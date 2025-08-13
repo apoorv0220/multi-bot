@@ -1,7 +1,7 @@
 (function() {
   // Configuration - set this to your actual deployed URL in production
-  const widgetUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3023';
-  const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8023';
+  const widgetUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3043';
+  const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8043';
   const primaryColor = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.primaryColor || '#bf362e';
   
   // Create iframe for the widget

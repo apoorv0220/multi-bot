@@ -77,7 +77,7 @@ const ChatWidget = ({ apiUrl }) => {
   return (
     <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
       <WidgetHeader className="mrnwebdesigns-chatbot-widget-header">
-        <WidgetTitle>Hello, I'm Eyelene</WidgetTitle>
+        <WidgetTitle>MRN Web Designs Assistant</WidgetTitle>
       </WidgetHeader>
       
       <MessageContainer className="mrnwebdesigns-chatbot-widget-message-container">
