@@ -1,5 +1,5 @@
 """
-URL validation and fallback utilities for Medical Optics chatbot.
+URL validation and fallback utilities for MRN Web Designs chatbot.
 Handles invalid URLs by falling back to contact-us page.
 """
 
@@ -169,8 +169,8 @@ def validate_and_fix_url(url: str, fallback_base: Optional[str] = None) -> str:
         logger.info(f"Using provided fallback: {fallback_base}")
         return fallback_base
     
-    # Last resort: return contact-us page for the Medical Optics site
-    default_contact_url = "https://mornew.newsoftdemo.info/contact-us/"
+    # Last resort: return contact-us page for the MRN Web Designs site
+    default_contact_url = "https://mrnwebdesigns.com/contact-us/"
     logger.info(f"Using default contact-us fallback: {default_contact_url}")
     return default_contact_url
 
@@ -188,7 +188,7 @@ def clean_wordpress_url(site_url: str, post_name: str, post_id: int = None) -> s
         str: Clean URL or contact-us page fallback
     """
     if not site_url or not post_name:
-        return get_contact_url(site_url) if site_url else "https://mornew.newsoftdemo.info/contact-us/"
+        return get_contact_url(site_url) if site_url else "https://mrnwebdesigns.com/contact-us/"
     
     # Ensure site_url has trailing slash
     if not site_url.endswith('/'):

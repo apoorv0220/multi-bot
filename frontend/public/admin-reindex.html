@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Medical Optics - Reindexing Admin</title>
+    <title>MRN Web Designs - Reindexing Admin</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -112,15 +112,15 @@
 </head>
 <body>
     <div class="container">
-        <h1>🏥 Medical Optics - Reindexing Administration</h1>
+        <h1>🌐 MRN Web Designs - Reindexing Administration</h1>
         
         <!-- API Configuration -->
         <div class="api-config">
             <strong>🔧 API Configuration:</strong><br>
-            Backend URL: <input type="text" id="apiBaseUrl" value="http://localhost:8033" placeholder="http://your-server.com:8033">
+            Backend URL: <input type="text" id="apiBaseUrl" value="http://localhost:8043" placeholder="http://your-server.com:8043">
             <button onclick="updateApiBase()" style="padding: 5px 10px; font-size: 12px;">Update</button>
             <div style="margin-top: 5px; font-size: 12px; color: #666;">
-                For production: Use your server's URL (e.g., http://your-domain.com:8033)
+                For production: Use your server's URL (e.g., http://your-domain.com:8043)
             </div>
         </div>
         
@@ -161,19 +161,19 @@
 
     <script>
         // Default API base - will be updated based on environment
-        let API_BASE = 'http://localhost:8033';
+        let API_BASE = 'http://localhost:8043';
         
         // Auto-detect API base URL on page load
         function initializeApiBase() {
             const currentHost = window.location.hostname;
             const currentProtocol = window.location.protocol;
             
-            // For development (localhost:3033 -> localhost:8033)
+            // For development (localhost:3043 -> localhost:8043)
             if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
-                API_BASE = `${currentProtocol}//${currentHost}:8033`;
+                API_BASE = `${currentProtocol}//${currentHost}:8043`;
             } else {
-                // For production, assume backend is on same host but port 8033
-                API_BASE = `${currentProtocol}//${currentHost}:8033`;
+                // For production, assume backend is on same host but port 8043
+                API_BASE = `${currentProtocol}//${currentHost}:8043`;
             }
             
             document.getElementById('apiBaseUrl').value = API_BASE;

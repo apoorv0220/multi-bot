@@ -18,7 +18,7 @@ const Message = ({ type, text, timestamp, sources = [], isError, source }) => {
 
   return (
     <MessageContainer isError={isError} type={type}>
-      <MessageContent isError={isError} type={type} className="medicaloptics-chatbot-widget-message-content">
+      <MessageContent isError={isError} type={type} className="mrnwebdesigns-chatbot-widget-message-content">
         <ReactMarkdown>{text}</ReactMarkdown>
         {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
           <ReadMoreButton 
@@ -30,7 +30,7 @@ const Message = ({ type, text, timestamp, sources = [], isError, source }) => {
           </ReadMoreButton>
         )}
       </MessageContent>
-      <MessageTime type={type} className="medicaloptics-chatbot-widget-message-time">{formatTime(timestamp)}</MessageTime>
+      <MessageTime type={type} className="mrnwebdesigns-chatbot-widget-message-time">{formatTime(timestamp)}</MessageTime>
     </MessageContainer>
   );
 };

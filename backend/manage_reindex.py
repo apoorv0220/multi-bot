@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Management script for Medical Optics reindexing operations.
+Management script for MRN Web Designs reindexing operations.
 This script provides command-line interface to monitor and control reindexing jobs.
 """
 
@@ -18,7 +18,7 @@ load_dotenv()
 
 class ReindexManager:
     def __init__(self, api_url: str = None):
-        self.api_url = api_url or f"http://localhost:{os.getenv('API_PORT', 8033)}"
+        self.api_url = api_url or f"http://localhost:{os.getenv('API_PORT', 8043)}"
         
     async def start_reindex(self, force_restart: bool = False, chunk_size: int = None, batch_size: int = None):
         """Start a new reindexing job"""
@@ -214,8 +214,8 @@ class ReindexManager:
             return f"{hours:.1f}h"
 
 async def main():
-    parser = argparse.ArgumentParser(description="Medical Optics Reindexing Manager")
-    parser.add_argument("--api-url", help="API URL (default: http://localhost:8033)")
+    parser = argparse.ArgumentParser(description="MRN Web Designs Reindexing Manager")
+    parser.add_argument("--api-url", help="API URL (default: http://localhost:8043)")
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     

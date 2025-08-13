@@ -26,7 +26,7 @@ logging.basicConfig(
         logging.FileHandler("app.log")
     ]
 )
-logger = logging.getLogger("medicaloptics-chatbot")
+logger = logging.getLogger("mrnwebdesigns-chatbot")
 
 # Local imports - use relative imports
 try:
@@ -41,8 +41,8 @@ except ImportError:
 load_dotenv()
 
 # Initialize FastAPI app
-app = FastAPI(title="Medical Optics AI Chatbot API",
-              description="API for AI-powered search across Medical Optics content")
+app = FastAPI(title="MRN Web Designs AI Chatbot API",
+              description="API for AI-powered search across MRN Web Designs content")
 
 # Configure CORS
 app.add_middleware(
@@ -63,9 +63,9 @@ logger.info(f"OpenAI API key configured: {openai.api_key[:5]}...{openai.api_key[
 qdrant_client = None
 try:
     # Define Qdrant connection parameters from environment or use defaults
-    QDRANT_HOST = os.getenv("QDRANT_HOST", "medicaloptics-qdrant")
+    QDRANT_HOST = os.getenv("QDRANT_HOST", "mrnwebdesigns-qdrant")
     QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
-    COLLECTION_NAME = os.getenv("COLLECTION_NAME", "medicaloptics_content")
+    COLLECTION_NAME = os.getenv("COLLECTION_NAME", "mrnwebdesigns_content")
     logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
     qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     # Check if collection exists, create if not
@@ -142,8 +142,8 @@ async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
         raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
     
     try:
-        # First try to search in Medical Optics content (prioritized)
-        medicaloptics_results = qdrant_client.search(
+        # First try to search in MRN Web Designs content (prioritized)
+        mrnwebdesigns_results = qdrant_client.search(
             collection_name=COLLECTION_NAME,
             query_vector=embedding,
             limit=limit,
@@ -152,16 +152,16 @@ async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
                 must=[
                     models.FieldCondition(
                         key="source_type",
-                        match=models.MatchValue(value="medicaloptics_ie")
+                        match=models.MatchValue(value="mrnwebdesigns_ie")
                     )
                 ]
             )
         )
         
-        logger.info(f"Found {len(medicaloptics_results)} medicaloptics.ie results")
+        logger.info(f"Found {len(mrnwebdesigns_results)} mrnwebdesigns.com results")
         
-        # If we don't have enough results from Medical Optics, search external sources
-        if len(medicaloptics_results) < limit or max([r.score for r in medicaloptics_results] + [0]) < 0.7:
+        # If we don't have enough results from MRN Web Designs, search external sources
+        if len(mrnwebdesigns_results) < limit or max([r.score for r in mrnwebdesigns_results] + [0]) < 0.7:
             external_results = qdrant_client.search(
                 collection_name=COLLECTION_NAME,
                 query_vector=embedding,
@@ -177,12 +177,12 @@ async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
             )
             
             # Combine and sort results
-            all_results = medicaloptics_results + external_results
+            all_results = mrnwebdesigns_results + external_results
             all_results.sort(key=lambda x: x.score, reverse=True)
             logger.info(f"Added {len(external_results)} external results, total: {len(all_results)}")
             return all_results[:limit]
         
-        return medicaloptics_results
+        return mrnwebdesigns_results
     except Exception as e:
         logger.error(f"Error searching Qdrant: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to search knowledge base: {e}")
@@ -234,7 +234,7 @@ async def generate_answer(query: str, context_texts: List[str]) -> str:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant specialized in ophthalmology and eye care. Your role is to format information found in the context to provide accurate, helpful, and professional information about eye health, vision care, optical services, and eye treatments. Present this information as if it's directly from Medical Optics, a state-of-the-art ophthalmology practice offering top-notch facilities for vision health. Focus on eye care knowledge, treatment options, diagnostic procedures, and helping patients understand their vision health needs."},
+                {"role": "system", "content": "You are a helpful assistant specialized in web design and digital marketing. Your role is to format information found in the context to provide accurate, helpful, and professional information about website design, development, maintenance, SEO, paid search, and social media marketing. Present this information as if it's directly from MRN Web Designs, a custom web design and digital marketing agency. Focus on helping businesses stand out from the competition by creating digital experiences that boost visibility and drive engagement. Always emphasize custom solutions over templates or cookie-cutter approaches."},
                 {"role": "user", "content": f"Question: {query}\n\nContext: {context}"}
             ]
         )
@@ -293,7 +293,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         if not filtered_results:
             logger.info("No high-confidence results found. Returning empty response.")
             return ChatResponse(
-                response="I apologize, but I couldn't find specific information about that in our Medical Optics knowledge base. Please rephrase or ask about eye care, vision health, optical services, or other vision-related topics.",
+                response="I apologize, but I couldn't find specific information about that in our MRN Web Designs knowledge base. Please rephrase or ask about website design, development, SEO, digital marketing, or other web design-related topics.",
                 source="vector_search",
                 confidence=0.0,
                 sources=[]
@@ -335,7 +335,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         if not sources:
             logger.warning("All sources filtered out due to invalid URLs")
             return ChatResponse(
-                response="I found some relevant information, but the source links are currently unavailable. Please contact Medical Optics directly for more details about eye care and vision health services.",
+                response="I found some relevant information, but the source links are currently unavailable. Please contact MRN Web Designs directly for more details about web design and digital marketing services.",
                 source="vector_search",
                 confidence=filtered_results[0].score if filtered_results else 0.0,
                 sources=[]
@@ -713,6 +713,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app", 
         host=os.getenv("API_HOST", "0.0.0.0"), 
-        port=int(os.getenv("API_PORT", 8033)),
+        port=int(os.getenv("API_PORT", 8043)),
         reload=False
     ) 

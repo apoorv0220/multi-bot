@@ -39,7 +39,7 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Define Qdrant connection parameters from environment or use defaults
-QDRANT_HOST = os.getenv("QDRANT_HOST", "medicaloptics-qdrant")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "mrnwebdesigns-qdrant")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 
 # Create a shared QdrantClient instance - will be set by main.py
@@ -80,7 +80,7 @@ class Embedder:
             self._connect_to_qdrant()
         
         # Collection name for Qdrant
-        self.collection_name = os.getenv("COLLECTION_NAME", "medicaloptics_content")
+        self.collection_name = os.getenv("COLLECTION_NAME", "mrnwebdesigns_content")
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -281,8 +281,8 @@ class Embedder:
                             "url": post['url'],
                             "type": post['type'],
                             "date": str(post['date']),
-                            "source": "Medical Optics",
-                            "source_type": "medicaloptics_ie"  # Used for filtering
+                            "source": "MRN Web Designs",
+                            "source_type": "mrnwebdesigns_ie"  # Used for filtering
                         }
                         
                         # Create point with UUID format
@@ -357,7 +357,7 @@ class Embedder:
                             must=[
                                 models.FieldCondition(
                                     key="source_type",
-                                    match=models.MatchValue(value="medicaloptics_ie")
+                                    match=models.MatchValue(value="mrnwebdesigns_ie")
                                 )
                             ]
                         )
@@ -557,7 +557,7 @@ class Embedder:
 async def test_embedder():
     """Test the Embedder class by connecting to the local Qdrant server and testing a simple embedding"""
     embedder = Embedder()
-    test_text = "This is a test of the embedding system for Medical Optics"
+    test_text = "This is a test of the embedding system for MRN Web Designs"
     embedding = await embedder.generate_embedding(test_text)
     
     if embedding:

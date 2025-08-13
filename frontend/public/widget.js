@@ -1,13 +1,13 @@
 (function() {
   // Configuration - set this to your actual deployed URL in production
-  const widgetUrl = window.MEDICALOPTICS_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3023';
-  const apiUrl = window.MEDICALOPTICS_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8023';
-  const primaryColor = window.MEDICALOPTICS_CHATBOT_CONFIG?.primaryColor || '#017764';
+  const widgetUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3023';
+  const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8023';
+  const primaryColor = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.primaryColor || '#bf362e';
   
   // Create iframe for the widget
   function createChatbotIframe() {
     const iframe = document.createElement('iframe');
-    iframe.id = 'medicaloptics-chatbot-iframe';
+    iframe.id = 'mrnwebdesigns-chatbot-iframe';
     iframe.src = widgetUrl;
     iframe.style.position = 'fixed';
     iframe.style.bottom = '90px';
@@ -39,7 +39,7 @@
   // Create toggle button
   function createToggleButton() {
     const button = document.createElement('button');
-    button.id = 'medicaloptics-chatbot-toggle';
+    button.id = 'mrnwebdesigns-chatbot-toggle';
     button.innerHTML = `
       <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -67,8 +67,8 @@
   
   // Toggle chatbot visibility
   function toggleChatbot() {
-    const iframe = document.getElementById('medicaloptics-chatbot-iframe');
-    const button = document.getElementById('medicaloptics-chatbot-toggle');
+    const iframe = document.getElementById('mrnwebdesigns-chatbot-iframe');
+    const button = document.getElementById('mrnwebdesigns-chatbot-toggle');
     
     if (iframe.style.display === 'none') {
       // Show iframe with transition
@@ -96,8 +96,8 @@
   
   // Function to close the chat
   function closeChat() {
-    const iframe = document.getElementById('medicaloptics-chatbot-iframe');
-    const button = document.getElementById('medicaloptics-chatbot-toggle');
+    const iframe = document.getElementById('mrnwebdesigns-chatbot-iframe');
+    const button = document.getElementById('mrnwebdesigns-chatbot-toggle');
     
     // Hide with transition
     iframe.style.opacity = '0';
@@ -127,7 +127,7 @@
   // Initialize widget
   function initWidget() {
     // Check if widget already exists
-    if (document.getElementById('medicaloptics-chatbot-iframe')) {
+    if (document.getElementById('mrnwebdesigns-chatbot-iframe')) {
       return;
     }
     

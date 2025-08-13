@@ -8,14 +8,13 @@ const ChatWidget = ({ apiUrl }) => {
   const [messages, setMessages] = useState([
     {
       id: 1,
-      text: 'Hello! I\'m Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?',
+      text: 'Hello! I\'m your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?',
       isBot: true,
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -42,7 +41,6 @@ const ChatWidget = ({ apiUrl }) => {
     setMessages((prevMessages) => [...prevMessages, userMessage]);
     setInput('');
     setIsLoading(true);
-    setError(null);
 
     try {
       // Call API with the new chat endpoint
@@ -63,8 +61,6 @@ const ChatWidget = ({ apiUrl }) => {
       setMessages((prevMessages) => [...prevMessages, botMessage]);
     } catch (err) {
       console.error('Error querying API:', err);
-      setError('Sorry, I had trouble getting your answer. Please try again later.');
-      
       // Add error message
       const errorMessage = {
         type: 'bot',
@@ -79,12 +75,12 @@ const ChatWidget = ({ apiUrl }) => {
   };
 
   return (
-    <WidgetContainer className="medicaloptics-chatbot-widget-container">
-      <WidgetHeader className="medicaloptics-chatbot-widget-header">
+    <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
+      <WidgetHeader className="mrnwebdesigns-chatbot-widget-header">
         <WidgetTitle>Hello, I'm Eyelene</WidgetTitle>
       </WidgetHeader>
       
-      <MessageContainer className="medicaloptics-chatbot-widget-message-container">
+      <MessageContainer className="mrnwebdesigns-chatbot-widget-message-container">
         {messages.map((message, index) => (
           <Message
             key={index}
@@ -143,26 +139,13 @@ const WidgetHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  background: #017764;
+  background: #bf362e;
   color: white;
 `;
 
 const WidgetTitle = styled.h2`
   margin: 0;
   font-size: 1.2rem;
-`;
-
-const CloseButton = styled.button`
-  background: none;
-  border: none;
-  color: white;
-  cursor: pointer;
-  font-size: 1.2rem;
-  padding: 5px;
-  
-  &:hover {
-    opacity: 0.8;
-  }
 `;
 
 const MessageContainer = styled.div`
@@ -189,12 +172,12 @@ const Input = styled.input`
   outline: none;
   
   &:focus {
-    border-color: #017764;
+    border-color: #bf362e;
   }
 `;
 
 const SendButton = styled.button`
-  background: #017764;
+  background: #bf362e;
   color: white;
   border: none;
   border-radius: 50%;

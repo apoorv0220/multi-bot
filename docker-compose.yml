@@ -2,15 +2,15 @@ version: '3.8'
 
 services:
   # Qdrant vector database (start first)
-  medicaloptics-qdrant:
+  mrnwebdesigns-qdrant:
     image: qdrant/qdrant:latest
     ports:
-      - "6033:6333"
-      - "6034:6334"
+      - "6043:6333"
+      - "6044:6334"
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
-      - medicaloptics-net
+      - mrnwebdesigns-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
@@ -19,47 +19,47 @@ services:
       retries: 3
 
   # Backend API service (no volume conflicts)
-  medicaloptics-backend:
+  mrnwebdesigns-backend:
     build:
       context: .
       dockerfile: ./backend/Dockerfile
     ports:
-      - "8033:8033"
+      - "8043:8043"
     depends_on:
-      - medicaloptics-qdrant
+      - mrnwebdesigns-qdrant
     env_file:
       - ./backend/.env
     environment:
-      - QDRANT_HOST=medicaloptics-qdrant
+      - QDRANT_HOST=mrnwebdesigns-qdrant
       - QDRANT_PORT=6333
       - ENVIRONMENT=production
     networks:
-      - medicaloptics-net
+      - mrnwebdesigns-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8033/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8043/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
   # Frontend service
-  medicaloptics-frontend:
+  mrnwebdesigns-frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "3033:3033"
+      - "3043:3043"
     depends_on:
-      - medicaloptics-backend
+      - mrnwebdesigns-backend
     environment:
-      - REACT_APP_API_URL=http://localhost:8033/api
+      - REACT_APP_API_URL=http://localhost:8043/api
     networks:
-      - medicaloptics-net
+      - mrnwebdesigns-net
     restart: unless-stopped
 
 networks:
-  medicaloptics-net:
+  mrnwebdesigns-net:
     driver: bridge
 
 volumes:

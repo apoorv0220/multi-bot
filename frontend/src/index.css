@@ -14,9 +14,9 @@ code {
 
 /* Global styles for the chatbot widget */
 :root {
-  --primary-color: #017764;
-  --primary-dark: #017764;
-  --secondary-color: #c1e7e0;
+  --primary-color: #bf362e;
+  --primary-dark: #bf362e;
+  --secondary-color: #d5bbb9;
   --text-color: #333;
   --light-text: #777;
   --error-color: #e74c3c;
@@ -30,7 +30,7 @@ code {
 }
 
 /* Ensure the widget is only visible when included in another site */
-#medicaloptics-chatbot-widget {
+#mrnwebdesigns-chatbot-widget {
   position: fixed;
   z-index: 999999;
   transition: all 0.3s ease;
@@ -46,27 +46,4 @@ code {
   display: none !important;
   opacity: 0 !important;
   visibility: hidden !important;
-} 
-
-/* @media (max-width:600px) {
-  .medicaloptics-chatbot-widget-container {
-    width: 300px !important;
-  }
-  .medicaloptics-chatbot-widget-header {
-    padding: 10px !important;
-  }
-  .medicaloptics-chatbot-widget-header h2 {
-    margin: 0px !important;
-    font-size: 1rem !important;
-  }
-  .medicaloptics-chatbot-widget-message-content {
-    padding: 8px 12px !important;
-  }
-  .medicaloptics-chatbot-widget-message-content p {
-    font-size: 14px !important;
-  }
-  #medicaloptics-chatbot-iframe {
-    right: 10px !important;
-    width: 300px !important;
-  }
-} */
+}

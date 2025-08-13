@@ -1,11 +1,11 @@
-# 👁️ Medical Optics AI Chatbot
+# 🌐 MRN Web Designs AI Chatbot
 
-An intelligent AI chatbot for Medical Optics - a state-of-the-art ophthalmology practice offering patients top-notch facilities designed to provide the highest level of care for their vision health. This chatbot helps patients with eye care questions, appointment scheduling, and understanding medical procedures.
+An intelligent AI chatbot for MRN Web Designs - offering custom web design and digital marketing services to help businesses stand out from the competition by creating digital experiences that boost visibility and drive engagement. This chatbot helps clients with website design questions, digital marketing strategies, and understanding our custom solutions.
 
 ## 🚀 Features
 
-- 🤖 **AI-powered assistance** for tiles, flooring, and home improvement
-- 🔍 **Smart search** across Medical Optics content
+- 🤖 **AI-powered assistance** for web design, development, and digital marketing
+- 🔍 **Smart search** across MRN Web Designs content
 - 📱 **Embeddable widget** for any website
 - 🏗️ **WordPress integration** ready
 - 🐳 **Docker containerized** for easy deployment
@@ -44,9 +44,9 @@ WORDPRESS_URL_TABLE=wp_custom_urls
 WORDPRESS_TABLE_PREFIX=wp_
 
 # Qdrant Configuration
-QDRANT_HOST=medicaloptics-qdrant
+QDRANT_HOST=mrnwebdesigns-qdrant
 QDRANT_PORT=6333  # Internal Docker port (always 6333)
-COLLECTION_NAME=medicaloptics_content
+COLLECTION_NAME=mrnwebdesigns_content
 
 # Environment
 ENVIRONMENT=production
@@ -65,20 +65,20 @@ docker-compose logs -f
 ```
 
 ### 4. Verify Installation
-- **Frontend**: Open http://localhost:3033
-- **Backend API**: Open http://localhost:8033/docs
-- **Qdrant Health**: `curl http://localhost:6033/health`
+- **Frontend**: Open http://localhost:3043
+- **Backend API**: Open http://localhost:8043/docs
+- **Qdrant Health**: `curl http://localhost:6043/health`
 
 ### 5. Initialize Content (Optional)
 ```bash
 # Sync WordPress content if database is configured
-curl -X POST http://localhost:8033/api/reindex
+curl -X POST http://localhost:8043/api/reindex
 ```
 
 ## 🌐 Using the Chatbot
 
 ### Standalone Widget
-Access the chatbot directly at: http://localhost:3033
+Access the chatbot directly at: http://localhost:3043
 
 
 ## 🛠️ Development
@@ -100,9 +100,9 @@ docker-compose up --build -d
 docker-compose logs -f
 
 # Specific service
-docker-compose logs -f medicaloptics-backend
-docker-compose logs -f medicaloptics-frontend
-docker-compose logs -f medicaloptics-qdrant
+docker-compose logs -f mrnwebdesigns-backend
+docker-compose logs -f mrnwebdesigns-frontend
+docker-compose logs -f mrnwebdesigns-qdrant
 ```
 
 ## 📁 Project Structure
@@ -136,14 +136,14 @@ ai_chatbot/
 | `WORDPRESS_TABLE_PREFIX` | WordPress table prefix | `wp_` |
 | `QDRANT_HOST` | Qdrant database host | `qdrant` |
 | `QDRANT_PORT` | Qdrant database port (internal) | `6333` |
-| `COLLECTION_NAME` | Vector collection name | `medicaloptics_content` |
+| `COLLECTION_NAME` | Vector collection name | `mrnwebdesigns_content` |
 
 ### Ports
 | Service | Port | Description |
 |---------|------|-------------|
-| Frontend | 3033 | React chatbot widget |
-| Backend | 8033 | FastAPI server |
-| Qdrant | 6033 | Vector database |
+| Frontend | 3043 | React chatbot widget |
+| Backend | 8043 | FastAPI server |
+| Qdrant | 6043 | Vector database |
 
 ## 🔧 Troubleshooting
 
@@ -152,13 +152,13 @@ ai_chatbot/
 If you're running multiple projects with Qdrant, you have two options:
 
 #### 🔍 **Understanding Docker Port Mapping**
-Our configuration uses: `6033:6333`
-- **External access** (from host machine): `localhost:6033`
-- **Internal Docker communication**: `medicaloptics-qdrant:6333`
+Our configuration uses: `6043:6333`
+- **External access** (from host machine): `localhost:6043`
+- **Internal Docker communication**: `mrnwebdesigns-qdrant:6333`
 - **Why:** Qdrant always runs on port 6333 inside containers, we just map it externally
 
 #### Option 1: Separate Qdrant Instances (Current Setup)
-- Medical Optics uses port `6033` externally (maps to internal `6333`)
+- MRN Web Designs uses port `6043` externally (maps to internal `6333`)
 - Complete isolation between projects
 
 #### Option 2: Shared Qdrant Instance (Alternative)
@@ -167,9 +167,9 @@ To use the same Qdrant instance (port 6333) for both projects:
 1. **Remove the Qdrant service** from this docker-compose.yml
 2. **Update environment variables:**
    ```env
-   QDRANT_HOST=medicaloptics-qdrant
+   QDRANT_HOST=mrnwebdesigns-qdrant
    QDRANT_PORT=6333
-   COLLECTION_NAME=medicaloptics_content  # Different collection name
+   COLLECTION_NAME=mrnwebdesigns_content  # Different collection name
    ```
 3. **Benefits:** Resource efficient, single Qdrant management
 4. **Note:** Both projects share the same Qdrant but use different collections
@@ -180,7 +180,7 @@ To use the same Qdrant instance (port 6333) for both projects:
 docker --version
 
 # Check ports aren't in use
-netstat -tlnp | grep -E '(3033|8033|6033)'
+netstat -tlnp | grep -E '(3043|8043|6043)'
 
 # Reset everything
 docker-compose down -v
@@ -188,24 +188,24 @@ docker-compose up --build -d
 ```
 
 ### API Connection Issues
-1. Verify backend is running: `curl http://localhost:8033/health`
+1. Verify backend is running: `curl http://localhost:8043/health`
 2. Check environment variables in `backend/.env`
-3. View backend logs: `docker-compose logs medicaloptics-backend`
+3. View backend logs: `docker-compose logs mrnwebdesigns-backend`
 
 ### No Chat Responses
 1. Ensure `OPENAI_API_KEY` is set correctly
-2. Check Qdrant is healthy: `curl http://localhost:6033/health`
-3. Initialize content: `curl -X POST http://localhost:8033/api/reindex`
+2. Check Qdrant is healthy: `curl http://localhost:6043/health`
+3. Initialize content: `curl -X POST http://localhost:8043/api/reindex`
 
 ## 📚 API Documentation
 
-When the backend is running, visit http://localhost:8033/docs for interactive API documentation.
+When the backend is running, visit http://localhost:8043/docs for interactive API documentation.
 
 ## 🏭 Production Deployment
 
 For production deployment:
 1. Update domain names in environment files
 2. Use proper SSL certificates
-3. Configure firewalls for ports 3033, 8033
+3. Configure firewalls for ports 3043, 8043
 4. Set up monitoring and backups for Qdrant data
 5. Use production-grade OpenAI API limits

@@ -1,6 +1,6 @@
 {
-  "short_name": "Medical Optics Chat",
-  "name": "Medical Optics AI Chatbot",
+  "short_name": "MRN Web Designs Chat",
+  "name": "MRN Web Designs AI Chatbot",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,6 +20,6 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#017764",
+  "theme_color": "#bf362e",
   "background_color": "#ffffff"
 } 

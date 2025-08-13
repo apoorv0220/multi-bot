@@ -3,107 +3,119 @@ from typing import Dict, Optional, Tuple, List
 
 # Expanded hardcoded responses for common queries
 GREETING_RESPONSES = {
-    "hi": "Hello! I'm Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?",
-    "hello": "Hello! I'm Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?",
-    "hey": "Hey there! I'm Eyelene, your Medical Optics Assistant. How can I help you today with eye care, vision health, or our optical services?",
-    "good morning": "Good morning! How can Medical Optics assist you with your vision health today?",
-    "good afternoon": "Good afternoon! What eye care questions can I help you with?",
-    "good evening": "Good evening! How can I assist you with your vision needs tonight?",
-    "how are you": "I'm functioning well and ready to help with your eye care and vision health questions!",
-    "hello how are you": "I'm functioning well and ready to help with your eye care and vision health questions!",
-    "how are you doing": "I'm doing great and ready to assist with your optical service queries!",
-    "what's up": "I'm here to help with eye care, vision health, and optical service information. What would you like to know?",
-    "how's it going": "I'm doing well and ready to assist with your eye care and vision health queries!",
-    "how have you been": "I'm functioning well and ready to help with your optical service questions!",
-    "what's new": "I'm here to help with eye care, vision health, and optical service information. What would you like to know?",
-    "how's your day": "I'm having a good day and ready to help with your eye care and vision health questions!",
-    "how's everything": "Everything is working well! How can I help with your optical service questions?",
+    "hi": "Hello! I'm your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?",
+    "hello": "Hello! I'm your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?",
+    "hey": "Hey there! I'm your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?",
+    "good morning": "Good morning! How can MRN Web Designs help you with your digital presence today?",
+    "good afternoon": "Good afternoon! What web design or digital marketing questions can I help you with?",
+    "good evening": "Good evening! How can I assist you with your website or marketing needs tonight?",
+    "how are you": "I'm functioning well and ready to help with your web design and digital marketing questions!",
+    "hello how are you": "I'm functioning well and ready to help with your web design and digital marketing questions!",
+    "how are you doing": "I'm doing great and ready to assist with your website and digital marketing queries!",
+    "what's up": "I'm here to help with website design, development, SEO, and digital marketing information. What would you like to know?",
+    "how's it going": "I'm doing well and ready to assist with your web design and digital marketing queries!",
+    "how have you been": "I'm functioning well and ready to help with your website and marketing questions!",
+    "what's new": "I'm here to help with website design, development, SEO, and digital marketing information. What would you like to know?",
+    "how's your day": "I'm having a good day and ready to help with your web design and digital marketing questions!",
+    "how's everything": "Everything is working well! How can I help with your website or marketing questions?",
 }
 
 IDENTITY_RESPONSES = {
-    "who are you": "I'm a Medical Optics assistant here to help with your eye care, vision health, and optical service needs.",
-    "what are you": "I'm an AI assistant for Medical Optics, designed to help answer your questions about eye care and vision health.",
-    "what can you do": "I can help answer questions about eye care, vision health, treatments, and our optical services using our extensive product knowledge and design expertise.",
-    "how can you help": "I can provide information about our eye care and vision health products, design advice, installation guidance, and help you make the best choices for your home or commercial project.",
-    "what is your purpose": "My purpose is to provide accurate, helpful information about eye care, vision health, and optical services to support your design journey.",
-    "tell me about yourself": "I'm an AI assistant specialized in eye care and vision health. I can help answer your questions about our products, design options, and installation guidance.",
-    "what do you know": "I'm knowledgeable about eye care, vision health, treatments, and our extensive product range. What would you like to know?",
-    "what are your capabilities": "I can provide information about eye care and vision health, answer questions about design and installation, and help you find the perfect solutions for your project.",
+    "who are you": "I'm a MRN Web Designs assistant here to help with your website design, development, and digital marketing needs.",
+    "what are you": "I'm an AI assistant for MRN Web Designs, designed to help answer your questions about web design, development, SEO, and digital marketing.",
+    "what can you do": "I can help answer questions about website design, development, maintenance, SEO, paid search, and social media marketing using our extensive expertise and custom solutions.",
+    "how can you help": "I can provide information about our web design and digital marketing services, design advice, development guidance, and help you make the best choices for your business's digital presence.",
+    "what is your purpose": "My purpose is to provide accurate, helpful information about website design, development, and digital marketing to support your business growth.",
+    "tell me about yourself": "I'm an AI assistant specialized in web design and digital marketing. I can help answer your questions about our services, design options, and development guidance.",
+    "what do you know": "I'm knowledgeable about website design, development, maintenance, SEO, paid search, social media marketing, and our extensive service range. What would you like to know?",
+    "what are your capabilities": "I can provide information about web design and digital marketing, answer questions about development and SEO, and help you find the perfect digital solutions for your business.",
 }
 
 POSITIVE_RESPONSES = {
-    "thank you": "You're welcome! Is there anything else you'd like to know about our eye care or vision health products?",
-    "thanks": "My pleasure! Let me know if you have any other questions about optical services.",
-    "thank you so much": "You're very welcome! Feel free to ask about any other eye care or vision health needs.",
-    "thanks a lot": "You're welcome! Is there anything else I can help you with regarding your project?",
-    "appreciate it": "I'm glad I could help! Any other questions about eye care or vision health?",
-    "that's helpful": "Great! Is there anything else you'd like to know about our products?",
-    "perfect": "Wonderful! Let me know if you need any other information about eye care or vision health.",
-    "excellent": "I'm pleased to help! Any other questions about your optical service project?",
-    "great": "Excellent! Is there anything else you'd like to know about our eye care or vision health products?",
-    "awesome": "I'm glad that was helpful! Any other questions about home design?",
-    "that's great": "I'm glad I could help! Is there anything else you'd like to know about eye care or vision health?",
+    "thank you": "You're welcome! Is there anything else you'd like to know about our web design or digital marketing services?",
+    "thanks": "My pleasure! Let me know if you have any other questions about website development or marketing.",
+    "thank you so much": "You're very welcome! Feel free to ask about any other web design or digital marketing needs.",
+    "thanks a lot": "You're welcome! Is there anything else I can help you with regarding your website project?",
+    "appreciate it": "I'm glad I could help! Any other questions about web design or digital marketing?",
+    "that's helpful": "Great! Is there anything else you'd like to know about our services?",
+    "perfect": "Wonderful! Let me know if you need any other information about web design or digital marketing.",
+    "excellent": "I'm pleased to help! Any other questions about your website or marketing project?",
+    "great": "Excellent! Is there anything else you'd like to know about our web design or digital marketing services?",
+    "awesome": "I'm glad that was helpful! Any other questions about website development?",
+    "that's great": "I'm glad I could help! Is there anything else you'd like to know about web design or digital marketing?",
 }
 
 RANDOM_RESPONSES = {
-    "test": "I'm working perfectly! How can I help you with eye care, vision health, or optical services?",
-    "testing": "Test successful! What would you like to know about our products?",
-    "are you there": "Yes, I'm here! How can I assist with your eye care and vision health needs?",
-    "are you working": "Yes, I'm working perfectly! What can I help you with today?",
-    "can you hear me": "Yes, I can understand you! How can I help with your optical service project?",
-    "hello world": "Hello! Welcome to Medical Optics. How can I assist you today?",
-    "ping": "Pong! I'm here to help with your eye care and vision health questions.",
-    "echo": "Echo received! How can I help with your optical service needs?",
-    "what's happening": "I'm here to help with eye care, vision health, and optical service information. What would you like to know?",
-    "what's going on": "I'm ready to assist with your eye care and vision health queries. What would you like to know?",
-    "what's the matter": "I'm here to help with eye care, vision health, and optical service information. What would you like to know?",
-    "what's wrong": "I'm here to help with eye care, vision health, and optical service information. What would you like to know?",
-    "what's the problem": "I'm here to help with eye care, vision health, and optical service information. What would you like to know?",
+    "test": "I'm working perfectly! How can I help you with web design, development, SEO, or digital marketing?",
+    "testing": "Test successful! What would you like to know about our services?",
+    "check": "Everything looks good! How can I assist with your website or marketing needs?",
+    "ok": "How can I help you with web design or digital marketing today?",
+    "okay": "What web design or digital marketing questions can I answer for you?",
+    "yes": "Great! What would you like to know about our web design and digital marketing services?",
+    "no": "No problem! Is there something else about web design or digital marketing I can help with?",
+    "sure": "Perfect! What web design or digital marketing information are you looking for?",
+    "cool": "Awesome! How can I help with your website or marketing project?",
+    "nice": "Thank you! What web design or digital marketing questions do you have?",
 }
 
 CLARIFICATION_RESPONSES = {
-    "what do you mean": "I'm here to provide information about eye care, vision health, and optical service. Could you please rephrase your question?",
-    "i don't understand": "I apologize for any confusion. Could you please ask your question about eye care or vision health in a different way?",
-    "can you explain": "I'd be happy to explain. What specific aspect of eye care, vision health, or optical service would you like to know more about?",
-    "i'm confused": "Let me help clarify. What specific aspect of eye care, vision health, or optical service would you like to know more about?",
-    "i don't get it": "Let me explain differently. What would you like to know about our eye care, vision health, or optical service services?",
-    "can you clarify": "Of course! What specific aspect of eye care, vision health, or optical service would you like me to clarify?",
+    "what": "Could you please be more specific about what aspect of web design or digital marketing you'd like to know about?",
+    "how": "I'd be happy to help! Could you clarify what specific process or service you're asking about?",
+    "when": "Could you provide more details about what timeline or scheduling information you need?",
+    "where": "Are you asking about our service areas, office location, or something else? Please clarify.",
+    "why": "I'd like to help explain! Could you be more specific about what you'd like to understand?",
+    "which": "Could you provide more context about what options or services you're comparing?",
+    "can you": "Absolutely! What specifically would you like me to help you with regarding web design or digital marketing?",
+    "do you": "I'd be happy to answer! Could you be more specific about what you'd like to know?",
+    "will you": "Of course! What would you like me to help you with regarding your website or marketing needs?",
+    "should i": "I'd be glad to provide guidance! Could you give me more details about your specific situation?",
 }
 
 HELP_RESPONSES = {
-    "help": "I'm here to help! I can answer questions about eye care, vision health, treatments, and our optical services. What would you like to know?",
-    "i need help": "I'm here to help! Whether you have questions about eye exams, treatments, or our services, just ask!",
-    "can you help me": "Of course! I'm here to help with all your eye care and vision health questions. What can I assist you with?",
-    "i need assistance": "I'm here to help! What eye care or vision health information do you need?",
-    "can you assist me": "I'd be happy to assist you. What would you like to know about our products or services?",
-    "i need support": "I'm here to support you. What eye care or vision health information would be helpful?",
+    "help": "I'm here to help! I can answer questions about website design, development, maintenance, SEO, paid search, and social media marketing. What would you like to know?",
+    "help me": "I'd be happy to help! What specific web design or digital marketing topic would you like assistance with?",
+    "i need help": "I'm here to assist! What web design or digital marketing challenge can I help you with?",
+    "can you help": "Absolutely! I can provide information about our website design, development, SEO, and digital marketing services. What do you need help with?",
+    "i'm confused": "No worries! Web design and digital marketing can be complex. What specific aspect would you like me to clarify?",
+    "i don't understand": "That's okay! I'm here to explain. What part of web design or digital marketing would you like me to break down for you?",
+    "what should i do": "I'd be happy to provide guidance! Could you tell me more about your website or marketing goals?",
+    "i'm lost": "Let me help guide you! What are you trying to accomplish with your website or digital marketing?",
+    "i need advice": "I'm here to provide expert advice! What aspect of your web design or digital marketing strategy would you like guidance on?",
+    "guide me": "I'd be happy to guide you! What's your main goal - a new website, improving SEO, or enhancing your digital marketing?",
 }
 
 SIMPLE_RESPONSES = {
-    "yes": "Great! What would you like to know about eye care, vision health, or optical services?",
-    "no": "No problem. Is there something else you'd like to ask about our products or services?",
-    "maybe": "That's okay. Take your time. I'm here when you have questions about eye care or vision health.",
-    "sure": "Great! What would you like to know about our eye care, vision health, or optical services?",
-    "okay": "Perfect! What eye care or vision health information can I help you with?",
-    "alright": "Great! What would you like to know about our products?",
+    "price": "Our pricing varies based on your specific needs and project scope. Each website and marketing strategy is custom-designed. Would you like to discuss your project requirements?",
+    "cost": "Costs depend on the complexity and scope of your project. We provide custom solutions rather than one-size-fits-all pricing. What type of project are you considering?",
+    "expensive": "We focus on providing value through custom solutions that deliver results. Our pricing reflects the quality and effectiveness of our work. What's your project budget range?",
+    "cheap": "We believe in providing excellent value. While we don't compete on price alone, we ensure every dollar spent delivers measurable results for your business.",
+    "free": "We offer free consultations to discuss your web design and digital marketing needs. Would you like to schedule one?",
+    "quote": "I'd be happy to help you get a custom quote! Could you tell me more about your project requirements and goals?",
+    "estimate": "For an accurate estimate, we'd need to understand your specific needs. What type of website or marketing services are you looking for?",
+    "contact": "You can contact MRN Web Designs through our website contact form, by phone, or email. How would you prefer to get in touch?",
+    "location": "MRN Web Designs serves clients nationwide. Where is your business located?",
+    "hours": "Our team is available during standard business hours, but we're flexible for client needs. When would be the best time to discuss your project?",
 }
 
 EMERGENCY_RESPONSES = {
-    "emergency": "For urgent property issues, please contact appropriate emergency services. For eye care and vision health information, I'm here to help.",
-    "urgent": "For urgent matters, please contact the appropriate services. For general eye care and vision health information, I'm here to assist.",
+    "urgent": "I understand this is urgent! For immediate assistance with your website or digital marketing emergency, please contact our support team directly.",
+    "emergency": "For website emergencies or urgent digital marketing needs, our team is ready to help. What's the nature of your emergency?",
+    "asap": "I see you need quick assistance! What urgent web design or digital marketing issue can we help resolve?",
+    "immediately": "For immediate support with your website or marketing needs, let me connect you with our rapid response team.",
+    "right now": "I understand you need immediate help! What urgent web design or digital marketing issue are you facing?",
+    "crisis": "We're here to help during digital crises! What website or marketing emergency can we assist with?",
+    "broken": "A broken website can be critical for business! Our emergency response team can help. What specific issue are you experiencing?",
+    "down": "Website downtime is serious! Our technical team can help immediately. Can you describe what's happening with your site?",
+    "hacked": "Website security breaches require immediate action! Please contact our security team right away for emergency assistance.",
+    "crashed": "Website crashes need immediate attention! Our emergency response team is ready to help restore your site quickly.",
 }
 
 class FuzzyMatcher:
-    def __init__(self, threshold: int = 80):
-        """
-        Initialize the fuzzy matcher with a similarity threshold.
+    def __init__(self, similarity_threshold: int = 85):
+        self.similarity_threshold = similarity_threshold
         
-        Args:
-            threshold (int): Minimum similarity score (0-100) to consider a match
-        """
-        self.threshold = threshold
         # Combine all response dictionaries
-        self.responses = {
+        self.response_db = {
             **GREETING_RESPONSES,
             **IDENTITY_RESPONSES,
             **POSITIVE_RESPONSES,
@@ -113,98 +125,62 @@ class FuzzyMatcher:
             **SIMPLE_RESPONSES,
             **EMERGENCY_RESPONSES
         }
-        self.greeting_patterns = [
-            "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
-            "how are you", "how are you doing", "what's up", "how's it going"
-        ]
-
-    def _get_word_combinations(self, words: List[str], max_length: int = 3) -> List[str]:
-        """
-        Generate combinations of consecutive words from the input.
+    
+    def clean_query(self, query: str) -> str:
+        """Clean and normalize the query string."""
+        return query.lower().strip()
+    
+    def find_best_match(self, query: str) -> Optional[Tuple[str, int]]:
+        """Find the best matching response for a query."""
+        clean_query = self.clean_query(query)
         
-        Args:
-            words (List[str]): List of words to combine
-            max_length (int): Maximum number of words to combine
-            
-        Returns:
-            List[str]: List of word combinations
-        """
-        combinations = []
-        for i in range(len(words)):
-            for j in range(i + 1, min(i + max_length + 1, len(words) + 1)):
-                combinations.append(" ".join(words[i:j]))
-        return combinations
-
-    def _contains_greeting(self, query: str) -> bool:
-        """
-        Check if the query contains any greeting patterns.
-        
-        Args:
-            query (str): The user's query
-            
-        Returns:
-            bool: True if query contains a greeting pattern
-        """
-        words = query.lower().split()
-        combinations = self._get_word_combinations(words)
-        
-        for pattern in self.greeting_patterns:
-            for combo in combinations:
-                if fuzz.ratio(combo, pattern) >= self.threshold:
-                    return True
-        return False
-
-    def find_best_match(self, query: str) -> Tuple[Optional[str], float]:
-        """
-        Find the best matching response for a given query.
-        
-        Args:
-            query (str): The user's query
-            
-        Returns:
-            Tuple[Optional[str], float]: (matched response, similarity score)
-        """
+        best_match = None
         best_score = 0
-        best_response = None
         
-        # Clean and normalize the query
-        query = query.lower().strip()
-        words = query.split()
-        
-        # First, check for greeting patterns in combinations
-        if self._contains_greeting(query):
-            # If it contains a greeting, prioritize greeting responses
-            for pattern in self.greeting_patterns:
-                score = fuzz.ratio(query, pattern)
-                if score > best_score:
-                    best_score = score
-                    best_response = self.responses.get(pattern)
-        
-        # If no greeting match found or score is low, check all patterns
-        if best_score < self.threshold:
-            for pattern, response in self.responses.items():
-                # Calculate similarity score
-                score = fuzz.ratio(query, pattern)
-                
-                # Update best match if score is higher
-                if score > best_score:
-                    best_score = score
-                    best_response = response
-        
-        # Return response only if score meets threshold
-        if best_score >= self.threshold:
-            return best_response, best_score
-        return None, best_score
-
-    def get_response(self, query: str) -> Optional[str]:
-        """
-        Get a response for the query if a good match is found.
-        
-        Args:
-            query (str): The user's query
+        for key, response in self.response_db.items():
+            # Try exact match first
+            if clean_query == key.lower():
+                return response, 100
             
-        Returns:
-            Optional[str]: The matched response or None if no good match
-        """
-        response, score = self.find_best_match(query)
-        return response 
+            # Try fuzzy matching
+            score = fuzz.ratio(clean_query, key.lower())
+            if score > best_score and score >= self.similarity_threshold:
+                best_score = score
+                best_match = response
+        
+        return (best_match, best_score) if best_match else None
+    
+    def get_response(self, query: str) -> Optional[Dict[str, any]]:
+        """Get a response for the query if it matches any hardcoded responses."""
+        match_result = self.find_best_match(query)
+        
+        if match_result:
+            response, confidence = match_result
+            return {
+                "response": response,
+                "confidence": confidence / 100.0,  # Convert to 0-1 scale
+                "source": "fuzzy_match",
+                "sources": []
+            }
+        
+        return None
+    
+    def get_suggestions(self, query: str, limit: int = 5) -> List[str]:
+        """Get suggested queries based on partial match."""
+        clean_query = self.clean_query(query)
+        suggestions = []
+        
+        for key in self.response_db.keys():
+            if clean_query in key.lower() or key.lower() in clean_query:
+                suggestions.append(key)
+                if len(suggestions) >= limit:
+                    break
+        
+        return suggestions
+
+# For backward compatibility
+def get_fuzzy_response(query: str) -> Optional[str]:
+    """Get a fuzzy response for the query (backward compatibility)."""
+    matcher = FuzzyMatcher()
+    result = matcher.get_response(query)
+    return result["response"] if result else None
