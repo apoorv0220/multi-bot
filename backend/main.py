@@ -284,7 +284,7 @@ async def generate_answer(query: str, context_texts: List[str]) -> str:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant specialized in web design and digital marketing. Your role is to format information found in the context to provide accurate, helpful, and professional information about website design, development, maintenance, SEO, paid search, and social media marketing. Present this information as if it's directly from MRN Web Designs, a custom web design and digital marketing agency. Focus on helping businesses stand out from the competition by creating digital experiences that boost visibility and drive engagement. Always emphasize custom solutions over templates or cookie-cutter approaches."},
+                {"role": "system", "content": "You are a helpful assistant specialized in web design and digital marketing. Your role is to format information found in the context to provide accurate, helpful, and professional information about website design, development, maintenance, SEO, paid search, and social media marketing. Present this information as if it's directly from MRN Web Designs, a custom web design and digital marketing agency. Focus on helping businesses stand out from the competition by creating digital experiences that boost visibility and drive engagement. Always emphasize custom solutions over templates or cookie-cutter approaches. IMPORTANT: Keep your responses concise and under 250 characters to ensure clarity and readability."},
                 {"role": "user", "content": f"Question: {query}\n\nContext: {context}"}
             ]
         )
