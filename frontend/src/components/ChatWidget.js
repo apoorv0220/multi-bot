@@ -9,7 +9,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   const [messages, setMessages] = useState([
     {
       type: 'bot',
-      text: 'Hello! I\'m your Migraine Assistant. How can I help you today?',
+      text: 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?',
       timestamp: new Date(),
     },
   ]);
@@ -81,7 +81,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   return (
     <WidgetContainer>
       <WidgetHeader>
-        <WidgetTitle>Migraine Assistant</WidgetTitle>
+        <WidgetTitle>Hello, I'm Allevia</WidgetTitle>
       </WidgetHeader>
       
       <MessageContainer>

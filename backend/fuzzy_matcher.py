@@ -4,9 +4,9 @@ from typing import Dict, Optional, Tuple, List
 # Expanded hardcoded responses for common queries
 PERSONALIZED_RESPONSES = {
     # Greetings
-    "hi": "Hi, I'm your Migraine Assistant. How can I assist you today?",
+    "hi": "Hi, I'm Allevia. I'm your migraine assistant. How can I assist you today?",
     "hello": "Hello! I'm here to help you with any migraine-related questions.",
-    "hey": "Hey there! I'm your migraine assistant. What can I help you with?",
+    "hey": "Hey there! I'm Allevia. I'm your migraine assistant. What can I help you with?",
     "good morning": "Good morning! I'm here to help with your migraine questions.",
     "good afternoon": "Good afternoon! How can I assist you with migraine-related information?",
     "good evening": "Good evening! I'm here to help with your migraine queries.",
