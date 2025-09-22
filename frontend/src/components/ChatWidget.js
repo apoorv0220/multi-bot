@@ -21,6 +21,26 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
   
+  // PHP History API URL
+  const PHP_HISTORY_API_URL = "/wp-admin/admin-ajax.php?action=save_chat_history";
+
+  // Function to save chat events to PHP backend
+  const saveChatEventToPHP = async (eventData) => {
+    try {
+      const formBody = Object.keys(eventData).map(key =>
+        encodeURIComponent(key) + '=' + encodeURIComponent(eventData[key])
+      ).join('&');
+
+      await fetch(PHP_HISTORY_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formBody,
+      });
+    } catch (error) {
+      console.error("Error saving chat event to PHP backend:", error);
+    }
+  };
+
   // Initialize trigger detection
   const { checkTriggers, renderTriggerResponse, chatDisabled } = useTriggerDetection();
 
@@ -98,10 +118,22 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     }
 
     // Check for trigger words before processing
-    const hasTrigger = await checkTriggers(input);
-    if (hasTrigger) {
+    const trigger = await checkTriggers(input);
+    console.log("Debug: Trigger object received by ChatWidget.js:", trigger);
+    if (trigger) {
       // Clear the input field when trigger is detected
       setInput('');
+      
+      // Save trigger event to PHP backend
+      await saveChatEventToPHP({
+        event_type: `trigger_${trigger.category}`,
+        user_message_text: input,
+        bot_response_text: trigger.response?.message || '', // Bot's predetermined response for trigger
+        trigger_detection_method: trigger.method || 'unknown',
+        trigger_confidence: trigger.confidence || 0,
+        trigger_matched_phrase: trigger.triggerWord || 'unknown',
+      });
+
       // Don't send the message to the AI model
       // The trigger response will be shown by renderTriggerResponse()
       return;
@@ -134,6 +166,16 @@ const ChatWidget = ({ onClose, apiUrl }) => {
         source: response.data.source,
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
+
+      // Save chat message to PHP backend
+      await saveChatEventToPHP({
+        event_type: 'chat_message',
+        user_message_text: userMessage.text,
+        bot_response_text: botMessage.text,
+        bot_response_source: botMessage.source,
+        bot_response_confidence: botMessage.confidence,
+      });
+
     } catch (err) {
       console.error('Error querying API:', err);
       

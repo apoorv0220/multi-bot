@@ -123,19 +123,19 @@ Please do not enter personal or medical identifiers in your messages.`,
 };
 
 // Generate a unique session ID
-const generateSessionId = () => {
-  return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-};
+// const generateSessionId = () => {
+//   return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+// };
 
 // Get or create session ID
-const getSessionId = () => {
-  let sessionId = sessionStorage.getItem('migraine-chatbot-session-id');
-  if (!sessionId) {
-    sessionId = generateSessionId();
-    sessionStorage.setItem('migraine-chatbot-session-id', sessionId);
-  }
-  return sessionId;
-};
+// const getSessionId = () => {
+//   let sessionId = sessionStorage.getItem('migraine-chatbot-session-id');
+//   if (!sessionId) {
+//     sessionId = generateSessionId();
+//     sessionStorage.setItem('migraine-chatbot-session-id', sessionId);
+//   }
+//   return sessionId;
+// };
 
 // Normalize text for matching (handle hyphens, spacing, case)
 const normalizeText = (text) => {
@@ -440,6 +440,7 @@ const detectTriggers = (text) => {
       console.log(`Debug: Final result: ${detectedTriggers[0].category} (priority: ${detectedTriggers[0].priority})`);
     }
     
+    console.log("Debug: Trigger object being returned by detectTriggers:", detectedTriggers[0]);
     return detectedTriggers[0];
   }
 
@@ -451,34 +452,6 @@ const detectTriggers = (text) => {
   return null;
 };
 
-// Log trigger detection to backend
-const logTrigger = async (triggerData) => {
-  try {
-    const sessionId = getSessionId();
-    const logData = {
-      trigger_type: triggerData.category,
-      timestamp: new Date().toISOString(),
-      session_id: sessionId,
-      detection_method: triggerData.method || 'unknown',
-      confidence: triggerData.confidence || 0,
-      matched_phrase: triggerData.triggerWord || 'unknown'
-    };
-
-    // Get API URL from environment or use default
-    const apiUrl = process.env.REACT_APP_API_URL || 'https://migraine.softdemonew.info/api';
-    // const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-    
-    await fetch(`${apiUrl}/api/log-trigger`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(logData)
-    });
-  } catch (error) {
-    console.error('Error logging trigger:', error);
-  }
-};
 
 // Emergency Response Banner Component
 const EmergencyBanner = ({ trigger, onAcknowledge, onEnableChat }) => {
@@ -611,13 +584,12 @@ export const useTriggerDetection = () => {
       setIsBlocked(true);
       setChatDisabled(true); // Disable chat after trigger
       
-      // Log the trigger detection
-      await logTrigger(trigger);
+      // The trigger response will be logged by the ChatWidget component
       
-      return true; // Trigger detected, block the message
+      return trigger; // Return the full trigger object
     }
     
-    return false; // No trigger detected
+    return null; // Return null if no trigger detected
   };
 
   const acknowledgeTrigger = () => {
@@ -861,5 +833,5 @@ const NoteButton = styled.button`
   }
 `;
 
-const TriggerDetector = { useTriggerDetection, detectTriggers, getSessionId };
+const TriggerDetector = { useTriggerDetection, detectTriggers };
 export default TriggerDetector;

@@ -112,7 +112,6 @@ class QueryResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None
     max_results: int = 5
 
 class ChatResponse(BaseModel):
@@ -124,7 +123,6 @@ class ChatResponse(BaseModel):
 class TriggerLogRequest(BaseModel):
     trigger_type: str
     timestamp: str
-    session_id: str
     detection_method: Optional[str] = "unknown"
     confidence: Optional[float] = 0.0
     matched_phrase: Optional[str] = "unknown"
@@ -427,7 +425,7 @@ async def log_trigger(request: TriggerLogRequest):
     Only logs trigger type, timestamp, session ID, detection method, confidence, and matched phrase - no user input text.
     """
     try:
-        logger.info(f"Trigger detected - Type: {request.trigger_type}, Session: {request.session_id}, Time: {request.timestamp}, Method: {request.detection_method}, Confidence: {request.confidence:.2f}, Phrase: '{request.matched_phrase}'")
+        logger.info(f"Trigger detected - Type: {request.trigger_type}, Time: {request.timestamp}, Method: {request.detection_method}, Confidence: {request.confidence:.2f}, Phrase: '{request.matched_phrase}'")
         
         # Here you could add database logging if needed
         # For now, we'll just log to the application log
