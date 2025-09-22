@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
 import axios from 'axios';
-import { FaTimes } from 'react-icons/fa';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
+import ConsentMessage from './ConsentMessage';
+import { useTriggerDetection } from './TriggerDetector';
 
 const ChatWidget = ({ onClose, apiUrl }) => {
   const [messages, setMessages] = useState([
@@ -15,9 +16,13 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [consentGiven, setConsentGiven] = useState(false);
+  const [showConsent, setShowConsent] = useState(true);
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
+  
+  // Initialize trigger detection
+  const { checkTriggers, renderTriggerResponse, chatDisabled } = useTriggerDetection();
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -29,9 +34,78 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     inputRef.current?.focus();
   }, []);
 
+  // Check for existing consent in session storage
+  useEffect(() => {
+    const sessionConsent = sessionStorage.getItem('migraine-chatbot-consent');
+    if (sessionConsent === 'true') {
+      setConsentGiven(true);
+      setShowConsent(false);
+    }
+  }, []);
+
+  // Announce consent message to screen readers
+  useEffect(() => {
+    if (showConsent) {
+      // Create a live region announcement for screen readers
+      const announcement = document.createElement('div');
+      announcement.setAttribute('aria-live', 'polite');
+      announcement.setAttribute('aria-atomic', 'true');
+      announcement.style.position = 'absolute';
+      announcement.style.left = '-10000px';
+      announcement.style.width = '1px';
+      announcement.style.height = '1px';
+      announcement.style.overflow = 'hidden';
+      announcement.textContent = 'Important disclaimer dialog has appeared. Please review the terms and conditions before proceeding.';
+      
+      document.body.appendChild(announcement);
+      
+      // Clean up after announcement
+      setTimeout(() => {
+        document.body.removeChild(announcement);
+      }, 1000);
+    }
+  }, [showConsent]);
+
+  // Handle consent acceptance
+  const handleConsentAccept = () => {
+    setConsentGiven(true);
+    setShowConsent(false);
+    sessionStorage.setItem('migraine-chatbot-consent', 'true');
+  };
+
+  // Handle consent decline
+  const handleConsentDecline = () => {
+    // Clear any existing consent from session storage
+    sessionStorage.removeItem('migraine-chatbot-consent');
+    
+    // Send message to parent window to close the entire widget
+    if (window.parent && window.parent !== window) {
+      // Use setTimeout to ensure the message is sent after any current operations
+      setTimeout(() => {
+        window.parent.postMessage('close-widget', '*');
+      }, 100);
+    }
+    // Don't call onClose() here as it might interfere with the parent window handling
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
+
+    // Check if consent has been given
+    if (!consentGiven) {
+      return; // Don't process input until consent is given
+    }
+
+    // Check for trigger words before processing
+    const hasTrigger = await checkTriggers(input);
+    if (hasTrigger) {
+      // Clear the input field when trigger is detected
+      setInput('');
+      // Don't send the message to the AI model
+      // The trigger response will be shown by renderTriggerResponse()
+      return;
+    }
 
     // Add user message
     const userMessage = {
@@ -42,7 +116,6 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     setMessages((prevMessages) => [...prevMessages, userMessage]);
     setInput('');
     setIsLoading(true);
-    setError(null);
 
     try {
       // Call API with the new chat endpoint
@@ -63,7 +136,6 @@ const ChatWidget = ({ onClose, apiUrl }) => {
       setMessages((prevMessages) => [...prevMessages, botMessage]);
     } catch (err) {
       console.error('Error querying API:', err);
-      setError('Sorry, I had trouble getting your answer. Please try again later.');
       
       // Add error message
       const errorMessage = {
@@ -97,6 +169,18 @@ const ChatWidget = ({ onClose, apiUrl }) => {
             source={message.source}
           />
         ))}
+        
+        {/* Show consent message after first bot message */}
+        {showConsent && (
+          <ConsentMessage
+            onAccept={handleConsentAccept}
+            onDecline={handleConsentDecline}
+          />
+        )}
+        
+        {/* Show trigger response if detected */}
+        {renderTriggerResponse()}
+        
         {isLoading && (
           <LoadingMessage>
             <LoadingDots>
@@ -115,10 +199,14 @@ const ChatWidget = ({ onClose, apiUrl }) => {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Type your message..."
-          disabled={isLoading}
+          placeholder={
+            !consentGiven ? "Please accept the disclaimer above to continue..." :
+            chatDisabled ? "Chat disabled due to trigger detection. Use 'Re-enable Chat' button to continue..." :
+            "Type your message..."
+          }
+          disabled={isLoading || !consentGiven || chatDisabled}
         />
-        <SendButton type="submit" disabled={isLoading || !input.trim()}>
+        <SendButton type="submit" disabled={isLoading || !input.trim() || !consentGiven || chatDisabled}>
           <BsSend />
         </SendButton>
       </InputForm>
@@ -152,18 +240,6 @@ const WidgetTitle = styled.h2`
   font-size: 1.2rem;
 `;
 
-const CloseButton = styled.button`
-  background: none;
-  border: none;
-  color: white;
-  cursor: pointer;
-  font-size: 1.2rem;
-  padding: 5px;
-  
-  &:hover {
-    opacity: 0.8;
-  }
-`;
 
 const MessageContainer = styled.div`
   flex: 1;
@@ -190,6 +266,12 @@ const Input = styled.input`
   
   &:focus {
     border-color: #72b519;
+  }
+  
+  &:disabled {
+    background-color: #f5f5f5;
+    color: #999;
+    cursor: not-allowed;
   }
 `;
 

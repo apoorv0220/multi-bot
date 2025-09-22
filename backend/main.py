@@ -121,6 +121,14 @@ class ChatResponse(BaseModel):
     confidence: Optional[float] = None
     sources: Optional[List[SearchResult]] = None
 
+class TriggerLogRequest(BaseModel):
+    trigger_type: str
+    timestamp: str
+    session_id: str
+    detection_method: Optional[str] = "unknown"
+    confidence: Optional[float] = 0.0
+    matched_phrase: Optional[str] = "unknown"
+
 # Helper function to generate embeddings
 async def generate_embedding(text: str) -> List[float]:
     try:
@@ -283,7 +291,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         
         # Filter out low confidence results (less than 30%)
         filtered_results = [result for result in search_results if result.score >= 0.3]
-        logger.info(f"Filtered results (confidence ≥ 30%): {len(filtered_results)}")
+        logger.info(f"Filtered results (confidence >= 30%): {len(filtered_results)}")
         
         # If no results have confidence above 30%, don't use any context
         if not filtered_results:
@@ -375,6 +383,63 @@ async def trigger_reindex(background_tasks: BackgroundTasks):
     except Exception as e:
         logger.error(f"Error starting reindexing: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to start reindexing: {e}")
+
+# Add a new endpoint for chunked reindexing with progress tracking
+@app.post("/api/reindex-chunked")
+async def trigger_chunked_reindex():
+    """Trigger a chunked content reindexing with progress tracking"""
+    try:
+        # First check if Qdrant is accessible
+        try:
+            collections = qdrant_client.get_collections().collections
+            logger.info(f"Successfully connected to Qdrant. Found {len(collections)} collections.")
+        except Exception as e:
+            logger.error(f"Error connecting to Qdrant before reindexing: {e}")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Cannot connect to Qdrant database. Please ensure Qdrant is running: {e}"
+            )
+        
+        # Create a simple progress callback that logs progress
+        def progress_callback(message, current, total):
+            logger.info(f"Progress: {message} ({current}/{total})")
+        
+        # Run reindexing with progress tracking
+        embedder_instance = Embedder(client=qdrant_client)
+        await embedder_instance.reindex_all_content(progress_callback)
+        
+        return {
+            "status": "success", 
+            "message": "Content reindexing completed successfully"
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions as they already have proper status codes and details
+        raise
+    except Exception as e:
+        logger.error(f"Error during reindexing: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to complete reindexing: {e}")
+
+# Add endpoint for logging trigger word detection
+@app.post("/api/log-trigger")
+async def log_trigger(request: TriggerLogRequest):
+    """
+    Log trigger word detection events with enhanced detection information.
+    Only logs trigger type, timestamp, session ID, detection method, confidence, and matched phrase - no user input text.
+    """
+    try:
+        logger.info(f"Trigger detected - Type: {request.trigger_type}, Session: {request.session_id}, Time: {request.timestamp}, Method: {request.detection_method}, Confidence: {request.confidence:.2f}, Phrase: '{request.matched_phrase}'")
+        
+        # Here you could add database logging if needed
+        # For now, we'll just log to the application log
+        # In the future, this could be extended to save to a database table
+        
+        return {
+            "status": "success",
+            "message": "Trigger logged successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error logging trigger: {e}")
+        raise HTTPException(status_code=500, detail="Failed to log trigger")
 
 # Add global exception handler middleware
 @app.middleware("http")

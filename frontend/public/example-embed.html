@@ -87,6 +87,8 @@
   window.MIGRAINE_CHATBOT_CONFIG = {
     baseUrl: 'https://migraine.softdemonew.info',       // URL where the chatbot widget is hosted
     apiUrl: 'https://migraine.softdemonew.info/api',       // URL of the backend API
+    <!-- baseUrl: 'http://localhost:3000',       // URL where the chatbot widget is hosted
+    apiUrl: 'http://localhost:8000',       // URL of the backend API -->
     primaryColor: '#72b519'                 // Primary color for the chatbot
   };
   
@@ -127,14 +129,15 @@
         // Update UI
         statusElement.className = 'loading';
         statusElement.style.display = 'block';
-        statusElement.innerText = 'Reindexing in progress. This may take several minutes...';
+        statusElement.innerText = 'Reindexing in progress. Processing content in chunks to avoid timeouts...';
         buttonElement.disabled = true;
         
         // Get API URL from configuration
         const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'https://migraine.softdemonew.info/api';
+        // const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'http://localhost:8000';
         
-        // Call the reindex API endpoint
-        fetch(`${apiUrl}/api/reindex`, {
+        // Call the chunked reindex API endpoint
+        fetch(`${apiUrl}/api/reindex-chunked`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -150,7 +153,7 @@
         })
         .then(data => {
           statusElement.className = 'success';
-          statusElement.innerText = 'Reindexing started successfully! This process will continue in the background.';
+          statusElement.innerText = 'Reindexing completed successfully! All content has been processed and indexed.';
         })
         .catch(error => {
           statusElement.className = 'error';
@@ -181,6 +184,8 @@
     window.MIGRAINE_CHATBOT_CONFIG = {
       baseUrl: 'https://migraine.softdemonew.info',
       apiUrl: 'https://migraine.softdemonew.info/api',
+      <!-- baseUrl: 'http://localhost:3000',
+      apiUrl: 'http://localhost:8000', -->
       primaryColor: '#72b519'
     };
     

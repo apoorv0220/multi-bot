@@ -1,16 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import ChatWidget from './components/ChatWidget';
-import ChatButton from './components/ChatButton';
-import reportWebVitals from './reportWebVitals';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
   const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://migraine.softdemonew.info/api');
-
-  const toggleChat = () => {
-    setIsOpen(!isOpen);
-  };
+  // const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://localhost:8000');
 
   const closeChat = () => {
     setIsOpen(false);
