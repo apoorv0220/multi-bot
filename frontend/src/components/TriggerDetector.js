@@ -346,11 +346,6 @@ const detectTriggers = (text) => {
     return null; // Skip single word inputs
   }
 
-  // Debug logging for specific test cases
-  if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-    console.log(`Debug: Testing "${text}"`);
-  }
-
   // Check each trigger category with smart detection
   Object.entries(TRIGGER_WORDS).forEach(([category, config]) => {
     let bestMatch = null;
@@ -369,10 +364,6 @@ const detectTriggers = (text) => {
       };
       highestConfidence = exactMatch.confidence;
       
-      // Debug logging
-      if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-        console.log(`Debug: ${category} exact match: "${exactMatch.phrase}" (confidence: ${exactMatch.confidence})`);
-      }
     }
 
     // Strategy 2: Check variations (high confidence)
@@ -388,10 +379,6 @@ const detectTriggers = (text) => {
       };
       highestConfidence = variationMatch.confidence;
       
-      // Debug logging
-      if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-        console.log(`Debug: ${category} variation match: "${variationMatch.variation}" (confidence: ${variationMatch.confidence})`);
-      }
     }
 
     // Strategy 3: Check keyword combinations (medium confidence)
@@ -407,10 +394,6 @@ const detectTriggers = (text) => {
       };
       highestConfidence = keywordMatch.confidence;
       
-      // Debug logging
-      if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-        console.log(`Debug: ${category} keyword match: [${keywordMatch.keywords.join(', ')}] (confidence: ${keywordMatch.confidence})`);
-      }
     }
 
     // Add the best match for this category if confidence is high enough
@@ -419,15 +402,8 @@ const detectTriggers = (text) => {
     if (bestMatch && highestConfidence >= minConfidence) {
       detectedTriggers.push(bestMatch);
       
-      // Debug logging
-      if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-        console.log(`Debug: ${category} added to triggers (confidence: ${highestConfidence}, threshold: ${minConfidence})`);
-      }
     } else if (bestMatch) {
       // Debug logging for rejected matches
-      if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-        console.log(`Debug: ${category} rejected (confidence: ${highestConfidence}, threshold: ${minConfidence})`);
-      }
     }
   });
 
@@ -435,18 +411,7 @@ const detectTriggers = (text) => {
   if (detectedTriggers.length > 0) {
     detectedTriggers.sort((a, b) => a.priority - b.priority);
     
-    // Debug logging for final result
-    if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-      console.log(`Debug: Final result: ${detectedTriggers[0].category} (priority: ${detectedTriggers[0].priority})`);
-    }
-    
-    console.log("Debug: Trigger object being returned by detectTriggers:", detectedTriggers[0]);
     return detectedTriggers[0];
-  }
-
-  // Debug logging for no matches
-  if (text.toLowerCase().includes("can't take it") || text.toLowerCase().includes("want to end")) {
-    console.log(`Debug: No triggers detected`);
   }
 
   return null;

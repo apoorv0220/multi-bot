@@ -22,7 +22,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   const inputRef = useRef(null);
   
   // PHP History API URL
-  const PHP_HISTORY_API_URL = "/wp-admin/admin-ajax.php?action=save_chat_history";
+  const PHP_HISTORY_API_URL = "https://migrainenew.newsoftdemo.info/wp-admin/admin-ajax.php?action=save_chat_history";
 
   // Function to save chat events to PHP backend
   const saveChatEventToPHP = async (eventData) => {
@@ -119,7 +119,6 @@ const ChatWidget = ({ onClose, apiUrl }) => {
 
     // Check for trigger words before processing
     const trigger = await checkTriggers(input);
-    console.log("Debug: Trigger object received by ChatWidget.js:", trigger);
     if (trigger) {
       // Clear the input field when trigger is detected
       setInput('');
