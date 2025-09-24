@@ -536,7 +536,7 @@ const DoctorNote = ({ onAcknowledge, onEnableChat }) => {
 };
 
 // Main Trigger Detector Hook
-export const useTriggerDetection = () => {
+export const useTriggerDetection = (saveHistory) => {
   const [activeTrigger, setActiveTrigger] = useState(null);
   const [isBlocked, setIsBlocked] = useState(false);
   const [chatDisabled, setChatDisabled] = useState(false);
@@ -549,7 +549,17 @@ export const useTriggerDetection = () => {
       setIsBlocked(true);
       setChatDisabled(true); // Disable chat after trigger
       
-      // The trigger response will be logged by the ChatWidget component
+      // Log trigger event to the backend
+      if (saveHistory) {
+        await saveHistory({
+          event_type: `trigger_${trigger.category}`,
+          user_message_text: text,
+          bot_response_text: trigger.response?.message || '',
+          trigger_detection_method: trigger.method || 'unknown',
+          trigger_confidence: trigger.confidence || 0,
+          trigger_matched_phrase: trigger.triggerWord || 'unknown',
+        });
+      }
       
       return trigger; // Return the full trigger object
     }
@@ -710,93 +720,93 @@ const ContinueButton = styled.button`
 `;
 
 const EnableChatButton = styled.button`
-  background: #3498db;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.95rem;
-  flex: 1;
-  
-  &:hover {
-    background: #2980b9;
-    transform: translateY(-1px);
-  }
-  
-  &:focus {
-    outline: 3px solid #72b519;
-    outline-offset: 2px;
-  }
-`;
-
-const NoteContainer = styled.div`
-  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-  border: 2px solid #4caf50;
-  border-radius: 8px;
-  padding: 15px;
-  margin: 10px 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-`;
-
-const NoteHeader = styled.h4`
-  color: #2e7d32;
-  margin: 0 0 10px 0;
-  font-size: 1rem;
-  font-weight: 600;
-`;
-
-const NoteContent = styled.p`
-  color: #388e3c;
-  font-size: 0.9rem;
-  line-height: 1.4;
-  margin: 0 0 8px 0;
-`;
-
-const NoteWarning = styled.p`
-  color: #d32f2f;
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin: 0 0 10px 0;
-`;
-
-const NoteButtonRow = styled.div`
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-`;
-
-const NoteButton = styled.button`
-  background: #72b519;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.9rem;
-  flex: 1;
-  
-  &:hover {
-    background: #5a8f15;
-  }
-  
-  &:focus {
-    outline: 3px solid #3498db;
-    outline-offset: 2px;
-  }
-  
-  &:nth-child(2) {
     background: #3498db;
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.95rem;
+    flex: 1;
     
     &:hover {
       background: #2980b9;
+      transform: translateY(-1px);
     }
-  }
-`;
-
-const TriggerDetector = { useTriggerDetection, detectTriggers };
-export default TriggerDetector;
+    
+    &:focus {
+      outline: 3px solid #72b519;
+      outline-offset: 2px;
+    }
+  `;
+  
+  const NoteContainer = styled.div`
+    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+    border: 2px solid #4caf50;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 10px 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  `;
+  
+  const NoteHeader = styled.h4`
+    color: #2e7d32;
+    margin: 0 0 10px 0;
+    font-size: 1rem;
+    font-weight: 600;
+  `;
+  
+  const NoteContent = styled.p`
+    color: #388e3c;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    margin: 0 0 8px 0;
+  `;
+  
+  const NoteWarning = styled.p`
+    color: #d32f2f;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0 0 10px 0;
+  `;
+  
+  const NoteButtonRow = styled.div`
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  `;
+  
+  const NoteButton = styled.button`
+    background: #72b519;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.9rem;
+    flex: 1;
+    
+    &:hover {
+      background: #5a8f15;
+    }
+    
+    &:focus {
+      outline: 3px solid #3498db;
+      outline-offset: 2px;
+    }
+    
+    &:nth-child(2) {
+      background: #3498db;
+      
+      &:hover {
+        background: #2980b9;
+      }
+    }
+  `;
+  
+  const TriggerDetector = { useTriggerDetection, detectTriggers };
+  export default TriggerDetector;

@@ -18,31 +18,22 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [consentGiven, setConsentGiven] = useState(false);
   const [showConsent, setShowConsent] = useState(true);
+  const [sessionId, setSessionId] = useState(sessionStorage.getItem('migraine-chatbot-session-id')); // Initialize directly from sessionStorage
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false); // New state for history loading
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
   
-  // PHP History API URL
-  const PHP_HISTORY_API_URL = "https://migrainenew.newsoftdemo.info/wp-admin/admin-ajax.php?action=save_chat_history";
-
-  // Function to save chat events to PHP backend
-  const saveChatEventToPHP = async (eventData) => {
+  // Function to save chat events to backend
+  const saveHistory = async (eventData) => {
     try {
-      const formBody = Object.keys(eventData).map(key =>
-        encodeURIComponent(key) + '=' + encodeURIComponent(eventData[key])
-      ).join('&');
-
-      await fetch(PHP_HISTORY_API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formBody,
-      });
+      await axios.post(`${apiUrl}/api/save-history`, { ...eventData, session_id: sessionId });
     } catch (error) {
-      console.error("Error saving chat event to PHP backend:", error);
+      console.error("Error saving chat event to backend:", error);
     }
   };
 
   // Initialize trigger detection
-  const { checkTriggers, renderTriggerResponse, chatDisabled } = useTriggerDetection();
+  const { checkTriggers, renderTriggerResponse, chatDisabled } = useTriggerDetection(saveHistory);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -54,14 +45,88 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     inputRef.current?.focus();
   }, []);
 
-  // Check for existing consent in session storage
+  // Check for existing consent in session storage and potentially create a session
   useEffect(() => {
     const sessionConsent = sessionStorage.getItem('migraine-chatbot-consent');
     if (sessionConsent === 'true') {
       setConsentGiven(true);
       setShowConsent(false);
+
+      // If consent is given but no session_id exists, create one via a dedicated endpoint
+      const ensureSessionId = async () => {
+        if (!sessionId) { // This condition will now correctly reflect sessionStorage
+          try {
+            const response = await axios.post(`${apiUrl}/api/start-session`, { session_id: null });
+            if (response.data.session_id) {
+              setSessionId(response.data.session_id);
+              sessionStorage.setItem('migraine-chatbot-session-id', response.data.session_id);
+              console.log("New session ID created and stored:", response.data.session_id);
+            }
+          } catch (error) {
+            console.error("Error ensuring session ID on consent accept:", error);
+          }
+        }
+      };
+      ensureSessionId();
     }
-  }, []);
+  }, [consentGiven, sessionId, apiUrl]); // Depend on consentGiven, sessionId, and apiUrl
+
+  // Load chat history if session_id exists and consent is given
+  useEffect(() => {
+    const loadChatHistory = async () => {
+      // Only load history if session_id and consent are confirmed
+      if (sessionId && consentGiven) {
+        setIsHistoryLoading(true); // Start loading
+        try {
+          const response = await axios.get(`${apiUrl}/api/chat-history/${sessionId}`);
+          const history = response.data.history.map(event => {
+            // Reconstruct message objects from history events
+            if (event.event_type === 'chat_message' || event.event_type === 'fuzzy_match' || event.event_type === 'unavailable_service' || event.event_type === 'no_reliable_info') {
+                return [
+                    { type: 'user', text: event.user_message_text, timestamp: new Date(event.event_timestamp) },
+                    { type: 'bot', text: event.bot_response_text, timestamp: new Date(event.event_timestamp), source: event.bot_response_source, confidence: event.bot_response_confidence }
+                ];
+            } else if (event.event_type.startsWith('trigger_')) {
+                // For trigger events, the bot_response_text contains the trigger message
+                return {
+                    type: 'bot',
+                    text: event.bot_response_text,
+                    timestamp: new Date(event.event_timestamp),
+                    isTrigger: true,
+                    triggerCategory: event.event_type.replace('trigger_', ''),
+                };
+            }
+            return null; // Should not happen
+          }).flat().filter(Boolean);
+          
+          // Filter out the initial bot greeting if history is loaded
+          if (history.length > 0) {
+            // Define the initial bot greeting statically
+            const initialBotGreetingText = 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?';
+            const filteredHistory = history.filter(msg => 
+                !(msg.type === 'bot' && msg.text === initialBotGreetingText)
+            );
+            setMessages(filteredHistory.length > 0 ? filteredHistory : []);
+          } else {
+            // If no history, ensure only the initial bot greeting is present
+            setMessages([
+                {
+                    type: 'bot',
+                    text: 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?',
+                    timestamp: new Date(),
+                },
+            ]);
+          }
+
+        } catch (error) {
+          console.error("Error loading chat history:", error);
+        } finally {
+          setIsHistoryLoading(false); // End loading
+        }
+      }
+    };
+    loadChatHistory();
+  }, [sessionId, consentGiven, apiUrl]);
 
   // Announce consent message to screen readers
   useEffect(() => {
@@ -122,19 +187,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     if (trigger) {
       // Clear the input field when trigger is detected
       setInput('');
-      
-      // Save trigger event to PHP backend
-      await saveChatEventToPHP({
-        event_type: `trigger_${trigger.category}`,
-        user_message_text: input,
-        bot_response_text: trigger.response?.message || '', // Bot's predetermined response for trigger
-        trigger_detection_method: trigger.method || 'unknown',
-        trigger_confidence: trigger.confidence || 0,
-        trigger_matched_phrase: trigger.triggerWord || 'unknown',
-      });
-
-      // Don't send the message to the AI model
-      // The trigger response will be shown by renderTriggerResponse()
+      // saveHistory is now called inside useTriggerDetection
       return;
     }
 
@@ -149,11 +202,19 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     setIsLoading(true);
 
     try {
-      // Call API with the new chat endpoint
+      // Call API with the new chat endpoint, including sessionId
       const response = await axios.post(`${apiUrl}/api/chat`, {
         message: input,
         max_results: 3,
+        session_id: sessionId, // Pass session_id to backend
       });
+
+      // If a new session_id is returned, update state and sessionStorage
+      if (response.data.session_id && response.data.session_id !== sessionId) {
+        setSessionId(response.data.session_id);
+        sessionStorage.setItem('migraine-chatbot-session-id', response.data.session_id);
+        console.log("New session ID received and stored during chat:", response.data.session_id);
+      }
 
       // Add bot response with the new response format
       const botMessage = {
@@ -166,14 +227,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
 
-      // Save chat message to PHP backend
-      await saveChatEventToPHP({
-        event_type: 'chat_message',
-        user_message_text: userMessage.text,
-        bot_response_text: botMessage.text,
-        bot_response_source: botMessage.source,
-        bot_response_confidence: botMessage.confidence,
-      });
+      // History is now saved directly by the backend in /api/chat endpoint
 
     } catch (err) {
       console.error('Error querying API:', err);
@@ -222,6 +276,18 @@ const ChatWidget = ({ onClose, apiUrl }) => {
         {/* Show trigger response if detected */}
         {renderTriggerResponse()}
         
+        {/* Show loading indicator for history fetch */}
+        {isHistoryLoading && (
+          <LoadingMessage>
+            <LoadingDots>
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </LoadingDots>
+            <p>Loading chat history...</p>
+          </LoadingMessage>
+        )}
+
         {isLoading && (
           <LoadingMessage>
             <LoadingDots>

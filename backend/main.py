@@ -1,6 +1,8 @@
+import asyncio
 import os
 import json
 import uuid
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +16,10 @@ import logging
 from fuzzy_matcher import FuzzyMatcher
 from typing import Optional, Dict, Any, List
 
+from embedder import Embedder
+from wordpress_fetcher import WordPressFetcher
+from database import ChatDatabase # Import the new ChatDatabase class
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -26,13 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger("migraine-chatbot")
 
 # Local imports - use relative imports
-try:
-    from .embedder import Embedder
-    from .wordpress_fetcher import WordPressFetcher
-except ImportError:
-    # Fallback for direct module execution
-    from embedder import Embedder
-    from wordpress_fetcher import WordPressFetcher
+from scraper import WebScraper
 
 # Load environment variables
 load_dotenv()
@@ -44,7 +44,7 @@ app = FastAPI(title="Migraine.ie AI Chatbot API",
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development - update for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,6 +94,12 @@ embedder_module.qdrant_client = qdrant_client
 # Initialize fuzzy matcher
 fuzzy_matcher = FuzzyMatcher(threshold=80)
 
+# Initialize database
+db = ChatDatabase()
+
+# Initialize scraper
+scraper = WebScraper()
+
 # Define request models
 class QueryRequest(BaseModel):
     query: str
@@ -112,20 +118,30 @@ class QueryResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    max_results: int = 5
+    max_results: int = 3
+    session_id: str | None = None  # Add session_id to ChatRequest
 
 class ChatResponse(BaseModel):
     response: str
     source: Optional[str] = None
     confidence: Optional[float] = None
     sources: Optional[List[SearchResult]] = None
+    session_id: str | None = None # Add session_id to ChatResponse
 
-class TriggerLogRequest(BaseModel):
-    trigger_type: str
-    timestamp: str
-    detection_method: Optional[str] = "unknown"
-    confidence: Optional[float] = 0.0
-    matched_phrase: Optional[str] = "unknown"
+class SaveHistoryRequest(BaseModel):
+    session_id: str
+    event_type: str
+    user_message_text: str | None = None
+    bot_response_text: str | None = None
+    bot_response_source: str | None = None
+    bot_response_confidence: float | None = None
+    trigger_detection_method: str | None = None
+    trigger_confidence: float | None = None
+    trigger_matched_phrase: str | None = None
+
+
+class StartSessionRequest(BaseModel):
+    session_id: str | None = None
 
 # Helper function to generate embeddings
 async def generate_embedding(text: str) -> List[float]:
@@ -254,25 +270,71 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
     Falls back to vector search if no fuzzy match is found.
     """
     try:
+        # Get or create session
+        session_data = db.get_or_create_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=500, detail="Could not create or retrieve session")
+        internal_session_id = session_data['id']
+        current_session_uuid = session_data['session_id']
+
         # Try fuzzy matching first
         fuzzy_response = fuzzy_matcher.get_response(request.message)
         if fuzzy_response:
             logger.info(f"Fuzzy match found for query: {request.message}")
+            # Log chat message (user input + bot response) to the database
+            db.save_chat_event({
+                "chatbot_session_id": internal_session_id,
+                "event_type": "chat_message", # Changed from "fuzzy_match"
+                "user_message_text": request.message,
+                "bot_response_text": fuzzy_response,
+                "bot_response_source": "fuzzy_match",
+                "bot_response_confidence": 1.0,
+            })
             return {
                 "response": fuzzy_response,
                 "source": "fuzzy_match",
                 "confidence": 1.0,
-                "sources": []
+                "sources": [],
+                "session_id": current_session_uuid # Ensure session_id is returned
             }
         
-        # If no fuzzy match, proceed with vector search
+        # If Qdrant is not available, return a default message
         if qdrant_client is None:
             logger.warning("Qdrant is not available, cannot perform vector search.")
+            db.save_chat_event({
+                "chatbot_session_id": internal_session_id,
+                "event_type": "chat_message", # Changed from "unavailable_service"
+                "user_message_text": request.message,
+                "bot_response_text": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                "bot_response_source": "qdrant_unavailable", # Keep source specific
+                "bot_response_confidence": 0.0,
+            })
             return {
                 "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
                 "source": "unavailable",
                 "confidence": 0.0,
-                "sources": []
+                "sources": [],
+                "session_id": current_session_uuid # Ensure session_id is returned
+            }
+        
+        # Perform vector search
+        if qdrant_client is None:
+            logger.warning("Qdrant is not available, cannot perform vector search.")
+            # Log chat message (user input + bot response) to the database
+            db.save_chat_event({
+                "chatbot_session_id": internal_session_id,
+                "event_type": "chat_message",
+                "user_message_text": request.message,
+                "bot_response_text": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                "bot_response_source": "unavailable",
+                "bot_response_confidence": 0.0,
+            })
+            return {
+                "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                "source": "unavailable",
+                "confidence": 0.0,
+                "sources": [],
+                "session_id": current_session_uuid # Ensure session_id is returned
             }
 
         # Generate embedding for the query
@@ -294,11 +356,20 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         # If no results have confidence above 30%, don't use any context
         if not filtered_results:
             logger.info("No high-confidence results found. Returning empty response.")
+            db.save_chat_event({
+                "chatbot_session_id": internal_session_id,
+                "event_type": "chat_message", # Changed from "no_reliable_info"
+                "user_message_text": request.message,
+                "bot_response_text": "I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
+                "bot_response_source": "no_reliable_info", # Keep source specific
+                "bot_response_confidence": 0.0,
+            })
             return ChatResponse(
                 response="I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
+                sources=[],
                 source="vector_search",
                 confidence=0.0,
-                sources=[]
+                session_id=current_session_uuid # Ensure session_id is returned
             )
         
         # Process results
@@ -316,16 +387,36 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         logger.info(f"Generating answer for query: {request.message}")
         answer = await generate_answer(request.message, context_texts)
         
+        # Log chat message (user input + bot response) to the database
+        db.save_chat_event({
+            "chatbot_session_id": internal_session_id,
+            "event_type": "chat_message",
+            "user_message_text": request.message,
+            "bot_response_text": answer,
+            "bot_response_source": "vector_search",
+            "bot_response_confidence": filtered_results[0].score if filtered_results else 0.0,
+        })
+
         return ChatResponse(
             response=answer,
             source="vector_search",
             confidence=filtered_results[0].score if filtered_results else 0.0,
-            sources=sources
+            sources=sources,
+            session_id=current_session_uuid # Ensure session_id is returned
         )
 
     except Exception as e:
-        logger.error(f"Error processing chat request: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Error processing chat request: {str(e)}")
+        # Log the bot error to the database
+        db.save_chat_event({
+            "chatbot_session_id": internal_session_id,
+            "event_type": "chat_message", # Changed from "bot_error"
+            "user_message_text": request.message,
+            "bot_response_text": "Sorry, I had trouble getting your answer. Please try again later.",
+            "bot_response_source": "error_handler",
+            "bot_response_confidence": 0.0,
+        })
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Health check endpoint
 @app.get("/health")
@@ -417,28 +508,6 @@ async def trigger_chunked_reindex():
         logger.error(f"Error during reindexing: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to complete reindexing: {e}")
 
-# Add endpoint for logging trigger word detection
-@app.post("/api/log-trigger")
-async def log_trigger(request: TriggerLogRequest):
-    """
-    Log trigger word detection events with enhanced detection information.
-    Only logs trigger type, timestamp, session ID, detection method, confidence, and matched phrase - no user input text.
-    """
-    try:
-        logger.info(f"Trigger detected - Type: {request.trigger_type}, Time: {request.timestamp}, Method: {request.detection_method}, Confidence: {request.confidence:.2f}, Phrase: '{request.matched_phrase}'")
-        
-        # Here you could add database logging if needed
-        # For now, we'll just log to the application log
-        # In the future, this could be extended to save to a database table
-        
-        return {
-            "status": "success",
-            "message": "Trigger logged successfully"
-        }
-    except Exception as e:
-        logger.error(f"Error logging trigger: {e}")
-        raise HTTPException(status_code=500, detail="Failed to log trigger")
-
 # Add global exception handler middleware
 @app.middleware("http")
 async def exception_handling_middleware(request: Request, call_next):
@@ -456,6 +525,54 @@ async def exception_handling_middleware(request: Request, call_next):
             status_code=500,
             content={"detail": f"Internal server error: {str(e)}"}
         )
+
+# Add new endpoint for saving chat history
+@app.post("/api/save-history")
+async def save_history(request: SaveHistoryRequest):
+    try:
+        session_data = db.get_or_create_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=500, detail="Could not create or retrieve session")
+        internal_session_id = session_data['id']
+
+        event_data = request.dict(exclude_unset=True)
+        event_data["chatbot_session_id"] = internal_session_id
+        event_data.pop("session_id") # Remove external session_id as we use internal_session_id
+
+        if db.save_chat_event(event_data):
+            return {"status": "success"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save chat event")
+    except Exception as e:
+        logger.exception(f"Error in save-history endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Add new endpoint for retrieving chat history
+@app.get("/api/chat-history/{session_id}")
+async def get_chat_history(session_id: str):
+    try:
+        history = db.get_chat_history(session_id)
+        # Convert datetime objects to string for JSON serialization
+        for event in history:
+            if 'event_timestamp' in event and isinstance(event['event_timestamp'], datetime):
+                event['event_timestamp'] = event['event_timestamp'].isoformat()
+        return {"history": history}
+    except Exception as e:
+        logger.exception(f"Error in chat-history endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/start-session")
+async def start_session(request: StartSessionRequest):
+    try:
+        session_data = db.get_or_create_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=500, detail="Could not create or retrieve session")
+        return {"session_id": session_data['session_id']}
+    except Exception as e:
+        logger.exception(f"Error in start-session endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Run the app
 if __name__ == "__main__":
