@@ -536,10 +536,11 @@ const DoctorNote = ({ onAcknowledge, onEnableChat }) => {
 };
 
 // Main Trigger Detector Hook
-export const useTriggerDetection = (saveHistory) => {
+export const useTriggerDetection = (saveHistory, setChatDisabled) => {
   const [activeTrigger, setActiveTrigger] = useState(null);
   const [isBlocked, setIsBlocked] = useState(false);
-  const [chatDisabled, setChatDisabled] = useState(false);
+  // Removed internal chatDisabled state, now managed by ChatWidget
+  // const [chatDisabled, setChatDisabled] = useState(false);
 
   const checkTriggers = async (text) => {
     const trigger = detectTriggers(text);
@@ -547,7 +548,7 @@ export const useTriggerDetection = (saveHistory) => {
     if (trigger) {
       setActiveTrigger(trigger);
       setIsBlocked(true);
-      setChatDisabled(true); // Disable chat after trigger
+      setChatDisabled(true); // Update external chatDisabled state
       
       // Log trigger event to the backend
       if (saveHistory) {
@@ -571,12 +572,15 @@ export const useTriggerDetection = (saveHistory) => {
   const acknowledgeTrigger = () => {
     setActiveTrigger(null);
     setIsBlocked(false);
-    // Keep chat disabled after acknowledging trigger
-    // User needs to manually re-enable if they want to continue
+    // For doctor triggers, re-enable chat when acknowledged
+    if (activeTrigger?.category === 'doctor') {
+      setChatDisabled(false); // Re-enable chat
+    }
+    // Keep chat disabled after acknowledging for emergency/suicide
   };
 
   const enableChat = () => {
-    setChatDisabled(false);
+    setChatDisabled(false); // Re-enable chat
     setActiveTrigger(null);
     setIsBlocked(false);
   };
@@ -587,12 +591,12 @@ export const useTriggerDetection = (saveHistory) => {
     if (activeTrigger.category === 'doctor') {
       return <DoctorNote onAcknowledge={acknowledgeTrigger} onEnableChat={enableChat} />;
     } else {
-      // Emergency and Suicide triggers don't allow re-enabling chat
+      // Emergency and Suicide triggers don't allow re-enabling chat directly from banner
       return (
         <EmergencyBanner 
           trigger={activeTrigger} 
           onAcknowledge={acknowledgeTrigger}
-          onEnableChat={null} // No re-enable for emergency/suicide
+          onEnableChat={null} // No direct re-enable for emergency/suicide
         />
       );
     }
@@ -604,7 +608,7 @@ export const useTriggerDetection = (saveHistory) => {
     enableChat,
     renderTriggerResponse,
     isBlocked,
-    chatDisabled,
+    // chatDisabled, // No longer returned from here
     activeTrigger
   };
 };

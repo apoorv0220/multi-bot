@@ -20,6 +20,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   const [showConsent, setShowConsent] = useState(true);
   const [sessionId, setSessionId] = useState(sessionStorage.getItem('migraine-chatbot-session-id')); // Initialize directly from sessionStorage
   const [isHistoryLoading, setIsHistoryLoading] = useState(false); // New state for history loading
+  const [chatDisabled, setChatDisabled] = useState(false); // Manage chatDisabled state here
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
   
@@ -37,8 +38,8 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     }
   };
 
-  // Initialize trigger detection
-  const { checkTriggers, renderTriggerResponse, chatDisabled } = useTriggerDetection(saveHistory);
+  // Initialize trigger detection, passing setChatDisabled
+  const { checkTriggers, renderTriggerResponse } = useTriggerDetection(saveHistory, setChatDisabled);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -133,6 +134,16 @@ const ChatWidget = ({ onClose, apiUrl }) => {
                 !(msg.type === 'bot' && msg.text === initialBotGreetingText)
             );
             setMessages(filteredHistory.length > 0 ? filteredHistory : []);
+
+            // After loading history, check if chat should be disabled
+            let shouldDisableChat = false;
+            for (const msg of filteredHistory) {
+              if (msg.isTrigger && (msg.triggerCategory === 'emergency' || msg.triggerCategory === 'suicide')) {
+                shouldDisableChat = true;
+                break;
+              }
+            }
+            setChatDisabled(shouldDisableChat);
 
             console.log("Loaded chat history:", history); // Debug log
 
