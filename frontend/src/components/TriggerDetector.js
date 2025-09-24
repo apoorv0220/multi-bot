@@ -558,6 +558,7 @@ export const useTriggerDetection = (saveHistory) => {
           trigger_detection_method: trigger.method || 'unknown',
           trigger_confidence: trigger.confidence || 0,
           trigger_matched_phrase: trigger.triggerWord || 'unknown',
+          bot_response_source: {"type": "trigger", "buttons": trigger.response?.buttons || []}, // Add buttons for triggers
         });
       }
       

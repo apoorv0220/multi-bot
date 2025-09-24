@@ -1,6 +1,7 @@
 import os
 import pymysql
 import uuid
+import json # Import the json module
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -79,7 +80,18 @@ class ChatDatabase:
                 values_placeholders.append("%s")
                 values.append(event_data["event_type"])
 
-                # Conditionally include other fields
+                # Handle JSON serialization for bot_response_source
+                if "bot_response_source" in event_data and isinstance(event_data["bot_response_source"], dict):
+                    columns.append("bot_response_source")
+                    values_placeholders.append("%s")
+                    values.append(json.dumps(event_data["bot_response_source"]))
+                elif "bot_response_source" in event_data and event_data["bot_response_source"] is not None:
+                    # Fallback for non-JSON strings if needed, though we expect JSON dicts now
+                    columns.append("bot_response_source")
+                    values_placeholders.append("%s")
+                    values.append(event_data["bot_response_source"])
+
+                # Conditionally include other fields (restored)
                 if "user_message_text" in event_data:
                     columns.append("user_message_text")
                     values_placeholders.append("%s")
@@ -88,10 +100,6 @@ class ChatDatabase:
                     columns.append("bot_response_text")
                     values_placeholders.append("%s")
                     values.append(event_data["bot_response_text"])
-                if "bot_response_source" in event_data:
-                    columns.append("bot_response_source")
-                    values_placeholders.append("%s")
-                    values.append(event_data["bot_response_source"])
                 if "bot_response_confidence" in event_data:
                     columns.append("bot_response_confidence")
                     values_placeholders.append("%s")
@@ -157,7 +165,17 @@ class ChatDatabase:
                     event_timestamp ASC
                 """
                 cursor.execute(history_query, (chatbot_internal_session_id,))
-                return cursor.fetchall()
+                history = cursor.fetchall()
+
+                # Deserialize bot_response_source for each event
+                for event in history:
+                    if event.get('bot_response_source'):
+                        try:
+                            event['bot_response_source'] = json.loads(event['bot_response_source'])
+                        except json.JSONDecodeError:
+                            # Handle cases where it's not valid JSON (e.g., old string data)
+                            pass 
+                return history
         except Exception as e:
             print(f"Error retrieving chat history: {e}")
             return []

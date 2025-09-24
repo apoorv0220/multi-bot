@@ -123,17 +123,19 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
-    source: Optional[str] = None
-    confidence: Optional[float] = None
-    sources: Optional[List[SearchResult]] = None
-    session_id: str | None = None # Add session_id to ChatResponse
+    source: str 
+    confidence: float
+    sources: List[SearchResult] | None = None # Full sources data
+    session_id: str | None = None
+    source_details: dict | None = None # New field for structured source data
+
 
 class SaveHistoryRequest(BaseModel):
     session_id: str
     event_type: str
     user_message_text: str | None = None
     bot_response_text: str | None = None
-    bot_response_source: str | None = None
+    bot_response_source: dict | None = None
     bot_response_confidence: float | None = None
     trigger_detection_method: str | None = None
     trigger_confidence: float | None = None
@@ -282,61 +284,47 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         if fuzzy_response:
             logger.info(f"Fuzzy match found for query: {request.message}")
             # Log chat message (user input + bot response) to the database
-            db.save_chat_event({
+            event_data = {
                 "chatbot_session_id": internal_session_id,
-                "event_type": "chat_message", # Changed from "fuzzy_match"
+                "event_type": "chat_message", 
                 "user_message_text": request.message,
                 "bot_response_text": fuzzy_response,
-                "bot_response_source": "fuzzy_match",
+                "bot_response_source": {"type": "fuzzy_match"}, # Consistent JSON for DB
                 "bot_response_confidence": 1.0,
-            })
-            return {
-                "response": fuzzy_response,
-                "source": "fuzzy_match",
-                "confidence": 1.0,
-                "sources": [],
-                "session_id": current_session_uuid # Ensure session_id is returned
             }
+            db.save_chat_event(event_data)
+            logger.debug(f"Event data sent to db.save_chat_event (fuzzy_match): {event_data}") # Debug log
+            return ChatResponse(
+                response=fuzzy_response,
+                source="fuzzy_match", # Simple string
+                confidence=1.0,
+                sources=[],
+                session_id=current_session_uuid,
+                source_details={"type": "fuzzy_match"} # Structured data
+            )
         
         # If Qdrant is not available, return a default message
         if qdrant_client is None:
             logger.warning("Qdrant is not available, cannot perform vector search.")
-            db.save_chat_event({
+            event_data = {
                 "chatbot_session_id": internal_session_id,
-                "event_type": "chat_message", # Changed from "unavailable_service"
+                "event_type": "chat_message", 
                 "user_message_text": request.message,
                 "bot_response_text": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
-                "bot_response_source": "qdrant_unavailable", # Keep source specific
+                "bot_response_source": {"type": "qdrant_unavailable"}, # Consistent JSON for DB
                 "bot_response_confidence": 0.0,
-            })
-            return {
-                "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
-                "source": "unavailable",
-                "confidence": 0.0,
-                "sources": [],
-                "session_id": current_session_uuid # Ensure session_id is returned
             }
+            db.save_chat_event(event_data)
+            logger.debug(f"Event data sent to db.save_chat_event (qdrant_unavailable): {event_data}") # Debug log
+            return ChatResponse(
+                response="Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                source="qdrant_unavailable", # Simple string
+                confidence=0.0,
+                sources=[],
+                session_id=current_session_uuid,
+                source_details={"type": "qdrant_unavailable"} # Structured data
+            )
         
-        # Perform vector search
-        if qdrant_client is None:
-            logger.warning("Qdrant is not available, cannot perform vector search.")
-            # Log chat message (user input + bot response) to the database
-            db.save_chat_event({
-                "chatbot_session_id": internal_session_id,
-                "event_type": "chat_message",
-                "user_message_text": request.message,
-                "bot_response_text": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
-                "bot_response_source": "unavailable",
-                "bot_response_confidence": 0.0,
-            })
-            return {
-                "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
-                "source": "unavailable",
-                "confidence": 0.0,
-                "sources": [],
-                "session_id": current_session_uuid # Ensure session_id is returned
-            }
-
         # Generate embedding for the query
         embedding = await generate_embedding(request.message)
         
@@ -345,7 +333,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         
         # Prepare context for OpenAI
         context_texts = []
-        sources = []
+        sources_for_response: List[SearchResult] = [] # Use explicit type hint for clarity
 
         logger.info(f"Search results: {len(search_results)}")
         
@@ -356,27 +344,30 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         # If no results have confidence above 30%, don't use any context
         if not filtered_results:
             logger.info("No high-confidence results found. Returning empty response.")
-            db.save_chat_event({
+            event_data = {
                 "chatbot_session_id": internal_session_id,
-                "event_type": "chat_message", # Changed from "no_reliable_info"
+                "event_type": "chat_message", 
                 "user_message_text": request.message,
                 "bot_response_text": "I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
-                "bot_response_source": "no_reliable_info", # Keep source specific
+                "bot_response_source": {"type": "no_reliable_info"}, # Consistent JSON for DB
                 "bot_response_confidence": 0.0,
-            })
+            }
+            db.save_chat_event(event_data)
+            logger.debug(f"Event data sent to db.save_chat_event (no_reliable_info): {event_data}") # Debug log
             return ChatResponse(
                 response="I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
                 sources=[],
-                source="vector_search",
+                source="no_reliable_info", # Simple string
                 confidence=0.0,
-                session_id=current_session_uuid # Ensure session_id is returned
+                session_id=current_session_uuid,
+                source_details={"type": "no_reliable_info"} # Structured data
             )
         
         # Process results
         for result in filtered_results:
             content_preview = result.payload['content']
             context_texts.append(f"Source: {result.payload['source']}\nURL: {result.payload['url']}\n{content_preview}")
-            sources.append(SearchResult(
+            sources_for_response.append(SearchResult(
                 content=result.payload['content'][:200] + "...",
                 source=result.payload['source'],
                 url=result.payload['url'],
@@ -388,34 +379,39 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         answer = await generate_answer(request.message, context_texts)
         
         # Log chat message (user input + bot response) to the database
-        db.save_chat_event({
+        event_data = {
             "chatbot_session_id": internal_session_id,
             "event_type": "chat_message",
             "user_message_text": request.message,
             "bot_response_text": answer,
-            "bot_response_source": "vector_search",
+            "bot_response_source": {"type": "vector_search", "details": {"sources": [s.model_dump() for s in sources_for_response]}}, # Structured JSON for DB
             "bot_response_confidence": filtered_results[0].score if filtered_results else 0.0,
-        })
+        }
+        db.save_chat_event(event_data)
+        logger.debug(f"Event data sent to db.save_chat_event (vector_search): {event_data}") # Debug log
 
         return ChatResponse(
             response=answer,
-            source="vector_search",
+            sources=sources_for_response, # Use the list of SearchResult objects
+            source="vector_search", # Simple string
             confidence=filtered_results[0].score if filtered_results else 0.0,
-            sources=sources,
-            session_id=current_session_uuid # Ensure session_id is returned
+            session_id=current_session_uuid,
+            source_details={"type": "vector_search", "sources": [s.model_dump() for s in sources_for_response]} # Structured data
         )
 
     except Exception as e:
         logger.exception(f"Error processing chat request: {str(e)}")
         # Log the bot error to the database
-        db.save_chat_event({
+        event_data = {
             "chatbot_session_id": internal_session_id,
-            "event_type": "chat_message", # Changed from "bot_error"
+            "event_type": "chat_message", 
             "user_message_text": request.message,
             "bot_response_text": "Sorry, I had trouble getting your answer. Please try again later.",
-            "bot_response_source": "error_handler",
+            "bot_response_source": {"type": "error_handler"}, # Consistent JSON for DB
             "bot_response_confidence": 0.0,
-        })
+        }
+        db.save_chat_event(event_data)
+        logger.debug(f"Event data sent to db.save_chat_event (error_handler): {event_data}") # Debug log
         raise HTTPException(status_code=500, detail="Internal server error")
 
 # Health check endpoint
@@ -539,6 +535,7 @@ async def save_history(request: SaveHistoryRequest):
         event_data["chatbot_session_id"] = internal_session_id
         event_data.pop("session_id") # Remove external session_id as we use internal_session_id
 
+        logger.debug(f"Event data sent to db.save_chat_event (save-history): {event_data}") # Debug log
         if db.save_chat_event(event_data):
             return {"status": "success"}
         else:

@@ -26,6 +26,11 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   // Function to save chat events to backend
   const saveHistory = async (eventData) => {
     try {
+      // Ensure bot_response_source is structured correctly before sending
+      if (eventData.bot_response_source && typeof eventData.bot_response_source === 'object') {
+        // This object is already prepared by TriggerDetector.js
+        // The backend expects this as a dict for JSON serialization
+      }
       await axios.post(`${apiUrl}/api/save-history`, { ...eventData, session_id: sessionId });
     } catch (error) {
       console.error("Error saving chat event to backend:", error);
@@ -81,19 +86,40 @@ const ChatWidget = ({ onClose, apiUrl }) => {
           const response = await axios.get(`${apiUrl}/api/chat-history/${sessionId}`);
           const history = response.data.history.map(event => {
             // Reconstruct message objects from history events
-            if (event.event_type === 'chat_message' || event.event_type === 'fuzzy_match' || event.event_type === 'unavailable_service' || event.event_type === 'no_reliable_info') {
+            let sources_for_message = []; // Renamed to avoid confusion with event.bot_response_source
+            let triggerButtons = [];
+            let botResponseSourceType = 'unknown';
+
+            // Parse bot_response_source from DB (which is a dict now)
+            if (event.bot_response_source && typeof event.bot_response_source === 'object') {
+                botResponseSourceType = event.bot_response_source.type;
+                if (event.bot_response_source.type === 'vector_search') {
+                    sources_for_message = event.bot_response_source.details?.sources || [];
+                } else if (event.bot_response_source.type === 'trigger') {
+                    triggerButtons = event.bot_response_source.buttons || [];
+                }
+            }
+
+            if (event.event_type === 'chat_message') {
                 return [
                     { type: 'user', text: event.user_message_text, timestamp: new Date(event.event_timestamp) },
-                    { type: 'bot', text: event.bot_response_text, timestamp: new Date(event.event_timestamp), source: event.bot_response_source, confidence: event.bot_response_confidence }
+                    { 
+                        type: 'bot', 
+                        text: event.bot_response_text, 
+                        timestamp: new Date(event.event_timestamp), 
+                        sources: sources_for_message, // Pass extracted sources
+                        confidence: event.bot_response_confidence, 
+                        source: botResponseSourceType // Pass source type
+                    }
                 ];
             } else if (event.event_type.startsWith('trigger_')) {
-                // For trigger events, the bot_response_text contains the trigger message
                 return {
                     type: 'bot',
                     text: event.bot_response_text,
                     timestamp: new Date(event.event_timestamp),
                     isTrigger: true,
                     triggerCategory: event.event_type.replace('trigger_', ''),
+                    triggerButtons: triggerButtons // Pass extracted trigger buttons
                 };
             }
             return null; // Should not happen
@@ -107,6 +133,9 @@ const ChatWidget = ({ onClose, apiUrl }) => {
                 !(msg.type === 'bot' && msg.text === initialBotGreetingText)
             );
             setMessages(filteredHistory.length > 0 ? filteredHistory : []);
+
+            console.log("Loaded chat history:", history); // Debug log
+
           } else {
             // If no history, ensure only the initial bot greeting is present
             setMessages([
@@ -221,9 +250,10 @@ const ChatWidget = ({ onClose, apiUrl }) => {
         type: 'bot',
         text: response.data.response,
         timestamp: new Date(),
-        sources: response.data.sources || [],
+        sources: response.data.sources || [], // Use the 'sources' directly for 'Read More' in Message component
         confidence: response.data.confidence,
-        source: response.data.source,
+        source: response.data.source, // This is now a string like 'vector_search'
+        sourceDetails: response.data.source_details, // Pass source_details for potential future use or debugging
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
 
@@ -252,18 +282,24 @@ const ChatWidget = ({ onClose, apiUrl }) => {
       </WidgetHeader>
       
       <MessageContainer>
-        {messages.map((message, index) => (
-          <Message
-            key={index}
-            type={message.type}
-            text={message.text}
-            timestamp={message.timestamp}
-            sources={message.sources}
-            isError={message.isError}
-            confidence={message.confidence}
-            source={message.source}
-          />
-        ))}
+        {messages.map((message, index) => {
+          console.log("Rendering Message component with props:", message); // Debug log
+          return (
+            <Message
+              key={index}
+              type={message.type}
+              text={message.text}
+              timestamp={message.timestamp}
+              sources={message.sources}
+              isError={message.isError}
+              confidence={message.confidence}
+              source={message.source}
+              isTrigger={message.isTrigger} // Pass isTrigger prop
+              triggerCategory={message.triggerCategory} // Pass triggerCategory prop
+              triggerButtons={message.triggerButtons} // Pass triggerButtons prop
+            />
+          );
+        })}
         
         {/* Show consent message after first bot message */}
         {showConsent && (
