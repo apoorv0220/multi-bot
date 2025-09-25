@@ -1,19 +1,20 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 import axios from 'axios';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
 import ConsentMessage from './ConsentMessage';
 import { useTriggerDetection } from './TriggerDetector';
+// import TriggerMessageDisplay from './TriggerMessageDisplay'; // Removed as no longer needed
 
 const ChatWidget = ({ onClose, apiUrl }) => {
-  const [messages, setMessages] = useState([
-    {
-      type: 'bot',
-      text: 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?',
-      timestamp: new Date(),
-    },
-  ]);
+  const initialBotGreeting = useMemo(() => ({
+    type: 'bot',
+    text: 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?',
+    timestamp: new Date(),
+  }), []);
+
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [consentGiven, setConsentGiven] = useState(false);
@@ -23,7 +24,18 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   const [chatDisabled, setChatDisabled] = useState(false); // Manage chatDisabled state here
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
-  
+
+  // Custom acknowledge and re-enable chat functions for TriggerMessageDisplay
+  const acknowledgeTrigger = () => {
+    // For doctor triggers, re-enable chat when acknowledged
+    // This will be called from TriggerMessageDisplay within the Message component
+    setChatDisabled(false); // This will only affect doctor triggers, as emergency/suicide chat is disabled.
+  };
+
+  const enableChat = () => {
+    setChatDisabled(false);
+  };
+
   // Function to save chat events to backend
   const saveHistory = async (eventData) => {
     try {
@@ -38,8 +50,8 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     }
   };
 
-  // Initialize trigger detection, passing setChatDisabled
-  const { checkTriggers, renderTriggerResponse } = useTriggerDetection(saveHistory, setChatDisabled);
+  // Initialize trigger detection
+  const { checkTriggers } = useTriggerDetection(saveHistory);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -58,6 +70,14 @@ const ChatWidget = ({ onClose, apiUrl }) => {
       setConsentGiven(true);
       setShowConsent(false);
 
+      // If consent is given and greeting isn't already the first message, add it
+      setMessages(prevMessages => {
+        if (prevMessages.length === 0 || prevMessages[0].text !== initialBotGreeting.text) {
+          return [initialBotGreeting, ...prevMessages];
+        }
+        return prevMessages;
+      });
+
       // If consent is given but no session_id exists, create one via a dedicated endpoint
       const ensureSessionId = async () => {
         if (!sessionId) { // This condition will now correctly reflect sessionStorage
@@ -75,7 +95,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
       };
       ensureSessionId();
     }
-  }, [consentGiven, sessionId, apiUrl]); // Depend on consentGiven, sessionId, and apiUrl
+  }, [consentGiven, sessionId, apiUrl, initialBotGreeting]); // Depend on consentGiven, sessionId, apiUrl, and initialBotGreeting
 
   // Load chat history if session_id exists and consent is given
   useEffect(() => {
@@ -90,6 +110,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
             let sources_for_message = []; // Renamed to avoid confusion with event.bot_response_source
             let triggerButtons = [];
             let botResponseSourceType = 'unknown';
+            let botResponseTitle = ''; // Initialize botResponseTitle
 
             // Parse bot_response_source from DB (which is a dict now)
             if (event.bot_response_source && typeof event.bot_response_source === 'object') {
@@ -98,6 +119,8 @@ const ChatWidget = ({ onClose, apiUrl }) => {
                     sources_for_message = event.bot_response_source.details?.sources || [];
                 } else if (event.bot_response_source.type === 'trigger') {
                     triggerButtons = event.bot_response_source.buttons || [];
+                    // Use bot_response_title if available, otherwise infer from category
+                    botResponseTitle = event.bot_response_title || (event.event_type.replace('trigger_', '') === 'emergency' ? '⚠️ Emergency Medical Alert' : event.event_type.replace('trigger_', '') === 'suicide' ? '⚠️ Crisis Support Available' : '📋 Medical Advice Recommended');
                 }
             }
 
@@ -110,52 +133,62 @@ const ChatWidget = ({ onClose, apiUrl }) => {
                         timestamp: new Date(event.event_timestamp), 
                         sources: sources_for_message, // Pass extracted sources
                         confidence: event.bot_response_confidence, 
-                        source: botResponseSourceType // Pass source type
+                        source: botResponseSourceType, // Pass source type
+                        botResponseTitle: botResponseTitle, // Pass the title
                     }
                 ];
             } else if (event.event_type.startsWith('trigger_')) {
-                return {
-                    type: 'bot',
-                    text: event.bot_response_text,
-                    timestamp: new Date(event.event_timestamp),
-                    isTrigger: true,
-                    triggerCategory: event.event_type.replace('trigger_', ''),
-                    triggerButtons: triggerButtons // Pass extracted trigger buttons
-                };
+                // For trigger events, we need to add both the user's message and the bot's trigger response
+                return [
+                    { 
+                        type: 'user', 
+                        text: event.user_message_text, 
+                        timestamp: new Date(event.event_timestamp) 
+                    },
+                    {
+                        type: 'bot',
+                        text: event.bot_response_text,
+                        timestamp: new Date(event.event_timestamp),
+                        isTrigger: true,
+                        triggerCategory: event.event_type.replace('trigger_', ''),
+                        triggerButtons: triggerButtons, // Pass extracted trigger buttons
+                        botResponseTitle: botResponseTitle, // Pass the title
+                    }
+                ];
             }
             return null; // Should not happen
           }).flat().filter(Boolean);
           
           // Filter out the initial bot greeting if history is loaded
           if (history.length > 0) {
-            // Define the initial bot greeting statically
-            const initialBotGreetingText = 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?';
+            // Ensure the initial bot greeting is always the first message
             const filteredHistory = history.filter(msg => 
-                !(msg.type === 'bot' && msg.text === initialBotGreetingText)
+                !(msg.type === 'bot' && msg.text === initialBotGreeting.text)
             );
-            setMessages(filteredHistory.length > 0 ? filteredHistory : []);
+            setMessages([initialBotGreeting, ...filteredHistory]);
 
             // After loading history, check if chat should be disabled
             let shouldDisableChat = false;
+            // Also check for active triggers from history to set the `activeTrigger` state
+            
             for (const msg of filteredHistory) {
-              if (msg.isTrigger && (msg.triggerCategory === 'emergency' || msg.triggerCategory === 'suicide')) {
-                shouldDisableChat = true;
-                break;
+              if (msg.isTrigger) {
+                if (msg.triggerCategory === 'emergency' || msg.triggerCategory === 'suicide') {
+                  shouldDisableChat = true;
+                  
+                }
+                
               }
             }
             setChatDisabled(shouldDisableChat);
+            // The activeTrigger state is no longer used for rendering a separate banner
+            // Instead, the Message component will render TriggerMessageDisplay if isTrigger is true
 
             console.log("Loaded chat history:", history); // Debug log
 
           } else {
             // If no history, ensure only the initial bot greeting is present
-            setMessages([
-                {
-                    type: 'bot',
-                    text: 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?',
-                    timestamp: new Date(),
-                },
-            ]);
+            setMessages([initialBotGreeting]);
           }
 
         } catch (error) {
@@ -166,7 +199,7 @@ const ChatWidget = ({ onClose, apiUrl }) => {
       }
     };
     loadChatHistory();
-  }, [sessionId, consentGiven, apiUrl]);
+  }, [sessionId, consentGiven, apiUrl, initialBotGreeting]);
 
   // Announce consent message to screen readers
   useEffect(() => {
@@ -196,6 +229,14 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     setConsentGiven(true);
     setShowConsent(false);
     sessionStorage.setItem('migraine-chatbot-consent', 'true');
+
+    // Add initial greeting after consent is accepted, if not already present
+    setMessages(prevMessages => {
+      if (prevMessages.length === 0 || prevMessages[0].text !== initialBotGreeting.text) {
+        return [initialBotGreeting, ...prevMessages];
+      }
+      return prevMessages;
+    });
   };
 
   // Handle consent decline
@@ -222,23 +263,38 @@ const ChatWidget = ({ onClose, apiUrl }) => {
       return; // Don't process input until consent is given
     }
 
-    // Check for trigger words before processing
-    const trigger = await checkTriggers(input);
-    if (trigger) {
-      // Clear the input field when trigger is detected
-      setInput('');
-      // saveHistory is now called inside useTriggerDetection
-      return;
-    }
-
-    // Add user message
+    // Add user message to display immediately
     const userMessage = {
       type: 'user',
       text: input,
       timestamp: new Date(),
     };
     setMessages((prevMessages) => [...prevMessages, userMessage]);
-    setInput('');
+    setInput(''); // Clear input immediately after adding user message
+
+    // Check for trigger words before processing
+    const trigger = await checkTriggers(userMessage.text); // Pass the text of the user message for trigger detection
+    if (trigger) {
+      // Disable chat based on trigger category
+      if (trigger.category === 'emergency' || trigger.category === 'suicide') {
+        setChatDisabled(true);
+      }
+      // Add bot trigger response message to the chat
+      const botTriggerMessage = {
+        type: 'bot',
+        text: trigger.response.message,
+        timestamp: new Date(),
+        isTrigger: true,
+        triggerCategory: trigger.category,
+        triggerButtons: trigger.response.buttons,
+        botResponseTitle: trigger.response.title,
+      };
+      setMessages((prevMessages) => [...prevMessages, botTriggerMessage]);
+
+      // saveHistory is now called inside useTriggerDetection
+      return; // Exit as trigger response is handled by renderTriggerResponse and saveHistory
+    }
+
     setIsLoading(true);
 
     try {
@@ -308,6 +364,9 @@ const ChatWidget = ({ onClose, apiUrl }) => {
               isTrigger={message.isTrigger} // Pass isTrigger prop
               triggerCategory={message.triggerCategory} // Pass triggerCategory prop
               triggerButtons={message.triggerButtons} // Pass triggerButtons prop
+              botResponseTitle={message.botResponseTitle} // Pass the title prop
+              onAcknowledge={message.isTrigger && message.triggerCategory === 'doctor' ? acknowledgeTrigger : null} // Pass acknowledge for doctor triggers
+              onEnableChat={message.isTrigger && message.triggerCategory === 'doctor' ? enableChat : null} // Pass enableChat for doctor triggers
             />
           );
         })}
@@ -320,8 +379,8 @@ const ChatWidget = ({ onClose, apiUrl }) => {
           />
         )}
         
-        {/* Show trigger response if detected */}
-        {renderTriggerResponse()}
+        {/* Render active trigger banner dynamically */}
+        {/* This is no longer needed as trigger messages are now handled by the Message component */}
         
         {/* Show loading indicator for history fetch */}
         {isHistoryLoading && (

@@ -1,6 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
+import TriggerMessageDisplay from './TriggerMessageDisplay'; // Import the new component
 
 // Determine background color for trigger messages
 const getTriggerBackgroundColor = (category) => {
@@ -22,7 +23,7 @@ const getTriggerBorderColor = (category) => {
   }
 };
 
-const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigger, triggerCategory, triggerButtons = [] }) => {
+const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigger, triggerCategory, triggerButtons = [], botResponseTitle }) => {
   // console.log("Message component received props:", { type, text, isTrigger, triggerCategory, sources, triggerButtons }); // Debug log removed
   // Format timestamp
   const formatTime = (date) => {
@@ -37,6 +38,23 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigg
     sources.length > 0 && 
     sources.some(s => s.score >= 0.3); // Renamed 'source' to 's' to avoid conflict with prop 'source'
 
+  // If it's a trigger message, render TriggerMessageDisplay
+  if (isTrigger) {
+    return (
+      <MessageContainer type={type} isTrigger={isTrigger} triggerCategory={triggerCategory}>
+        <TriggerMessageDisplay
+          title={botResponseTitle || (triggerCategory === 'emergency' ? '⚠️ Emergency Medical Alert' : triggerCategory === 'suicide' ? '⚠️ Crisis Support Available' : '📋 Medical Advice Recommended')}
+          message={text}
+          buttons={triggerButtons}
+          category={triggerCategory}
+          // onAcknowledge and onEnableChat are not passed here, as Message component is for display only
+        />
+        <MessageTime type={type}>{formatTime(timestamp)}</MessageTime>
+      </MessageContainer>
+    );
+  }
+
+  // Original rendering for non-trigger messages
   return (
     <MessageContainer isError={isError} type={type} isTrigger={isTrigger} triggerCategory={triggerCategory}>
       <MessageContent 
@@ -56,27 +74,7 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigg
             Read More
           </ReadMoreButton>
         )}
-        {isTrigger && triggerButtons.length > 0 && (
-            <TriggerButtonsContainer>
-                {triggerButtons.map((button, idx) => (
-                    <TriggerButton 
-                        key={idx} 
-                        buttonType={button.type}
-                        onClick={(e) => {
-                            e.preventDefault(); // Prevent default link behavior
-                            if (button.action.startsWith('tel:')) {
-                                window.location.href = button.action;
-                            } else if (button.action.startsWith('http')) {
-                                window.open(button.action, '_blank');
-                            }
-                            // No action for 'continue' for historical messages
-                        }}
-                    >
-                        {button.text}
-                    </TriggerButton>
-                ))}
-            </TriggerButtonsContainer>
-        )}
+        {/* Trigger buttons are now handled by TriggerMessageDisplay */}
       </MessageContent>
       <MessageTime type={type}>{formatTime(timestamp)}</MessageTime>
     </MessageContainer>
@@ -159,35 +157,6 @@ const TriggerIcon = styled.span`
   padding: 2px;
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
   z-index: 10; // Ensure it's above the message content
-`;
-
-const TriggerButtonsContainer = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-`;
-
-const TriggerButton = styled.button`
-  background-color: ${props => {
-    switch (props.buttonType) {
-      case 'emergency': return '#d32f2f';
-      case 'support': return '#1976d2';
-      case 'continue': return '#4caf50';
-      default: return '#cccccc';
-    }
-  }};
-  color: white;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 4px;
-  font-size: 0.85em;
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-
-  &:hover {
-    opacity: 0.9;
-  }
 `;
 
 export default Message; 

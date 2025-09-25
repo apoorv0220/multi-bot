@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import styled from 'styled-components';
+// import styled from 'styled-components'; // Removed as no longer needed
+import TriggerMessageDisplay from './TriggerMessageDisplay';
 
 
 // Enhanced trigger word definitions with priority levels and keywords
@@ -417,128 +418,10 @@ const detectTriggers = (text) => {
   return null;
 };
 
-
-// Emergency Response Banner Component
-const EmergencyBanner = ({ trigger, onAcknowledge, onEnableChat }) => {
-  const [isVisible, setIsVisible] = useState(true);
-
-  const handleAcknowledge = () => {
-    setIsVisible(false);
-    onAcknowledge();
-  };
-
-  const handleEnableChat = () => {
-    setIsVisible(false);
-    onEnableChat();
-  };
-
-  const handleButtonClick = (button) => {
-    if (button.action === 'continue') {
-      handleAcknowledge();
-    } else if (button.action.startsWith('tel:')) {
-      window.location.href = button.action;
-    } else if (button.action.startsWith('http')) {
-      window.open(button.action, '_blank');
-    }
-  };
-
-  if (!isVisible) return null;
-
-  return (
-    <BannerContainer 
-      role="alert" 
-      aria-live="assertive"
-      priority={trigger.category}
-    >
-      <BannerHeader>
-        <span aria-hidden="true">⚠️</span>
-        {trigger.response.title}
-      </BannerHeader>
-      
-      <BannerContent>
-        {trigger.response.message.split('\n').map((line, index) => (
-          <BannerText key={index}>
-            {line}
-          </BannerText>
-        ))}
-      </BannerContent>
-      
-      <BannerButtons>
-        {trigger.response.buttons.map((button, index) => (
-          <BannerButton
-            key={index}
-            onClick={() => handleButtonClick(button)}
-            buttonType={button.type}
-            priority={trigger.category}
-          >
-            {button.text}
-          </BannerButton>
-        ))}
-      </BannerButtons>
-      
-      {/* Only show acknowledge button for Doctor contact level */}
-      {onEnableChat && (
-        <ButtonRow>
-          <ContinueButton onClick={handleAcknowledge}>
-            Acknowledge
-          </ContinueButton>
-          <EnableChatButton onClick={handleEnableChat}>
-            Re-enable Chat
-          </EnableChatButton>
-        </ButtonRow>
-      )}
-    </BannerContainer>
-  );
-};
-
-// Doctor Contact Note Component
-const DoctorNote = ({ onAcknowledge, onEnableChat }) => {
-  const [isVisible, setIsVisible] = useState(true);
-
-  const handleAcknowledge = () => {
-    setIsVisible(false);
-    onAcknowledge();
-  };
-
-  const handleEnableChat = () => {
-    setIsVisible(false);
-    onEnableChat();
-  };
-
-  if (!isVisible) return null;
-
-  return (
-    <NoteContainer role="note" aria-live="polite">
-      <NoteHeader>
-        <span aria-hidden="true">📋</span>
-        Medical Advice Recommended
-      </NoteHeader>
-      
-      <NoteContent>
-        Talk to your doctor immediately. For informational support email info@migraine.ie. 
-        Please note this is a limited informational support service which receives a high volume of queries and it may take some time to respond.
-      </NoteContent>
-      
-      <NoteWarning>
-        Please do not enter personal or medical identifiers in your messages.
-      </NoteWarning>
-      
-      <NoteButtonRow>
-        <NoteButton onClick={handleAcknowledge}>
-          Acknowledge
-        </NoteButton>
-        <NoteButton onClick={handleEnableChat}>
-          Re-enable Chat
-        </NoteButton>
-      </NoteButtonRow>
-    </NoteContainer>
-  );
-};
-
 // Main Trigger Detector Hook
 export const useTriggerDetection = (saveHistory, setChatDisabled) => {
-  const [activeTrigger, setActiveTrigger] = useState(null);
-  const [isBlocked, setIsBlocked] = useState(false);
+  // const [activeTrigger, setActiveTrigger] = useState(null); // Removed
+  // const [isBlocked, setIsBlocked] = useState(false); // Removed
   // Removed internal chatDisabled state, now managed by ChatWidget
   // const [chatDisabled, setChatDisabled] = useState(false);
 
@@ -546,9 +429,9 @@ export const useTriggerDetection = (saveHistory, setChatDisabled) => {
     const trigger = detectTriggers(text);
     
     if (trigger) {
-      setActiveTrigger(trigger);
-      setIsBlocked(true);
-      setChatDisabled(true); // Update external chatDisabled state
+      // setActiveTrigger(trigger); // Removed
+      // setIsBlocked(true); // Removed
+      // setChatDisabled(true); // This will be handled by ChatWidget now
       
       // Log trigger event to the backend
       if (saveHistory) {
@@ -556,6 +439,7 @@ export const useTriggerDetection = (saveHistory, setChatDisabled) => {
           event_type: `trigger_${trigger.category}`,
           user_message_text: text,
           bot_response_text: trigger.response?.message || '',
+          bot_response_title: trigger.response?.title || '', // Save the title explicitly
           trigger_detection_method: trigger.method || 'unknown',
           trigger_confidence: trigger.confidence || 0,
           trigger_matched_phrase: trigger.triggerWord || 'unknown',
@@ -570,248 +454,37 @@ export const useTriggerDetection = (saveHistory, setChatDisabled) => {
   };
 
   const acknowledgeTrigger = () => {
-    setActiveTrigger(null);
-    setIsBlocked(false);
+    // setActiveTrigger(null); // Removed
+    // setIsBlocked(false); // Removed
     // For doctor triggers, re-enable chat when acknowledged
-    if (activeTrigger?.category === 'doctor') {
-      setChatDisabled(false); // Re-enable chat
-    }
+    // if (activeTrigger?.category === 'doctor') {
+    //   setChatDisabled(false); // Re-enable chat
+    // }
     // Keep chat disabled after acknowledging for emergency/suicide
+    // This logic is now handled in ChatWidget after a trigger is acknowledged.
   };
 
   const enableChat = () => {
-    setChatDisabled(false); // Re-enable chat
-    setActiveTrigger(null);
-    setIsBlocked(false);
+    // setChatDisabled(false); // Re-enable chat
+    // setActiveTrigger(null); // Removed
+    // setIsBlocked(false); // Removed
+    // This logic is now handled in ChatWidget after a trigger is re-enabled.
   };
 
-  const renderTriggerResponse = () => {
-    if (!activeTrigger) return null;
-
-    if (activeTrigger.category === 'doctor') {
-      return <DoctorNote onAcknowledge={acknowledgeTrigger} onEnableChat={enableChat} />;
-    } else {
-      // Emergency and Suicide triggers don't allow re-enabling chat directly from banner
-      return (
-        <EmergencyBanner 
-          trigger={activeTrigger} 
-          onAcknowledge={acknowledgeTrigger}
-          onEnableChat={null} // No direct re-enable for emergency/suicide
-        />
-      );
-    }
-  };
+  // renderTriggerResponse is no longer needed here as rendering is handled by Message component
 
   return {
     checkTriggers,
-    acknowledgeTrigger,
-    enableChat,
-    renderTriggerResponse,
-    isBlocked,
-    // chatDisabled, // No longer returned from here
-    activeTrigger
+    // acknowledgeTrigger, // No longer directly returned
+    // enableChat, // No longer directly returned
+    // renderTriggerResponse, // Removed
+    // isBlocked, // No longer returned
+    // activeTrigger // No longer returned
   };
 };
 
-// Styled Components
-const BannerContainer = styled.div`
-  background: ${props => 
-    props.priority === 'emergency' 
-      ? 'linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%)'
-      : 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)'
-  };
-  border: 2px solid ${props => 
-    props.priority === 'emergency' ? '#d32f2f' : '#f57c00'
-  };
-  border-radius: 12px;
-  padding: 20px;
-  margin: 15px 0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  max-width: 100%;
-`;
+// Removed old styled components for banners (BannerContainer, BannerHeader, etc.)
+// and the EmergencyBanner and DoctorNote components.
 
-const BannerHeader = styled.h3`
-  color: ${props => props.priority === 'emergency' ? '#c62828' : '#e65100'};
-  margin: 0 0 15px 0;
-  font-size: 1.1rem;
-  font-weight: 600;
-  text-align: center;
-`;
-
-const BannerContent = styled.div`
-  margin-bottom: 20px;
-`;
-
-const BannerText = styled.p`
-  color: #8b4513;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  margin: 0 0 8px 0;
-  
-  &:last-child {
-    margin-bottom: 0;
-  }
-`;
-
-const BannerButtons = styled.div`
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
-  margin-bottom: 15px;
-`;
-
-const BannerButton = styled.button`
-  background: ${props => 
-    props.buttonType === 'emergency' ? '#d32f2f' : 
-    props.buttonType === 'support' ? '#1976d2' : '#4caf50'
-  };
-  color: white;
-  border: none;
-  padding: 10px 16px;
-  border-radius: 6px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.9rem;
-  
-  &:hover {
-    background: ${props => 
-      props.buttonType === 'emergency' ? '#b71c1c' : 
-      props.buttonType === 'support' ? '#1565c0' : '#388e3c'
-    };
-    transform: translateY(-1px);
-  }
-  
-  &:focus {
-    outline: 3px solid #3498db;
-    outline-offset: 2px;
-  }
-`;
-
-const ButtonRow = styled.div`
-  display: flex;
-  gap: 10px;
-  margin-top: 15px;
-`;
-
-const ContinueButton = styled.button`
-  background: #72b519;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.95rem;
-  flex: 1;
-  
-  &:hover {
-    background: #5a8f15;
-    transform: translateY(-1px);
-  }
-  
-  &:focus {
-    outline: 3px solid #3498db;
-    outline-offset: 2px;
-  }
-  
-  /* When it's the only button, take full width */
-  &:only-child {
-    flex: none;
-    width: 100%;
-  }
-`;
-
-const EnableChatButton = styled.button`
-    background: #3498db;
-    color: white;
-    border: none;
-    padding: 12px 24px;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 0.95rem;
-    flex: 1;
-    
-    &:hover {
-      background: #2980b9;
-      transform: translateY(-1px);
-    }
-    
-    &:focus {
-      outline: 3px solid #72b519;
-      outline-offset: 2px;
-    }
-  `;
-  
-  const NoteContainer = styled.div`
-    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-    border: 2px solid #4caf50;
-    border-radius: 8px;
-    padding: 15px;
-    margin: 10px 0;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-  `;
-  
-  const NoteHeader = styled.h4`
-    color: #2e7d32;
-    margin: 0 0 10px 0;
-    font-size: 1rem;
-    font-weight: 600;
-  `;
-  
-  const NoteContent = styled.p`
-    color: #388e3c;
-    font-size: 0.9rem;
-    line-height: 1.4;
-    margin: 0 0 8px 0;
-  `;
-  
-  const NoteWarning = styled.p`
-    color: #d32f2f;
-    font-size: 0.85rem;
-    font-weight: 600;
-    margin: 0 0 10px 0;
-  `;
-  
-  const NoteButtonRow = styled.div`
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
-  `;
-  
-  const NoteButton = styled.button`
-    background: #72b519;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 0.9rem;
-    flex: 1;
-    
-    &:hover {
-      background: #5a8f15;
-    }
-    
-    &:focus {
-      outline: 3px solid #3498db;
-      outline-offset: 2px;
-    }
-    
-    &:nth-child(2) {
-      background: #3498db;
-      
-      &:hover {
-        background: #2980b9;
-      }
-    }
-  `;
-  
-  const TriggerDetector = { useTriggerDetection, detectTriggers };
-  export default TriggerDetector;
+const TriggerDetector = { useTriggerDetection, detectTriggers };
+export default TriggerDetector;
