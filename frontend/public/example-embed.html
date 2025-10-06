@@ -85,10 +85,10 @@
   <pre>&lt;script&gt;
   // Optional configuration
   window.MIGRAINE_CHATBOT_CONFIG = {
-    <!-- baseUrl: 'https://migraine.softdemonew.info',       // URL where the chatbot widget is hosted
-    apiUrl: 'https://migraine.softdemonew.info/api',       // URL of the backend API -->
-    baseUrl: 'http://localhost:3000',       // URL where the chatbot widget is hosted
-    apiUrl: 'http://localhost:8000',       // URL of the backend API
+    baseUrl: 'https://migraine.softdemonew.info',       // URL where the chatbot widget is hosted
+    apiUrl: 'https://migraine.softdemonew.info/api',       // URL of the backend API
+    <!-- baseUrl: 'http://localhost:3000',       // URL where the chatbot widget is hosted
+    apiUrl: 'http://localhost:8000',       // URL of the backend API -->
     primaryColor: '#72b519'                 // Primary color for the chatbot
   };
   
@@ -133,8 +133,8 @@
         buttonElement.disabled = true;
         
         // Get API URL from configuration
-        // const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'https://migraine.softdemonew.info/api';
-        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'http://localhost:8000';
+        const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'https://migraine.softdemonew.info/api';
+        // const apiUrl = window.MIGRAINE_CHATBOT_CONFIG.apiUrl || 'http://localhost:8000';
         
         // Call the chunked reindex API endpoint
         fetch(`${apiUrl}/api/reindex-chunked`, {
@@ -182,10 +182,10 @@
   <script>
     // Optional configuration
     window.MIGRAINE_CHATBOT_CONFIG = {
-      // baseUrl: 'https://migraine.softdemonew.info',
-      // apiUrl: 'https://migraine.softdemonew.info/api',
-      baseUrl: 'http://localhost:3000',
-      apiUrl: 'http://localhost:8000',
+      baseUrl: 'https://migraine.softdemonew.info',
+      apiUrl: 'https://migraine.softdemonew.info/api',
+      // baseUrl: 'http://localhost:3000',
+      // apiUrl: 'http://localhost:8000',
       primaryColor: '#72b519'
     };
     
