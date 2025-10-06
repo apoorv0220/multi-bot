@@ -1,34 +1,30 @@
-import React, { useState } from 'react';
-// import styled from 'styled-components'; // Removed as no longer needed
-import TriggerMessageDisplay from './TriggerMessageDisplay';
-
-
 // Enhanced trigger word definitions with priority levels and keywords
 const TRIGGER_WORDS = {
   emergency: {
     priority: 1,
     // Exact phrases for precise matching
     exactPhrases: [
-      'stroke', 'slurred speech', 'garbled speech', 'unable to talk', 'face drop', 'facial droop',
+      'stroke', 'slurred speech', 'slurred-speech', 'garbled speech', 'garbled-speech', 
+      'unable to talk', 'face drop', 'facial droop', 'face drop', 'facial droop',
       'problems with balance and coordination', 'a sudden and severe blinding headache',
       'difficulty understanding what other people are saying',
       'loss of vision in one eye or one half of both eyes', 'sudden onset dizziness or vertigo',
-      'sudden loss of sensation on one side of the body',
+      'a sudden loss of sensation on one side of the body involving both the arm and leg or the face and arm',
       'i have a stroke', 'i think i have a stroke', 'i might have a stroke',
       'face is numb', 'face feels numb', 'face is drooping', 'face is dropping',
-      'can\'t lift my arm', 'cannot lift my arm', 'unable to lift my arm',
+      'can\'t lift my arm', 'cannot lift my arm', 'unable to lift my arm', 'unable to lift arm',
       'speech is slurred', 'speech is garbled', 'can\'t speak clearly'
     ],
     // Keywords for smart matching (more specific to avoid false positives)
     keywords: [
-      'stroke', 'face', 'numbness', 'one-sided', 'weakness', 'confusion',
+      'stroke', 'face', 'numbness', 'one-sided', 'one sided', 'weakness', 'confusion',
       'slurred', 'garbled', 'unable', 'talk', 'speech', 'drop', 'droop',
       'balance', 'coordination', 'blinding', 'sudden', 'vision', 'eye', 
       'dizziness', 'vertigo', 'sensation', 'arm', 'leg', 'terrible', 'severe'
     ],
     // Common variations (very specific emergency phrases only)
     variations: [
-      'can\'t lift arm', 'cannot lift arm', 'unable to lift arm',
+      'can\'t lift arm', 'cannot lift arm', 'unable to lift arm', 'unable to lift arm',
       'face numbness', 'face feels numb', 'numb face',
       'dizzy suddenly', 'sudden dizziness', 'feel dizzy',
       'can\'t talk', 'cannot talk', 'unable to talk',
@@ -43,14 +39,15 @@ const TRIGGER_WORDS = {
       message: `Unfortunately, many migraine symptoms are frequently the same as life threatening conditions, such as stroke. Never presume what you have is migraine. Always seek medical advice. If you are worried you might have stroke symptoms contact 112/999 immediately.
 
 From the HSE: You can recognise a stroke and know what to do by using the word FAST:
-• Face – your face may have dropped on one side, you may not be able to smile, or your mouth/eyelid may droop.
+• Face – your face may have dropped on one side, you may not be able to smile, or your mouth or eyelid may droop.
 • Arms – you may not be able to lift both arms and keep them there because of weakness or numbness in 1 arm.
 • Speech – your speech may be slurred or garbled, or you may not be able to talk at all.
 • Time – it's time to dial 999 immediately if you have any of these signs or symptoms.`,
       buttons: [
         { text: 'Call 112', action: 'tel:112', type: 'emergency' },
         { text: 'Call 999', action: 'tel:999', type: 'emergency' },
-        { text: 'HSE Stroke Info', action: '#', type: 'info' }
+        { text: 'HSE Stroke Info', action: 'https://www2.hse.ie/conditions/stroke/', type: 'info' },
+        { text: 'Irish Heart FAST', action: 'https://irishheart.ie/campaigns/fast/', type: 'info' }
       ]
     }
   },
@@ -58,7 +55,9 @@ From the HSE: You can recognise a stroke and know what to do by using the word F
     priority: 2,
     // Exact phrases for precise matching
     exactPhrases: [
-      'suicide', 'kill me now', 'i want to die', 'i want to end it', 'i want to end it all'
+      'suicide', 'cant take it anymore', 'can\'t take it anymore', 'can-take-it-anymore',
+      'ending it all', 'ending-it-all', 'death', 'unbearable', 'i want to die', 
+      'i-want-to-die', 'kill me now', 'kill-me-now', 'die', 'alone'
     ],
     // Keywords for smart matching
     keywords: [
@@ -68,9 +67,10 @@ From the HSE: You can recognise a stroke and know what to do by using the word F
     // Common variations
     variations: [
       'can\'t take it anymore', 'cannot take it anymore', 'unable to take it anymore',
-      'ending it all', 'ending it', 'thinking of ending', 'thinking about ending',
-      'want to die', 'wanting to die', 'thinking of dying', 'thinking about dying',
-      'kill myself', 'killing myself', 'end myself', 'ending myself',
+      'cant take it anymore', 'can-take-it-anymore',
+      'ending it all', 'ending-it-all', 'ending it', 'thinking of ending', 'thinking about ending',
+      'want to die', 'i-want-to-die', 'wanting to die', 'thinking of dying', 'thinking about dying',
+      'kill myself', 'kill-me-now', 'killing myself', 'end myself', 'ending myself',
       'i want to end it', 'i want to end it all', 'i want to end my life',
       'too much', 'overwhelming', 'can\'t handle it', 'cannot handle it'
     ],
@@ -82,10 +82,11 @@ Samaritans – Pieta – Alone – Aware`,
       buttons: [
         { text: 'Call 112', action: 'tel:112', type: 'emergency' },
         { text: 'Call 999', action: 'tel:999', type: 'emergency' },
-        { text: 'Samaritans', action: '#', type: 'support' },
-        { text: 'Pieta', action: '#', type: 'support' },
-        { text: 'ALONE', action: '#', type: 'support' },
-        { text: 'HSE Urgent Help', action: '#', type: 'support' }
+        { text: 'Samaritans', action: 'https://www.samaritans.org/how-we-can-help/contact-samaritan/', type: 'support' },
+        { text: 'Pieta', action: 'https://www.pieta.ie/contact/', type: 'support' },
+        { text: 'ALONE', action: 'https://www.alone.ie/', type: 'support' },
+        { text: 'Aware', action: 'https://www.aware.ie/support/support-line/', type: 'support' },
+        { text: 'HSE Urgent Help', action: 'https://www.hse.ie/eng/services/list/4/mental-health-services/nosp/help/', type: 'support' }
       ]
     }
   },
@@ -93,7 +94,9 @@ Samaritans – Pieta – Alone – Aware`,
     priority: 3,
     // Exact phrases for precise matching
     exactPhrases: [
-      'paralysis', 'child', 'medications', 'diagnosis', 'treatment'
+      'paralysis', 'child', 'medications', 'diagnosis', 'treatment',
+      'worsening pain', 'worsening-pain', 'worsening symptoms', 'worsening-symptoms',
+      'new symptoms', 'new', 'symptoms', 'excruciating', 'do i have', 'do-i-have'
     ],
     // Keywords for smart matching
     keywords: [
@@ -103,13 +106,13 @@ Samaritans – Pieta – Alone – Aware`,
     ],
     // Common variations
     variations: [
-      'worsening pain', 'pain getting worse', 'pain is worse', 'worse pain',
+      'worsening pain', 'worsening-pain', 'pain getting worse', 'pain is worse', 'worse pain',
       'my pain is worsening', 'my pain is getting worse', 'my pain is worse',
-      'worsening symptoms', 'symptoms getting worse', 'symptoms are worse', 'worse symptoms',
+      'worsening symptoms', 'worsening-symptoms', 'symptoms getting worse', 'symptoms are worse', 'worse symptoms',
       'my symptoms are worsening', 'my symptoms are getting worse', 'my symptoms are worse',
       'new symptoms', 'new pain', 'new problem', 'new issue',
       'excruciating pain', 'severe pain', 'terrible pain', 'awful pain',
-      'do i have', 'do i', 'have i', 'am i', 'could i have'
+      'do i have', 'do-i-have', 'do i', 'have i', 'am i', 'could i have'
     ],
     response: {
       title: '📋 Medical Advice Recommended',
@@ -453,33 +456,8 @@ export const useTriggerDetection = (saveHistory, setChatDisabled) => {
     return null; // Return null if no trigger detected
   };
 
-  const acknowledgeTrigger = () => {
-    // setActiveTrigger(null); // Removed
-    // setIsBlocked(false); // Removed
-    // For doctor triggers, re-enable chat when acknowledged
-    // if (activeTrigger?.category === 'doctor') {
-    //   setChatDisabled(false); // Re-enable chat
-    // }
-    // Keep chat disabled after acknowledging for emergency/suicide
-    // This logic is now handled in ChatWidget after a trigger is acknowledged.
-  };
-
-  const enableChat = () => {
-    // setChatDisabled(false); // Re-enable chat
-    // setActiveTrigger(null); // Removed
-    // setIsBlocked(false); // Removed
-    // This logic is now handled in ChatWidget after a trigger is re-enabled.
-  };
-
-  // renderTriggerResponse is no longer needed here as rendering is handled by Message component
-
   return {
-    checkTriggers,
-    // acknowledgeTrigger, // No longer directly returned
-    // enableChat, // No longer directly returned
-    // renderTriggerResponse, // Removed
-    // isBlocked, // No longer returned
-    // activeTrigger // No longer returned
+    checkTriggers
   };
 };
 

@@ -77,7 +77,7 @@ const TriggerMessageDisplay = ({ title, message, buttons, category, onAcknowledg
         </ButtonsContainer>
       )}
 
-      {/* Only show acknowledge/re-enable for live triggers from TriggerDetector */}
+      {/* Only show acknowledge/re-enable for doctor triggers */}
       {(onAcknowledge || onEnableChat) && category === 'doctor' && (
         <ButtonRow>
           {onAcknowledge && (
@@ -92,14 +92,7 @@ const TriggerMessageDisplay = ({ title, message, buttons, category, onAcknowledg
           )}
         </ButtonRow>
       )}
-      {/* For emergency/suicide, only Acknowledge is shown if provided, and it will close the banner without re-enabling chat */}
-      {(onAcknowledge || onEnableChat) && (category === 'emergency' || category === 'suicide') && onAcknowledge && (
-        <ButtonRow>
-          <ActionButtons onClick={onAcknowledge} isPrimary={true}>
-            Acknowledge
-          </ActionButtons>
-        </ButtonRow>
-      )}
+      {/* Emergency and suicide triggers show only emergency/support buttons - no continue options */}
     </Container>
   );
 };

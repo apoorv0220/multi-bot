@@ -4,8 +4,8 @@ import ChatWidget from './components/ChatWidget';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://migraine.softdemonew.info/api');
-  // const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://localhost:8000');
+  // const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://migraine.softdemonew.info/api');
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://localhost:8000');
 
   const closeChat = () => {
     setIsOpen(false);
