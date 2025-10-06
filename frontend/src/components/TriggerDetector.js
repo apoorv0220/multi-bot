@@ -42,12 +42,12 @@ From the HSE: You can recognise a stroke and know what to do by using the word F
 • Face – your face may have dropped on one side, you may not be able to smile, or your mouth or eyelid may droop.
 • Arms – you may not be able to lift both arms and keep them there because of weakness or numbness in 1 arm.
 • Speech – your speech may be slurred or garbled, or you may not be able to talk at all.
-• Time – it's time to dial 999 immediately if you have any of these signs or symptoms.`,
+• Time – it's time to dial 999 immediately if you have any of these signs or symptoms.
+
+For more information on Stroke : Stroke overview - HSE.ie  Irish Heart Act F.A.S.T. - Irish Heart`,
       buttons: [
         { text: 'Call 112', action: 'tel:112', type: 'emergency' },
-        { text: 'Call 999', action: 'tel:999', type: 'emergency' },
-        { text: 'HSE Stroke Info', action: 'https://www2.hse.ie/conditions/stroke/', type: 'info' },
-        { text: 'Irish Heart FAST', action: 'https://irishheart.ie/campaigns/fast/', type: 'info' }
+        { text: 'Call 999', action: 'tel:999', type: 'emergency' }
       ]
     }
   },
@@ -76,17 +76,10 @@ From the HSE: You can recognise a stroke and know what to do by using the word F
     ],
     response: {
       title: '⚠️ Crisis Support Available',
-      message: `If you are worried that you or a loved one is at risk from suicide please call 999/112 immediately. See Urgent help – HSE.ie
-
-Samaritans – Pieta – Alone – Aware`,
+      message: `If you are worried that you or a loved one is at risk from suicide please call 999/112 immediately. See Urgent help - HSE.ie Contact Us | Samaritans Pieta | Contact Us ALONE Aware`,
       buttons: [
         { text: 'Call 112', action: 'tel:112', type: 'emergency' },
-        { text: 'Call 999', action: 'tel:999', type: 'emergency' },
-        { text: 'Samaritans', action: 'https://www.samaritans.org/how-we-can-help/contact-samaritan/', type: 'support' },
-        { text: 'Pieta', action: 'https://www.pieta.ie/contact/', type: 'support' },
-        { text: 'ALONE', action: 'https://www.alone.ie/', type: 'support' },
-        { text: 'Aware', action: 'https://www.aware.ie/support/support-line/', type: 'support' },
-        { text: 'HSE Urgent Help', action: 'https://www.hse.ie/eng/services/list/4/mental-health-services/nosp/help/', type: 'support' }
+        { text: 'Call 999', action: 'tel:999', type: 'emergency' }
       ]
     }
   },
