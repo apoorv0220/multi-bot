@@ -44,7 +44,7 @@ From the HSE: You can recognise a stroke and know what to do by using the word F
 • Speech – your speech may be slurred or garbled, or you may not be able to talk at all.
 • Time – it's time to dial 999 immediately if you have any of these signs or symptoms.
 
-For more information on Stroke: <a href="https://www2.hse.ie/conditions/stroke/" target="_blank" rel="noopener noreferrer">HSE.ie</a> Irish Heart Act F.A.S.T: <a href="https://irishheart.ie/campaigns/fast/" target="_blank" rel="noopener noreferrer">Irish Heart</a>`,
+For more information on Stroke: <a href="https://www2.hse.ie/conditions/stroke/" target="_blank" rel="noopener noreferrer">Stroke overview - HSE.ie</a> <a href="https://irishheart.ie/campaigns/fast/" target="_blank" rel="noopener noreferrer">Irish Heart Act F.A.S.T. - Irish Heart</a>`,
       buttons: [
         { text: 'Call 112', action: 'tel:112', type: 'emergency' },
         { text: 'Call 999', action: 'tel:999', type: 'emergency' }
@@ -76,7 +76,7 @@ For more information on Stroke: <a href="https://www2.hse.ie/conditions/stroke/"
     ],
     response: {
       title: '⚠️ Crisis Support Available',
-      message: `If you are worried that you or a loved one is at risk from suicide please call 999/112 immediately. See Urgent help: <a href="https://www.hse.ie/eng/services/list/4/mental-health-services/nosp/help/" target="_blank" rel="noopener noreferrer">HSE.ie</a> Contact Us | Samaritans: <a href="https://www.samaritans.org/how-we-can-help/contact-samaritan/" target="_blank" rel="noopener noreferrer">Samaritans</a> Pieta: <a href="https://www.pieta.ie/contact/" target="_blank" rel="noopener noreferrer">Pieta</a> ALONE: <a href="https://www.alone.ie/" target="_blank" rel="noopener noreferrer">ALONE</a> Aware: <a href="https://www.aware.ie/support/support-line/" target="_blank" rel="noopener noreferrer">Aware</a>`,
+      message: `If you are worried that you or a loved one is at risk from suicide please call 999/112 immediately. See <a href="https://www.hse.ie/eng/services/list/4/mental-health-services/nosp/help/" target="_blank" rel="noopener noreferrer"> Urgent help: HSE.ie</a> <a href="https://www.samaritans.org/how-we-can-help/contact-samaritan/" target="_blank" rel="noopener noreferrer"> Contact Us | Samaritans</a> <a href="https://www.pieta.ie/contact/" target="_blank" rel="noopener noreferrer"> Pieta | Contact Us</a> <a href="https://www.alone.ie/" target="_blank" rel="noopener noreferrer"> ALONE</a> <a href="https://www.aware.ie/support/support-line/" target="_blank" rel="noopener noreferrer"> Aware</a>`,
       buttons: [
         { text: 'Call 112', action: 'tel:112', type: 'emergency' },
         { text: 'Call 999', action: 'tel:999', type: 'emergency' }
