@@ -38,10 +38,12 @@ class ChatDatabase:
             )
         except Exception as e:
             print(f"Error connecting to WordPress database: {e}")
+            logger.exception(f"Error connecting to WordPress database in database.py: {e}")
             return None
 
     def get_or_create_session(self, session_uuid: str = None) -> dict:
         connection = self.get_connection()
+        logger.info(f"Connection: {connection}")
         if not connection:
             return None
 
