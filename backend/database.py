@@ -1,10 +1,21 @@
 import os
 import pymysql
 import uuid
+import logging
 import json # Import the json module
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("app.log")
+    ]
+)
+logger = logging.getLogger("migraine-chatbot")
 
 class ChatDatabase:
     def __init__(self):
@@ -46,14 +57,17 @@ class ChatDatabase:
 
                 # Create new session if not found or no session_uuid provided
                 new_session_uuid = str(uuid.uuid4())
+                logger.info(f"New session UUID: {new_session_uuid}")
                 insert_query = "INSERT INTO wp_chatbot_sessions (session_id) VALUES (%s)"
                 cursor.execute(insert_query, (new_session_uuid,))
                 connection.commit()
 
                 cursor.execute("SELECT id, session_id FROM wp_chatbot_sessions WHERE session_id = %s", (new_session_uuid,))
+                logger.info("New session data retrieved from database.py")
                 return cursor.fetchone()
         except Exception as e:
             print(f"Error getting or creating session: {e}")
+            logger.exception(f"Error getting or creating session in database.py: {e}")
             connection.rollback()
             return None
         finally:

@@ -564,6 +564,7 @@ async def get_chat_history(session_id: str):
 async def start_session(request: StartSessionRequest):
     try:
         session_data = db.get_or_create_session(request.session_id)
+        logger.info(f"Session data: {session_data}")
         if not session_data:
             raise HTTPException(status_code=500, detail="Could not create or retrieve session")
         return {"session_id": session_data['session_id']}
