@@ -12,11 +12,6 @@ services:
     networks:
       - mrnwebdesigns-net
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/readiness"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # Backend API service (no volume conflicts)
   mrnwebdesigns-backend:

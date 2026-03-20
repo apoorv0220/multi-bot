@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import asyncio
+import time
 from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,31 +62,57 @@ logger.info(f"OpenAI API key configured: {openai.api_key[:5]}...{openai.api_key[
 
 # Try to import Qdrant and related modules, but do not crash if unavailable
 qdrant_client = None
-try:
+
+def _initialize_qdrant_client_with_retries(max_retries: int = 10, retry_delay: float = 2.0):
+    """
+    Initialize Qdrant client with retry logic.
+
+    Important: if this fails once at import-time, Gunicorn workers can get stuck in a state
+    where `qdrant_client` is None for the lifetime of that worker.
+    """
     # Define Qdrant connection parameters from environment or use defaults
     QDRANT_HOST = os.getenv("QDRANT_HOST", "mrnwebdesigns-qdrant")
     QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
     COLLECTION_NAME = os.getenv("COLLECTION_NAME", "mrnwebdesigns_content")
-    logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
-    qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-    # Check if collection exists, create if not
-    collections = qdrant_client.get_collections().collections
-    collection_names = [collection.name for collection in collections]
-    if COLLECTION_NAME not in collection_names:
-        logger.info(f"Creating collection '{COLLECTION_NAME}'...")
-        qdrant_client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(
-                size=1536,  # Dimension for text-embedding-3-small
-                distance=Distance.COSINE
-            )
-        )
-        qdrant_client.create_payload_index(
-            collection_name=COLLECTION_NAME,
-            field_name="source_type",
-            field_schema=models.PayloadSchemaType.KEYWORD
-        )
-        logger.info(f"Collection '{COLLECTION_NAME}' created")
+
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT} (attempt {attempt}/{max_retries})")
+            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+
+            # Ensure Qdrant is responding
+            collections = client.get_collections().collections
+            collection_names = [collection.name for collection in collections]
+
+            # Check if collection exists, create if not
+            if COLLECTION_NAME not in collection_names:
+                logger.info(f"Creating collection '{COLLECTION_NAME}'...")
+                client.create_collection(
+                    collection_name=COLLECTION_NAME,
+                    vectors_config=VectorParams(
+                        size=1536,  # Dimension for text-embedding-3-small
+                        distance=Distance.COSINE
+                    )
+                )
+                client.create_payload_index(
+                    collection_name=COLLECTION_NAME,
+                    field_name="source_type",
+                    field_schema=models.PayloadSchemaType.KEYWORD
+                )
+                logger.info(f"Collection '{COLLECTION_NAME}' created")
+
+            return client
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Failed to connect to Qdrant (attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(retry_delay)
+
+    raise last_error
+
+try:
+    qdrant_client = _initialize_qdrant_client_with_retries()
 except Exception as e:
     logger.error(f"Qdrant unavailable or error initializing: {e}")
     qdrant_client = None
@@ -141,10 +168,12 @@ async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
     if qdrant_client is None:
         raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
     
+    collection_name = os.getenv("COLLECTION_NAME", "mrnwebdesigns_content")
+
     try:
         # First try to search in MRN Web Designs content (prioritized)
         mrnwebdesigns_results = qdrant_client.search(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             query_vector=embedding,
             limit=limit,
             score_threshold=0.6,
@@ -163,7 +192,7 @@ async def search_qdrant(embedding: List[float], limit: int = 5) -> List[Any]:
         # If we don't have enough results from MRN Web Designs, search external sources
         if len(mrnwebdesigns_results) < limit or max([r.score for r in mrnwebdesigns_results] + [0]) < 0.7:
             external_results = qdrant_client.search(
-                collection_name=COLLECTION_NAME,
+                collection_name=collection_name,
                 query_vector=embedding,
                 query_filter=models.Filter(
                     must=[
@@ -301,6 +330,7 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
     Handle chat requests with fuzzy matching for common queries.
     Falls back to vector search if no fuzzy match is found.
     """
+    global qdrant_client
     try:
         # Try fuzzy matching first
         fuzzy_response = fuzzy_matcher.get_response(request.message)
@@ -315,13 +345,18 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         
         # If no fuzzy match, proceed with vector search
         if qdrant_client is None:
-            logger.warning("Qdrant is not available, cannot perform vector search.")
-            return {
-                "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
-                "source": "unavailable",
-                "confidence": 0.0,
-                "sources": []
-            }
+            logger.warning("Qdrant is not available, cannot perform vector search yet. Attempting reconnect...")
+            try:
+                qdrant_client = _initialize_qdrant_client_with_retries(max_retries=10, retry_delay=1.0)
+                embedder_module.qdrant_client = qdrant_client
+            except Exception as e:
+                logger.warning(f"Reconnect attempt failed: {e}")
+                return {
+                    "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                    "source": "unavailable",
+                    "confidence": 0.0,
+                    "sources": []
+                }
 
         # Preprocess and enhance the query for better search results
         enhanced_query = await preprocess_query(request.message)
