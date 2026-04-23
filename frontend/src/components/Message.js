@@ -1,8 +1,9 @@
 import React from 'react';
 import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
+import { client } from '../api';
 
-const Message = ({ type, text, timestamp, sources = [], isError, source }) => {
+const Message = ({ type, text, timestamp, sources = [], isError, source, messageId }) => {
   // Format timestamp
   const formatTime = (date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -16,18 +17,27 @@ const Message = ({ type, text, timestamp, sources = [], isError, source }) => {
     sources.length > 0 && 
     sources.some(source => source.score >= 0.3);
 
+  const sendFeedback = async (vote) => {
+    if (!messageId) return;
+    try {
+      await client.post(`/api/messages/${messageId}/feedback`, { vote });
+    } catch (err) {
+      console.error("Feedback failed", err);
+    }
+  };
+
   return (
     <MessageContainer isError={isError} type={type}>
       <MessageContent isError={isError} type={type} className="mrnwebdesigns-chatbot-widget-message-content">
         <ReactMarkdown>{text}</ReactMarkdown>
         {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
-          <ReadMoreButton 
-            href={sources[0].url} 
-            target="_blank" 
-            rel="noopener noreferrer"
-          >
-            Read More
-          </ReadMoreButton>
+          <>
+            <ReadMoreButton href={sources[0].url} target="_blank" rel="noopener noreferrer">Read More</ReadMoreButton>
+            <FeedbackRow>
+              <button onClick={() => sendFeedback("up")} type="button">👍</button>
+              <button onClick={() => sendFeedback("down")} type="button">👎</button>
+            </FeedbackRow>
+          </>
         )}
       </MessageContent>
       <MessageTime type={type} className="mrnwebdesigns-chatbot-widget-message-time">{formatTime(timestamp)}</MessageTime>
@@ -95,6 +105,12 @@ const MessageTime = styled.span`
   font-size: 11px;
   color: var(--light-text);
   margin-top: 5px;
+`;
+
+const FeedbackRow = styled.div`
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
 `;
 
 export default Message; 

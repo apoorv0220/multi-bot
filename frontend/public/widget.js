@@ -3,12 +3,13 @@
   const widgetUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3043';
   const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8043';
   const primaryColor = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.primaryColor || '#bf362e';
+  const tenantPublicKey = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.tenantPublicKey || null;
   
   // Create iframe for the widget
   function createChatbotIframe() {
     const iframe = document.createElement('iframe');
     iframe.id = 'mrnwebdesigns-chatbot-iframe';
-    iframe.src = widgetUrl;
+    iframe.src = widgetUrl.replace(/\/$/, '') + '/embed';
     iframe.style.position = 'fixed';
     iframe.style.bottom = '90px';
     iframe.style.right = '20px';
@@ -87,7 +88,8 @@
       // Send message to iframe to open chat
       iframe.contentWindow.postMessage({
         action: 'open-chat',
-        apiUrl: apiUrl
+        apiUrl: apiUrl,
+        tenantPublicKey: tenantPublicKey
       }, '*');
     } else {
       closeChat();

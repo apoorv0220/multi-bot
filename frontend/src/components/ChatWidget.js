@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
-import axios from 'axios';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
+import { client } from '../api';
 
-const ChatWidget = ({ apiUrl }) => {
+const ChatWidget = () => {
   const [messages, setMessages] = useState([
     {
       id: 1,
@@ -15,6 +15,10 @@ const ChatWidget = ({ apiUrl }) => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || "http://localhost:8043");
+  const [widgetKey, setWidgetKey] = useState(null);
+  const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
+  const [sessionId, setSessionId] = useState(localStorage.getItem("chat_session_id") || null);
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -26,6 +30,22 @@ const ChatWidget = ({ apiUrl }) => {
   // Focus input when widget opens
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onMessage = (event) => {
+      const data = event?.data;
+      if (!data || typeof data !== "object") return;
+      if (data.action !== "open-chat") return;
+      if (data.apiUrl) setApiUrl(data.apiUrl);
+      if (data.tenantPublicKey) setWidgetKey(data.tenantPublicKey);
+      const keySuffix = data.tenantPublicKey || "default";
+      const storageKey = `chat_session_id_${keySuffix}`;
+      setSessionStorageKey(storageKey);
+      setSessionId(localStorage.getItem(storageKey) || null);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   const handleSubmit = async (e) => {
@@ -43,11 +63,18 @@ const ChatWidget = ({ apiUrl }) => {
     setIsLoading(true);
 
     try {
-      // Call API with the new chat endpoint
-      const response = await axios.post(`${apiUrl}/api/chat`, {
+      const endpoint = widgetKey ? "/api/public/chat" : "/api/chat";
+      const response = await client.post(`${apiUrl}${endpoint}`, {
         message: input,
+        session_id: sessionId,
         max_results: 3,
+      }, {
+        headers: widgetKey ? { "X-Widget-Key": widgetKey } : undefined,
       });
+      if (response.data.session_id) {
+        setSessionId(response.data.session_id);
+        localStorage.setItem(sessionStorageKey, response.data.session_id);
+      }
 
       // Add bot response with the new response format
       const botMessage = {
@@ -57,6 +84,7 @@ const ChatWidget = ({ apiUrl }) => {
         sources: response.data.sources || [],
         confidence: response.data.confidence,
         source: response.data.source,
+        messageId: response.data.message_id,
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
     } catch (err) {
@@ -91,6 +119,7 @@ const ChatWidget = ({ apiUrl }) => {
             isError={message.isError}
             confidence={message.confidence}
             source={message.source}
+            messageId={message.messageId}
           />
         ))}
         {isLoading && (

@@ -70,7 +70,7 @@ class ProcessingProgress:
         }
 
 class Embedder:
-    def __init__(self, client=None):
+    def __init__(self, client=None, collection_name: Optional[str] = None, source_config: Optional[Dict[str, Any]] = None, progress_callback=None):
         # Use the provided client or the global client
         self.qdrant_client = client or qdrant_client
         
@@ -79,8 +79,12 @@ class Embedder:
             logger.info(f"Creating new Qdrant client connecting to {QDRANT_HOST}:{QDRANT_PORT}")
             self._connect_to_qdrant()
         
-        # Collection name for Qdrant
-        self.collection_name = os.getenv("COLLECTION_NAME", "mrnwebdesigns_content")
+        # Collection name for Qdrant (tenant-specific should be passed explicitly)
+        self.collection_name = collection_name or os.getenv("COLLECTION_NAME")
+        if not self.collection_name:
+            raise ValueError("collection_name must be provided for multi-tenant indexing")
+        self.source_config = source_config or {}
+        self.progress_callback = progress_callback
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -329,7 +333,7 @@ class Embedder:
         logger.info("Starting chunked WordPress content embedding...")
         
         # Get WordPress content
-        wp_fetcher = WordPressFetcher()
+        wp_fetcher = WordPressFetcher(source_config=self.source_config)
         posts = wp_fetcher.get_all_posts()
         
         if not posts:
@@ -392,6 +396,11 @@ class Embedder:
                 self.current_progress.failed_items += len(batch_posts) - len(batch_points)
                 self.current_progress.last_update_time = time.time()
                 self.save_progress(self.current_progress)
+                if self.progress_callback:
+                    try:
+                        self.progress_callback(self.current_progress.to_dict())
+                    except Exception as cb_err:
+                        logger.warning(f"Progress callback failed: {cb_err}")
                 
                 logger.info(f"Progress: {self.current_progress.processed_items}/{total_posts} posts processed ({self.current_progress.processed_items/total_posts*100:.1f}%)")
             
@@ -447,7 +456,7 @@ class Embedder:
     async def embed_external_urls(self):
         """Embed content from external URLs and store in Qdrant"""
         # Get external URLs from WordPress
-        wp_fetcher = WordPressFetcher()
+        wp_fetcher = WordPressFetcher(source_config=self.source_config)
         external_urls = wp_fetcher.get_external_urls()
         
         if not external_urls:

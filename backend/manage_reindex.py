@@ -20,16 +20,10 @@ class ReindexManager:
     def __init__(self, api_url: str = None):
         self.api_url = api_url or f"http://localhost:{os.getenv('API_PORT', 8043)}"
         
-    async def start_reindex(self, force_restart: bool = False, chunk_size: int = None, batch_size: int = None):
+    async def start_reindex(self, tenant_id: str = None):
         """Start a new reindexing job"""
         async with aiohttp.ClientSession() as session:
-            data = {
-                "force_restart": force_restart,
-                "chunk_size": chunk_size,
-                "batch_size": batch_size
-            }
-            # Remove None values
-            data = {k: v for k, v in data.items() if v is not None}
+            data = {"tenant_id": tenant_id} if tenant_id else {}
             
             try:
                 async with session.post(f"{self.api_url}/api/reindex", json=data) as response:
@@ -38,8 +32,7 @@ class ReindexManager:
                         print(f"✅ Reindexing job started successfully!")
                         print(f"   Job ID: {result['job_id']}")
                         print(f"   Status: {result['status']}")
-                        print(f"   Estimated Duration: {result.get('estimated_duration', 'Unknown')}")
-                        print(f"   Message: {result['message']}")
+                        print(f"   Message: {result.get('status', 'started')}")
                         return result['job_id']
                     else:
                         error = await response.json()
@@ -51,33 +44,34 @@ class ReindexManager:
 
     async def get_status(self, job_id: str = None):
         """Get status of reindexing jobs"""
-        async with aiohttp.ClientSession() as session:
-            url = f"{self.api_url}/api/reindex/status"
-            if job_id:
-                url += f"?job_id={job_id}"
-                
-            try:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        self._print_status(result)
-                        return result
-                    else:
-                        error = await response.json()
-                        print(f"❌ Failed to get status: {error.get('detail', 'Unknown error')}")
-                        return None
-            except Exception as e:
-                print(f"❌ Error connecting to API: {e}")
-                return None
+        jobs_data = await self.list_jobs(return_data=True)
+        if not jobs_data:
+            return None
+        jobs = jobs_data.get("jobs", [])
+        if not jobs:
+            print("No jobs found")
+            return None
+        target = next((j for j in jobs if j["id"] == job_id), jobs[0] if not job_id else None)
+        if not target:
+            print(f"❌ Job not found: {job_id}")
+            return None
+        self._print_status(target)
+        return target
 
-    async def list_jobs(self):
+    async def list_jobs(self, return_data: bool = False):
         """List all reindexing jobs"""
         async with aiohttp.ClientSession() as session:
             try:
                 async with session.get(f"{self.api_url}/api/reindex/jobs") as response:
                     if response.status == 200:
-                        result = await response.json()
-                        self._print_jobs_list(result)
+                        jobs = await response.json()
+                        result = {
+                            "jobs": jobs,
+                            "total_jobs": len(jobs),
+                            "active_jobs": len([j for j in jobs if j.get("status") == "running"]),
+                        }
+                        if not return_data:
+                            self._print_jobs_list(result)
                         return result
                     else:
                         error = await response.json()
@@ -88,24 +82,9 @@ class ReindexManager:
                 return None
 
     async def cancel_job(self, job_id: str):
-        """Cancel a specific reindexing job"""
-        async with aiohttp.ClientSession() as session:
-            try:
-                async with session.delete(f"{self.api_url}/api/reindex/jobs/{job_id}") as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        print(f"✅ Job cancellation requested")
-                        print(f"   Job ID: {result['job_id']}")
-                        print(f"   Status: {result['status']}")
-                        print(f"   Message: {result['message']}")
-                        return result
-                    else:
-                        error = await response.json()
-                        print(f"❌ Failed to cancel job: {error.get('detail', 'Unknown error')}")
-                        return None
-            except Exception as e:
-                print(f"❌ Error connecting to API: {e}")
-                return None
+        """Cancellation is not supported in the current API"""
+        print("❌ Cancel is not supported by current API version.")
+        return None
 
     async def monitor(self, job_id: str = None, interval: int = 5):
         """Monitor reindexing progress in real-time"""
@@ -115,7 +94,7 @@ class ReindexManager:
         try:
             while True:
                 status = await self.get_status(job_id)
-                if status and status.get('status') in ['completed', 'failed', 'cancelled']:
+                if status and status.get('status') in ['completed', 'failed']:
                     print(f"\n🏁 Job finished with status: {status['status']}")
                     break
                 
@@ -131,16 +110,15 @@ class ReindexManager:
         print(f"📊 Reindexing Status")
         print(f"   Job ID: {status.get('job_id', 'N/A')}")
         print(f"   Status: {self._format_status(status['status'])}")
-        print(f"   Message: {status['message']}")
+        print(f"   Message: {status.get('error') or 'Running'}")
         
-        if status.get('start_time'):
-            print(f"   Start Time: {status['start_time']}")
+        if status.get('started_at'):
+            print(f"   Start Time: {status['started_at']}")
         
-        if status.get('elapsed_time'):
-            elapsed = status['elapsed_time']
-            print(f"   Elapsed Time: {self._format_duration(elapsed)}")
+        if status.get('created_at'):
+            print(f"   Created: {status['created_at']}")
         
-        progress = status.get('progress')
+        progress = status.get('meta', {}).get('progress')
         if progress:
             print(f"\n📈 Progress Details:")
             print(f"   Total Items: {progress['total_items']}")
@@ -170,12 +148,12 @@ class ReindexManager:
             status_icon = self._get_status_icon(job['status'])
             print(f"{status_icon} {job['job_id']}")
             print(f"   Status: {self._format_status(job['status'])}")
-            print(f"   Start: {job.get('start_time', 'N/A')}")
+            print(f"   Start: {job.get('started_at', 'N/A')}")
             
-            if job.get('elapsed_time'):
-                print(f"   Duration: {self._format_duration(job['elapsed_time'])}")
-            
-            print(f"   Message: {job['message']}")
+            progress = job.get("meta", {}).get("progress", {})
+            if progress:
+                print(f"   Progress: {progress.get('progress_percentage', 0):.1f}%")
+            print(f"   Message: {job.get('error') or 'Running'}")
             print()
 
     def _format_status(self, status):
@@ -221,9 +199,7 @@ async def main():
     
     # Start command
     start_parser = subparsers.add_parser('start', help='Start reindexing')
-    start_parser.add_argument('--force-restart', action='store_true', help='Force restart if job already running')
-    start_parser.add_argument('--chunk-size', type=int, help='Items per chunk (default: 50)')
-    start_parser.add_argument('--batch-size', type=int, help='Concurrent processing batch size (default: 10)')
+    start_parser.add_argument('--tenant-id', help='Target tenant id (superadmin only)')
     
     # Status command
     status_parser = subparsers.add_parser('status', help='Get reindexing status')
@@ -250,11 +226,7 @@ async def main():
     manager = ReindexManager(args.api_url)
     
     if args.command == 'start':
-        await manager.start_reindex(
-            force_restart=args.force_restart,
-            chunk_size=args.chunk_size,
-            batch_size=args.batch_size
-        )
+        await manager.start_reindex(tenant_id=args.tenant_id)
     elif args.command == 'status':
         await manager.get_status(args.job_id)
     elif args.command == 'list':

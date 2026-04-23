@@ -1,49 +1,90 @@
 import React, { useState, useEffect } from 'react';
-import styled from 'styled-components';
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { AppBar, Box, Button, Container, CssBaseline, Stack, Toolbar, Typography } from '@mui/material';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import ChatWidget from './components/ChatWidget';
+import LoginPage from './components/LoginPage';
+import AdminDashboard from './components/AdminDashboard';
+import { loadToken, setAuthToken } from './api';
 
-function App() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://144.217.68.58:8043');
+function AppContent({ auth, onLogin, onLogout }) {
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith("/admin");
+  const isEmbedRoute = location.pathname === "/embed";
 
-  const closeChat = () => {
-    setIsOpen(false);
-  };
-
-  // Listen for messages from parent window if embedded as widget
-  useEffect(() => {
-    const handleMessage = (event) => {
-      // Accept messages from any origin when in widget mode
-      const data = event.data;
-      
-      if (typeof data === 'object' && data.action === 'open-chat') {
-        setIsOpen(true);
-        if (data.apiUrl) {
-          setApiUrl(data.apiUrl);
-        }
-      } else if (data === 'close-chat') {
-        setIsOpen(false);
-      } else if (data === 'toggle-chat') {
-        setIsOpen(prev => !prev);
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  if (isEmbedRoute) {
+    return <ChatWidget mode="public" />;
+  }
 
   return (
-    <AppContainer id="mrnwebdesigns-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
-      {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
-    </AppContainer>
+    <>
+      {isAdminRoute && (
+        <AppBar position="static" color="inherit" elevation={1}>
+          <Toolbar>
+            <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>Migraine Chatbot Control</Typography>
+            {auth && (
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Link to="/admin/chat">Chat</Link>
+                <Link to="/admin/dashboard">Dashboard</Link>
+                <Button onClick={onLogout} variant="outlined">Logout</Button>
+              </Stack>
+            )}
+          </Toolbar>
+        </AppBar>
+      )}
+      <Container maxWidth="xl" disableGutters>
+        <Box sx={{ minHeight: isAdminRoute ? "calc(100vh - 64px)" : "100vh" }}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/admin/chat" replace />} />
+            <Route path="/admin/chat" element={auth ? <ChatWidget mode="admin" /> : <LoginPage onLogin={onLogin} />} />
+            <Route path="/admin/dashboard" element={auth ? <AdminDashboard role={auth.role} tenantId={auth.tenant_id} /> : <LoginPage onLogin={onLogin} />} />
+            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+          </Routes>
+        </Box>
+      </Container>
+    </>
   );
 }
 
-const AppContainer = styled.div`
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-`;
+function App() {
+  const [auth, setAuth] = useState(null);
+  const theme = createTheme({
+    palette: {
+      mode: "light",
+      primary: { main: "#0f62fe" },
+      secondary: { main: "#6f42c1" },
+      background: { default: "#f6f8fb" },
+    },
+    shape: { borderRadius: 10 },
+  });
+
+  useEffect(() => {
+    if (loadToken()) {
+      const cachedRole = localStorage.getItem("role");
+      const cachedTenant = localStorage.getItem("tenant_id");
+      if (cachedRole) setAuth({ role: cachedRole, tenant_id: cachedTenant });
+    }
+  }, []);
+
+  const onLogin = (data) => {
+    setAuth(data);
+    localStorage.setItem("role", data.role);
+    localStorage.setItem("tenant_id", data.tenant_id || "");
+  };
+
+  const onLogout = () => {
+    setAuthToken(null);
+    setAuth(null);
+  };
+
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <BrowserRouter>
+        <AppContent auth={auth} onLogin={onLogin} onLogout={onLogout} />
+      </BrowserRouter>
+    </ThemeProvider>
+  );
+}
 
 export default App; 

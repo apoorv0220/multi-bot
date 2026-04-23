@@ -87,6 +87,7 @@
   window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
     baseUrl: 'http://144.217.68.58:3043',       // URL where the chatbot widget is hosted
     apiUrl: 'http://144.217.68.58:8043',       // URL of the backend API
+    tenantPublicKey: 'replace-with-widget-key', // Per-tenant public embed key
     primaryColor: '#bf362e',                    // Chatbot theme color  
     position: 'bottom-right'                    // Position on page (bottom-right, bottom-left)
   };
@@ -180,8 +181,11 @@
   <script>
     // Optional configuration
     window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-      baseUrl: 'http://144.217.68.58:3043',
-      apiUrl: 'http://144.217.68.58:8043',
+      // baseUrl: 'http://144.217.68.58:3043',
+      // apiUrl: 'http://144.217.68.58:8043',
+      baseUrl: 'http://localhost:3043',
+      apiUrl: 'http://localhost:8043',
+      tenantPublicKey: 'replace-with-widget-key',
       primaryColor: '#bf362e',
       position: 'bottom-right'
     };

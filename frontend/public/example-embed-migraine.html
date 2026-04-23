@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Embed Example - Migraine Tenant</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+    h1 { color: #0f62fe; }
+    pre { background-color: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }
+    .note { background-color: #eef6ff; padding: 15px; border-left: 4px solid #0f62fe; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>Chatbot Embed Example - Migraine Tenant</h1>
+  <p>This page demonstrates the public website embed for the <strong>Migraine</strong> tenant.</p>
+
+  <h2>How to Embed</h2>
+  <p>Add this snippet before your closing <code>&lt;/body&gt;</code> tag:</p>
+
+  <pre>&lt;script&gt;
+window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+  baseUrl: "http://localhost:3043",
+  apiUrl: "http://localhost:8043",
+  tenantPublicKey: "demo_pub_migraine_4c97be2e",
+  primaryColor: "#0f62fe",
+  position: "bottom-right"
+};
+(function () {
+  const script = document.createElement("script");
+  script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + "/widget.js";
+  script.async = true;
+  document.body.appendChild(script);
+})();
+&lt;/script&gt;</pre>
+
+  <div class="note">
+    Public embeds should not require login and should not show admin shell/header. This page is intended to simulate that public usage pattern.
+  </div>
+
+  <h2>Features</h2>
+  <ul>
+    <li>Tenant-scoped retrieval via widget key</li>
+    <li>Public visitor chat without auth flow</li>
+    <li>Session persistence per widget key</li>
+  </ul>
+
+  <script>
+    window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+      baseUrl: "http://localhost:3043",
+      apiUrl: "http://localhost:8043",
+      tenantPublicKey: "demo_pub_migraine_4c97be2e",
+      primaryColor: "#0f62fe",
+      position: "bottom-right"
+    };
+    (function () {
+      const script = document.createElement("script");
+      script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + "/widget.js";
+      script.async = true;
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html>
