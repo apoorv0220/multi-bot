@@ -226,7 +226,10 @@ const AdminDashboard = ({ role, tenantId }) => {
                 onChange={(e) => setSourceTenantId(e.target.value)}
               >
                 {tenants.map((t) => (
-                  <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+                  <MenuItem key={t.id} value={t.id}>
+                    {t.name}
+                    {role === "superadmin" ? ` (${t.id})` : ""}
+                  </MenuItem>
                 ))}
               </Select>
             </FormControl>
@@ -418,6 +421,9 @@ const AdminDashboard = ({ role, tenantId }) => {
               <Stack direction="row" spacing={1} alignItems="center">
                 <Button variant="contained" onClick={saveSourceConfig} disabled={!sourceTenantId}>Save Source Settings</Button>
                 {selectedTenant && <Chip label={selectedTenant.name} />}
+                {role === "superadmin" && selectedTenant && (
+                  <Chip variant="outlined" label={`Tenant ID: ${selectedTenant.id}`} />
+                )}
               </Stack>
             </Stack>
           </CardContent>
@@ -449,7 +455,10 @@ const AdminDashboard = ({ role, tenantId }) => {
                 <InputLabel>Tenant</InputLabel>
                 <Select label="Tenant" value={adminTenantId} onChange={(e) => setAdminTenantId(e.target.value)}>
                   {tenants.map((t) => (
-                    <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+                    <MenuItem key={t.id} value={t.id}>
+                      {t.name}
+                      {role === "superadmin" ? ` (${t.id})` : ""}
+                    </MenuItem>
                   ))}
                 </Select>
               </FormControl>

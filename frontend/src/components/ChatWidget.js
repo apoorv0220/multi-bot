@@ -4,7 +4,7 @@ import { BsSend } from 'react-icons/bs';
 import Message from './Message';
 import { client } from '../api';
 
-const ChatWidget = () => {
+const ChatWidget = ({ mode = "admin" }) => {
   const [messages, setMessages] = useState([
     {
       id: 1,
@@ -19,6 +19,7 @@ const ChatWidget = () => {
   const [widgetKey, setWidgetKey] = useState(null);
   const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
   const [sessionId, setSessionId] = useState(localStorage.getItem("chat_session_id") || null);
+  const [publicConfigError, setPublicConfigError] = useState("");
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -33,6 +34,7 @@ const ChatWidget = () => {
   }, []);
 
   useEffect(() => {
+    if (mode !== "public") return;
     const onMessage = (event) => {
       const data = event?.data;
       if (!data || typeof data !== "object") return;
@@ -43,14 +45,23 @@ const ChatWidget = () => {
       const storageKey = `chat_session_id_${keySuffix}`;
       setSessionStorageKey(storageKey);
       setSessionId(localStorage.getItem(storageKey) || null);
+      if (!data.tenantPublicKey) {
+        setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
+      } else {
+        setPublicConfigError("");
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [mode]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
+    if (mode === "public" && !widgetKey) {
+      setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
+      return;
+    }
 
     // Add user message
     const userMessage = {
@@ -63,13 +74,13 @@ const ChatWidget = () => {
     setIsLoading(true);
 
     try {
-      const endpoint = widgetKey ? "/api/public/chat" : "/api/chat";
+      const endpoint = mode === "public" ? "/api/public/chat" : "/api/chat";
       const response = await client.post(`${apiUrl}${endpoint}`, {
         message: input,
         session_id: sessionId,
         max_results: 3,
       }, {
-        headers: widgetKey ? { "X-Widget-Key": widgetKey } : undefined,
+        headers: mode === "public" ? { "X-Widget-Key": widgetKey } : undefined,
       });
       if (response.data.session_id) {
         setSessionId(response.data.session_id);
@@ -147,6 +158,7 @@ const ChatWidget = () => {
           <BsSend />
         </SendButton>
       </InputForm>
+      {publicConfigError && <ConfigError>{publicConfigError}</ConfigError>}
     </WidgetContainer>
   );
 };
@@ -248,6 +260,12 @@ const LoadingDots = styled.div`
     0%, 80%, 100% { opacity: 0; }
     40% { opacity: 1; }
   }
+`;
+
+const ConfigError = styled.div`
+  color: #c62828;
+  font-size: 0.85rem;
+  padding: 8px 12px 12px;
 `;
 
 export default ChatWidget; 

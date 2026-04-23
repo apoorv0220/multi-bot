@@ -212,15 +212,16 @@ def _resolve_embed_tenant_id(embed_key: Optional[str]) -> str:
 
 
 def _resolve_tenant_actor_user_id(db, tenant_id: str) -> uuid.UUID:
-    member = db.execute(
+    members = db.execute(
         select(UserTenant).where(UserTenant.tenant_id == uuid.UUID(tenant_id)).order_by(UserTenant.created_at.asc())
-    ).scalar_one_or_none()
-    if not member:
+    ).scalars().all()
+    if not members:
         raise HTTPException(status_code=400, detail="No tenant user available for widget chat")
-    user = db.get(User, member.user_id)
-    if not user or not user.is_active:
-        raise HTTPException(status_code=400, detail="No active tenant user available for widget chat")
-    return user.id
+    for member in members:
+        user = db.get(User, member.user_id)
+        if user and user.is_active:
+            return user.id
+    raise HTTPException(status_code=400, detail="No active tenant user available for widget chat")
 
 
 def _parse_source_dsn(dsn: Optional[str], table_prefix: Optional[str], url_table: Optional[str]) -> Dict[str, Any]:
