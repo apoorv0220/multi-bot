@@ -12,6 +12,7 @@
   </style>
 </head>
 <body>
+  <script src="/runtime-config.js"></script>
   <h1>Chatbot Embed Example - Default Tenant</h1>
   <p>This page demonstrates the public website embed for the <strong>Default Tenant</strong>.</p>
 
@@ -20,8 +21,8 @@
 
   <pre>&lt;script&gt;
 window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-  baseUrl: "http://localhost:3043",
-  apiUrl: "http://localhost:8043",
+  baseUrl: "https://your-frontend-domain",
+  apiUrl: "https://your-backend-domain",
   tenantPublicKey: "demo_pub_default_7721e85d",
   primaryColor: "#bf362e",
   position: "bottom-right"
@@ -46,9 +47,11 @@ window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
   </ul>
 
   <script>
+    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
     window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-      baseUrl: 'http://144.217.68.58:3043',
-      apiUrl: 'http://144.217.68.58:8043',
+      baseUrl: resolvedWidgetBaseUrl,
+      apiUrl: resolvedApiBaseUrl,
       tenantPublicKey: "demo_pub_default_7721e85d",
       primaryColor: "#bf362e",
       position: "bottom-right"

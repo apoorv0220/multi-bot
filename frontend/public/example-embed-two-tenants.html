@@ -47,6 +47,7 @@
   </style>
 </head>
 <body>
+  <script src="/runtime-config.js"></script>
   <h1>Two-Tenant Embed Demo</h1>
   <p>
     Yes, your understanding is correct: plugin integration stays the same, but each client site should use its own tenant config/key.
@@ -60,8 +61,8 @@
     <p><strong>Demo Public Key:</strong> <code>demo_pub_migraine_4c97be2e</code></p>
     <pre>&lt;script&gt;
 window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-  baseUrl: "http://localhost:3043",
-  apiUrl: "http://localhost:8043",
+  baseUrl: "https://your-frontend-domain",
+  apiUrl: "https://your-backend-domain",
   tenantPublicKey: "demo_pub_migraine_4c97be2e",
   primaryColor: "#bf362e",
   position: "bottom-right"
@@ -77,8 +78,8 @@ window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
     <p><strong>Demo Public Key:</strong> <code>demo_pub_default_7721e85d</code></p>
     <pre>&lt;script&gt;
 window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-  baseUrl: "http://localhost:3043",
-  apiUrl: "http://localhost:8043",
+  baseUrl: "https://your-frontend-domain",
+  apiUrl: "https://your-backend-domain",
   tenantPublicKey: "demo_pub_default_7721e85d",
   primaryColor: "#bf362e",
   position: "bottom-right"
@@ -92,17 +93,19 @@ window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
   </div>
 
   <script>
+    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
     const TENANT_CONFIGS = {
       migraine: {
-        baseUrl: "http://localhost:3043",
-        apiUrl: "http://localhost:8043",
+        baseUrl: resolvedWidgetBaseUrl,
+        apiUrl: resolvedApiBaseUrl,
         tenantPublicKey: "demo_pub_migraine_4c97be2e",
         primaryColor: "#bf362e",
         position: "bottom-right"
       },
       default: {
-        baseUrl: "http://localhost:3043",
-        apiUrl: "http://localhost:8043",
+        baseUrl: resolvedWidgetBaseUrl,
+        apiUrl: resolvedApiBaseUrl,
         tenantPublicKey: "demo_pub_default_7721e85d",
         primaryColor: "#bf362e",
         position: "bottom-right"

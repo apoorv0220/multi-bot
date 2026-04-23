@@ -30,6 +30,7 @@
   </style>
 </head>
 <body>
+  <script src="/runtime-config.js"></script>
   <h1>MRN Web Designs Chatbot - Embed Example</h1>
   
   <p>This page demonstrates how to embed the MRN Web Designs AI chatbot into any website.</p>
@@ -41,8 +42,8 @@
   <pre>&lt;script&gt;
   // Optional configuration
   window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-    baseUrl: 'http://144.217.68.58:3043',       // URL where the chatbot widget is hosted
-    apiUrl: 'http://144.217.68.58:8043',       // URL of the backend API
+    baseUrl: 'https://your-frontend-domain',    // URL where the chatbot widget is hosted
+    apiUrl: 'https://your-backend-domain',      // URL of the backend API
     tenantPublicKey: 'replace-with-widget-key', // Per-tenant public embed key
     primaryColor: '#bf362e',                    // Chatbot theme color  
     position: 'bottom-right'                    // Position on page (bottom-right, bottom-left)
@@ -72,13 +73,17 @@
   
   <!-- Example of how to embed the chatbot -->
   <script>
+    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
     // Optional configuration
     window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-      baseUrl: 'http://144.217.68.58:3043',
-      apiUrl: 'http://144.217.68.58:8043',
+      baseUrl: resolvedWidgetBaseUrl,
+      apiUrl: resolvedApiBaseUrl,
       tenantPublicKey: 'demo_pub_default_7721e85d',
       primaryColor: '#bf362e',
-      position: 'bottom-right'
+      position: 'bottom-right',
+      chatbotInitialText: "Hello! I'm your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?",
+      chatbotHeaderTitle: "MRN Web Designs Assistant"
     };
     
     // Load the widget script

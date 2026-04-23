@@ -4,15 +4,22 @@ import { BsSend } from 'react-icons/bs';
 import Message from './Message';
 import { client } from '../api';
 
+const FALLBACK_GREETING =
+  "Hello! I'm your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?";
+const FALLBACK_HEADER_TITLE = "MRN Web Designs Assistant";
+
+const resolveInitialGreeting = () => FALLBACK_GREETING;
+
+const createBotMessage = (text) => ({
+  id: 1,
+  type: "bot",
+  text,
+  timestamp: new Date(),
+});
+
 const ChatWidget = ({ mode = "admin" }) => {
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      text: 'Hello! I\'m your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?',
-      isBot: true,
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState([createBotMessage(resolveInitialGreeting())]);
+  const [headerTitle, setHeaderTitle] = useState(FALLBACK_HEADER_TITLE);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || "");
@@ -41,6 +48,12 @@ const ChatWidget = ({ mode = "admin" }) => {
       if (data.action !== "open-chat") return;
       if (data.apiUrl) setApiUrl(data.apiUrl);
       if (data.tenantPublicKey) setWidgetKey(data.tenantPublicKey);
+      if (data.chatbotInitialText) {
+        setMessages((prev) => (prev.length === 1 ? [createBotMessage(data.chatbotInitialText)] : prev));
+      }
+      if (data.chatbotHeaderTitle) {
+        setHeaderTitle(data.chatbotHeaderTitle);
+      }
       const keySuffix = data.tenantPublicKey || "default";
       const storageKey = `chat_session_id_${keySuffix}`;
       setSessionStorageKey(storageKey);
@@ -117,7 +130,7 @@ const ChatWidget = ({ mode = "admin" }) => {
   return (
     <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
       <WidgetHeader className="mrnwebdesigns-chatbot-widget-header">
-        <WidgetTitle>MRN Web Designs Assistant</WidgetTitle>
+        <WidgetTitle>{headerTitle}</WidgetTitle>
       </WidgetHeader>
       
       <MessageContainer className="mrnwebdesigns-chatbot-widget-message-container">

@@ -61,6 +61,8 @@ services:
       - backend
     environment:
       - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:${BACKEND_PORT:-8043}}
+      - WIDGET_BASE_URL=${WIDGET_BASE_URL:-}
+      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-}
 
 volumes:
   qdrant_data:

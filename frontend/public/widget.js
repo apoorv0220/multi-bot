@@ -1,9 +1,20 @@
 (function() {
+  const runtimeConfig = window.RUNTIME_CONFIG || {};
   // Configuration - set this to your actual deployed URL in production
-  const widgetUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.baseUrl || `${window.location.protocol}//${window.location.host}`;
-  const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl || `${window.location.protocol}//${window.location.host}`;
+  const widgetUrl =
+    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.baseUrl ||
+    runtimeConfig.WIDGET_BASE_URL ||
+    `${window.location.protocol}//${window.location.host}`;
+  const apiUrl =
+    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl ||
+    runtimeConfig.API_BASE_URL ||
+    `${window.location.protocol}//${window.location.host}`;
   const primaryColor = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.primaryColor || '#bf362e';
   const tenantPublicKey = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.tenantPublicKey || null;
+  const chatbotInitialText =
+    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.chatbotInitialText || null;
+  const chatbotHeaderTitle =
+    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.chatbotHeaderTitle || null;
   
   // Create iframe for the widget
   function createChatbotIframe() {
@@ -89,7 +100,9 @@
       iframe.contentWindow.postMessage({
         action: 'open-chat',
         apiUrl: apiUrl,
-        tenantPublicKey: tenantPublicKey
+        tenantPublicKey: tenantPublicKey,
+        chatbotInitialText: chatbotInitialText,
+        chatbotHeaderTitle: chatbotHeaderTitle
       }, '*');
     } else {
       closeChat();
