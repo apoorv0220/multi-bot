@@ -18,7 +18,8 @@ load_dotenv()
 
 class ReindexManager:
     def __init__(self, api_url: str = None):
-        self.api_url = api_url or f"http://localhost:{os.getenv('API_PORT', 8043)}"
+        default_port = os.getenv("BACKEND_PORT") or os.getenv("API_PORT", "8043")
+        self.api_url = api_url or f"http://localhost:{default_port}"
         
     async def start_reindex(self, tenant_id: str = None):
         """Start a new reindexing job"""
@@ -193,7 +194,7 @@ class ReindexManager:
 
 async def main():
     parser = argparse.ArgumentParser(description="MRN Web Designs Reindexing Manager")
-    parser.add_argument("--api-url", help="API URL (default: http://localhost:8043)")
+    parser.add_argument("--api-url", help="API URL (default: http://localhost:${BACKEND_PORT or API_PORT})")
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     

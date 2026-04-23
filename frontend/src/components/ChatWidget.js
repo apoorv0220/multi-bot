@@ -15,7 +15,7 @@ const ChatWidget = ({ mode = "admin" }) => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || "http://localhost:8043");
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || `${window.location.origin}`);
   const [widgetKey, setWidgetKey] = useState(null);
   const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
   const [sessionId, setSessionId] = useState(localStorage.getItem("chat_session_id") || null);

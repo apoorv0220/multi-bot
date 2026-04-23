@@ -117,10 +117,10 @@
         <!-- API Configuration -->
         <div class="api-config">
             <strong>🔧 API Configuration:</strong><br>
-            Backend URL: <input type="text" id="apiBaseUrl" value="http://localhost:8043" placeholder="http://your-server.com:8043">
+            Backend URL: <input type="text" id="apiBaseUrl" value="" placeholder="https://api.your-server.com">
             <button onclick="updateApiBase()" style="padding: 5px 10px; font-size: 12px;">Update</button>
             <div style="margin-top: 5px; font-size: 12px; color: #666;">
-                For production: Use your server's URL (e.g., http://your-domain.com:8043)
+                For production: Use your backend base URL (e.g., https://api.your-domain.com)
             </div>
         </div>
         
@@ -161,20 +161,15 @@
 
     <script>
         // Default API base - will be updated based on environment
-        let API_BASE = 'http://localhost:8043';
+        let API_BASE = '';
         
         // Auto-detect API base URL on page load
         function initializeApiBase() {
             const currentHost = window.location.hostname;
             const currentProtocol = window.location.protocol;
             
-            // For development (localhost:3043 -> localhost:8043)
-            if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
-                API_BASE = `${currentProtocol}//${currentHost}:8043`;
-            } else {
-                // For production, assume backend is on same host but port 8043
-                API_BASE = `${currentProtocol}//${currentHost}:8043`;
-            }
+            // Default to same-origin backend routing (recommended with reverse proxy)
+            API_BASE = `${currentProtocol}//${currentHost}`;
             
             document.getElementById('apiBaseUrl').value = API_BASE;
         }

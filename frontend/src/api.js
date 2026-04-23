@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const apiUrl = process.env.REACT_APP_API_URL || "http://localhost:8043";
+const apiUrl = process.env.REACT_APP_API_URL || `${window.location.origin}`;
 
 export const client = axios.create({
   baseURL: apiUrl,
