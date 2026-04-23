@@ -15,7 +15,7 @@ const ChatWidget = ({ mode = "admin" }) => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || `${window.location.origin}`);
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || "");
   const [widgetKey, setWidgetKey] = useState(null);
   const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
   const [sessionId, setSessionId] = useState(localStorage.getItem("chat_session_id") || null);
@@ -75,7 +75,8 @@ const ChatWidget = ({ mode = "admin" }) => {
 
     try {
       const endpoint = mode === "public" ? "/api/public/chat" : "/api/chat";
-      const response = await client.post(`${apiUrl}${endpoint}`, {
+      const requestUrl = mode === "public" ? `${apiUrl}${endpoint}` : endpoint;
+      const response = await client.post(requestUrl, {
         message: input,
         session_id: sessionId,
         max_results: 3,

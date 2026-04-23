@@ -1,9 +1,9 @@
 import axios from "axios";
 
-const apiUrl = process.env.REACT_APP_API_URL || `${window.location.origin}`;
+const apiUrl = process.env.REACT_APP_API_URL || "";
 
 export const client = axios.create({
-  baseURL: apiUrl,
+  baseURL: apiUrl || undefined,
 });
 
 export function setAuthToken(token) {
