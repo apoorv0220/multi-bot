@@ -28,6 +28,7 @@ from models import (
     AuditLog,
     ChatMessage,
     ChatSession,
+    ChatVisitor,
     FeedbackVote,
     MessageFeedback,
     ReindexJob,
@@ -99,6 +100,12 @@ class ChatResponse(BaseModel):
     source: Optional[str] = None
     confidence: Optional[float] = None
     sources: Optional[List[SearchResult]] = None
+
+
+class PublicVisitorProfileRequest(BaseModel):
+    visitor_id: str
+    name: str
+    email: EmailStr
 
 
 class FeedbackRequest(BaseModel):
@@ -222,6 +229,24 @@ def _resolve_tenant_actor_user_id(db, tenant_id: str) -> uuid.UUID:
         if user and user.is_active:
             return user.id
     raise HTTPException(status_code=400, detail="No active tenant user available for widget chat")
+
+
+def _normalize_visitor_id(visitor_id: Optional[str]) -> str:
+    normalized = (visitor_id or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=400, detail="visitor_id is required")
+    if len(normalized) > 64:
+        raise HTTPException(status_code=400, detail="visitor_id is invalid")
+    return normalized
+
+
+def _get_visitor_profile(db, tenant_id: str, visitor_id: str) -> Optional[ChatVisitor]:
+    return db.execute(
+        select(ChatVisitor).where(
+            ChatVisitor.tenant_id == uuid.UUID(tenant_id),
+            ChatVisitor.visitor_id == visitor_id,
+        )
+    ).scalar_one_or_none()
 
 
 def _parse_source_dsn(dsn: Optional[str], table_prefix: Optional[str], url_table: Optional[str]) -> Dict[str, Any]:
@@ -454,6 +479,7 @@ async def _run_chat_for_tenant(
     actor_user_id: uuid.UUID,
     db,
     is_public_chat: bool = False,
+    public_visitor: Optional[ChatVisitor] = None,
 ) -> Dict[str, Any]:
     ensure_collection_for_tenant(tenant_id)
 
@@ -466,7 +492,12 @@ async def _run_chat_for_tenant(
         db.add(session)
         db.flush()
         if is_public_chat:
-            session.title = f"Anonymous {session.id}"
+            if not public_visitor:
+                raise HTTPException(status_code=428, detail="Public visitor profile is required")
+            session.visitor_id = public_visitor.visitor_id
+            session.visitor_name = public_visitor.name
+            session.visitor_email = public_visitor.email
+            session.title = f"{public_visitor.name} ({public_visitor.email})"
 
     db.add(
         ChatMessage(
@@ -580,13 +611,71 @@ async def public_chat(
     request: ChatRequest,
     db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
     origin: Optional[str] = Header(default=None),
 ) -> Dict[str, Any]:
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    visitor_id = _normalize_visitor_id(x_visitor_id)
+    visitor = _get_visitor_profile(db, tenant_id, visitor_id)
+    if not visitor:
+        raise HTTPException(status_code=428, detail="Public visitor profile is required")
     actor_user_id = _resolve_tenant_actor_user_id(db, tenant_id)
-    return await _run_chat_for_tenant(request, tenant_id, actor_user_id, db, is_public_chat=True)
+    return await _run_chat_for_tenant(
+        request,
+        tenant_id,
+        actor_user_id,
+        db,
+        is_public_chat=True,
+        public_visitor=visitor,
+    )
+
+
+@app.get("/api/public/visitor-profile")
+async def get_public_visitor_profile(
+    db=Depends(db_session),
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
+    origin: Optional[str] = Header(default=None),
+):
+    if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
+    tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    visitor_id = _normalize_visitor_id(x_visitor_id)
+    visitor = _get_visitor_profile(db, tenant_id, visitor_id)
+    return {"profile_exists": bool(visitor)}
+
+
+@app.post("/api/public/visitor-profile")
+async def upsert_public_visitor_profile(
+    payload: PublicVisitorProfileRequest,
+    db=Depends(db_session),
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    origin: Optional[str] = Header(default=None),
+):
+    if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
+    tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    visitor_id = _normalize_visitor_id(payload.visitor_id)
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    visitor = _get_visitor_profile(db, tenant_id, visitor_id)
+    if visitor:
+        visitor.name = name
+        visitor.email = payload.email
+    else:
+        db.add(
+            ChatVisitor(
+                tenant_id=uuid.UUID(tenant_id),
+                visitor_id=visitor_id,
+                name=name,
+                email=payload.email,
+            )
+        )
+    db.commit()
+    return {"status": "ok", "profile_exists": True}
 
 @app.get("/health")
 async def health_check():
@@ -623,6 +712,49 @@ async def add_feedback(message_id: str, payload: FeedbackRequest, user_ctx=Depen
     return {"status": "ok"}
 
 
+@app.post("/api/public/messages/{message_id}/feedback")
+async def add_public_feedback(
+    message_id: str,
+    payload: FeedbackRequest,
+    db=Depends(db_session),
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    origin: Optional[str] = Header(default=None),
+):
+    if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
+    tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    message = db.get(ChatMessage, uuid.UUID(message_id))
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if str(message.tenant_id) != tenant_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Public feedback is keyed to the tenant actor user backing this chat session.
+    session = db.get(ChatSession, message.session_id)
+    actor_user_id = session.created_by_user_id if session else _resolve_tenant_actor_user_id(db, tenant_id)
+    feedback = db.execute(
+        select(MessageFeedback).where(
+            MessageFeedback.message_id == message.id,
+            MessageFeedback.user_id == actor_user_id,
+        )
+    ).scalar_one_or_none()
+    if feedback:
+        feedback.vote = payload.vote
+        feedback.reason = payload.reason or ""
+    else:
+        db.add(
+            MessageFeedback(
+                tenant_id=message.tenant_id,
+                message_id=message.id,
+                user_id=actor_user_id,
+                vote=payload.vote,
+                reason=payload.reason or "",
+            )
+        )
+    db.commit()
+    return {"status": "ok"}
+
+
 @app.get("/api/admin/chats")
 async def admin_chats(
     user_ctx=Depends(get_current_user),
@@ -644,8 +776,54 @@ async def admin_chats(
         ).scalars().all()
     if q:
         q_l = q.lower()
-        sessions = [s for s in sessions if q_l in (s.title or "").lower() or q_l in str(s.id)]
-    return [{"id": str(s.id), "tenant_id": str(s.tenant_id), "title": s.title, "last_message_at": s.last_message_at.isoformat()} for s in sessions]
+        session_ids = [s.id for s in sessions]
+        message_session_ids = set()
+        if session_ids:
+            message_rows = db.execute(
+                select(ChatMessage.session_id).where(ChatMessage.session_id.in_(session_ids), ChatMessage.content.ilike(f"%{q}%"))
+            ).all()
+            message_session_ids = {row[0] for row in message_rows}
+        sessions = [
+            s for s in sessions
+            if q_l in (s.title or "").lower()
+            or q_l in str(s.id)
+            or q_l in (s.visitor_name or "").lower()
+            or q_l in (s.visitor_email or "").lower()
+            or s.id in message_session_ids
+        ]
+    session_ids = [s.id for s in sessions]
+    feedback_by_session = {}
+    if session_ids:
+        message_rows = db.execute(
+            select(ChatMessage.id, ChatMessage.session_id).where(ChatMessage.session_id.in_(session_ids))
+        ).all()
+        message_to_session = {m_id: s_id for m_id, s_id in message_rows}
+        message_ids = list(message_to_session.keys())
+        if message_ids:
+            feedback_rows = db.execute(select(MessageFeedback.message_id, MessageFeedback.vote).where(MessageFeedback.message_id.in_(message_ids))).all()
+            for message_id, vote in feedback_rows:
+                session_id = message_to_session.get(message_id)
+                if not session_id:
+                    continue
+                sid = str(session_id)
+                if sid not in feedback_by_session:
+                    feedback_by_session[sid] = {"up": 0, "down": 0}
+                if vote == FeedbackVote.up:
+                    feedback_by_session[sid]["up"] += 1
+                elif vote == FeedbackVote.down:
+                    feedback_by_session[sid]["down"] += 1
+    return [
+        {
+            "id": str(s.id),
+            "tenant_id": str(s.tenant_id),
+            "title": s.title,
+            "visitor_name": s.visitor_name,
+            "visitor_email": s.visitor_email,
+            "last_message_at": s.last_message_at.isoformat(),
+            "feedback_summary": feedback_by_session.get(str(s.id), {"up": 0, "down": 0}),
+        }
+        for s in sessions
+    ]
 
 
 @app.get("/api/admin/users")
@@ -877,7 +1055,30 @@ async def admin_chat_detail(session_id: str, user_ctx=Depends(get_current_user),
     messages = db.execute(
         select(ChatMessage).where(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at.asc())
     ).scalars().all()
-    return [{"id": str(m.id), "sender_type": m.sender_type.value, "content": m.content, "created_at": m.created_at.isoformat()} for m in messages]
+    message_ids = [m.id for m in messages]
+    feedback_by_message = {}
+    if message_ids:
+        feedback_rows = db.execute(
+            select(MessageFeedback.message_id, MessageFeedback.vote).where(MessageFeedback.message_id.in_(message_ids))
+        ).all()
+        for message_id, vote in feedback_rows:
+            mid = str(message_id)
+            if mid not in feedback_by_message:
+                feedback_by_message[mid] = {"up": 0, "down": 0}
+            if vote == FeedbackVote.up:
+                feedback_by_message[mid]["up"] += 1
+            elif vote == FeedbackVote.down:
+                feedback_by_message[mid]["down"] += 1
+    return [
+        {
+            "id": str(m.id),
+            "sender_type": m.sender_type.value,
+            "content": m.content,
+            "created_at": m.created_at.isoformat(),
+            "feedback_summary": feedback_by_message.get(str(m.id), {"up": 0, "down": 0}),
+        }
+        for m in messages
+    ]
 
 
 @app.post("/api/reindex")

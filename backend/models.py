@@ -81,6 +81,9 @@ class ChatSession(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
     created_by_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     title: Mapped[str] = mapped_column(String(255), default="New Chat", nullable=False)
+    visitor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    visitor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    visitor_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     last_message_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -107,6 +110,23 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     session = relationship("ChatSession", back_populates="messages")
+
+
+class ChatVisitor(Base):
+    __tablename__ = "chat_visitors"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "visitor_id", name="uq_chat_visitors_tenant_visitor"),
+        Index("ix_chat_visitors_tenant_email", "tenant_id", "email"),
+        Index("ix_chat_visitors_tenant_name", "tenant_id", "name"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    visitor_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
 class MessageFeedback(Base):

@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
 import { client } from '../api';
 
-const Message = ({ type, text, timestamp, sources = [], isError, source, messageId }) => {
+const Message = ({ type, text, timestamp, sources = [], isError, source, messageId, mode = "admin", apiUrl = "", widgetKey = "" }) => {
   // Format timestamp
   const formatTime = (date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -17,10 +17,24 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, message
     sources.length > 0 && 
     sources.some(source => source.score >= 0.3);
 
+  const feedbackStorageKey = useMemo(
+    () => (messageId ? `feedback_${mode}_${widgetKey || "admin"}_${messageId}` : ""),
+    [messageId, mode, widgetKey]
+  );
+  const [selectedVote, setSelectedVote] = useState(() => (feedbackStorageKey ? localStorage.getItem(feedbackStorageKey) : ""));
+
   const sendFeedback = async (vote) => {
     if (!messageId) return;
     try {
-      await client.post(`/api/messages/${messageId}/feedback`, { vote });
+      const endpoint = mode === "public" ? `/api/public/messages/${messageId}/feedback` : `/api/messages/${messageId}/feedback`;
+      const requestUrl = mode === "public" ? `${apiUrl}${endpoint}` : endpoint;
+      await client.post(requestUrl, { vote }, {
+        headers: mode === "public" ? { "X-Widget-Key": widgetKey } : undefined,
+      });
+      setSelectedVote(vote);
+      if (feedbackStorageKey) {
+        localStorage.setItem(feedbackStorageKey, vote);
+      }
     } catch (err) {
       console.error("Feedback failed", err);
     }
@@ -34,8 +48,8 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, message
           <>
             <ReadMoreButton href={sources[0].url} target="_blank" rel="noopener noreferrer">Read More</ReadMoreButton>
             <FeedbackRow>
-              <button onClick={() => sendFeedback("up")} type="button">👍</button>
-              <button onClick={() => sendFeedback("down")} type="button">👎</button>
+              <FeedbackButton selected={selectedVote === "up"} onClick={() => sendFeedback("up")} type="button">👍</FeedbackButton>
+              <FeedbackButton selected={selectedVote === "down"} onClick={() => sendFeedback("down")} type="button">👎</FeedbackButton>
             </FeedbackRow>
           </>
         )}
@@ -111,6 +125,14 @@ const FeedbackRow = styled.div`
   margin-top: 8px;
   display: flex;
   gap: 6px;
+`;
+
+const FeedbackButton = styled.button`
+  border: 1px solid ${props => (props.selected ? "var(--primary-color)" : "#ddd")};
+  background: ${props => (props.selected ? "rgba(191, 54, 46, 0.12)" : "white")};
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
 `;
 
 export default Message; 

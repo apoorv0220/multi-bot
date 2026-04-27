@@ -208,6 +208,14 @@ const AdminDashboard = ({ role, tenantId }) => {
   };
 
   const selectedTenant = tenants.find((t) => t.id === sourceTenantId);
+  const aggregateFeedback = sessions.reduce(
+    (acc, s) => {
+      acc.up += Number(s?.feedback_summary?.up || 0);
+      acc.down += Number(s?.feedback_summary?.down || 0);
+      return acc;
+    },
+    { up: 0, down: 0 }
+  );
 
   return (
     <Box sx={{ p: 3 }}>
@@ -256,6 +264,8 @@ const AdminDashboard = ({ role, tenantId }) => {
               <CardContent>
                 <Stack direction="row" spacing={1} mb={1} alignItems="center">
                   <Typography variant="h6">Tenant Chats</Typography>
+                  <Chip size="small" label={`👍 ${aggregateFeedback.up}`} />
+                  <Chip size="small" label={`👎 ${aggregateFeedback.down}`} />
                 </Stack>
                 <TextField
                   size="small"
@@ -271,7 +281,10 @@ const AdminDashboard = ({ role, tenantId }) => {
                 <List dense>
                   {sessions.map((s) => (
                     <ListItemButton key={s.id} selected={selected === s.id} onClick={() => loadSession(s.id)}>
-                      <ListItemText primary={s.title || s.id} secondary={`${s.id} | ${s.last_message_at}`} />
+                      <ListItemText
+                        primary={s.title || s.id}
+                        secondary={`${s.visitor_name || "Unknown"}${s.visitor_email ? ` (${s.visitor_email})` : ""} | ${s.id} | ${s.last_message_at} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
+                      />
                     </ListItemButton>
                   ))}
                 </List>
@@ -291,6 +304,12 @@ const AdminDashboard = ({ role, tenantId }) => {
                       <Box key={m.id} sx={{ p: 1.5, borderRadius: 1, bgcolor: m.sender_type === "assistant" ? "grey.100" : "primary.50" }}>
                         <Typography variant="caption" color="text.secondary">{m.sender_type}</Typography>
                         <Typography>{m.content}</Typography>
+                        {m.sender_type === "assistant" && (
+                          <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                            <Chip size="small" label={`👍 ${m?.feedback_summary?.up || 0}`} />
+                            <Chip size="small" label={`👎 ${m?.feedback_summary?.down || 0}`} />
+                          </Stack>
+                        )}
                       </Box>
                     ))}
                   </Stack>

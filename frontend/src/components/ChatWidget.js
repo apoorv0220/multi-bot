@@ -9,6 +9,10 @@ const FALLBACK_GREETING =
 const FALLBACK_HEADER_TITLE = "MRN Web Designs Assistant";
 
 const resolveInitialGreeting = () => FALLBACK_GREETING;
+const createVisitorId = () => {
+  if (window?.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `visitor-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
 
 const createBotMessage = (text) => ({
   id: 1,
@@ -26,7 +30,12 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [widgetKey, setWidgetKey] = useState(null);
   const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
   const [sessionId, setSessionId] = useState(localStorage.getItem("chat_session_id") || null);
+  const [visitorId, setVisitorId] = useState(localStorage.getItem("chat_visitor_id") || null);
   const [publicConfigError, setPublicConfigError] = useState("");
+  const [isProfileRequired, setIsProfileRequired] = useState(false);
+  const [visitorName, setVisitorName] = useState("");
+  const [visitorEmail, setVisitorEmail] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -55,9 +64,16 @@ const ChatWidget = ({ mode = "admin" }) => {
         setHeaderTitle(data.chatbotHeaderTitle);
       }
       const keySuffix = data.tenantPublicKey || "default";
-      const storageKey = `chat_session_id_${keySuffix}`;
-      setSessionStorageKey(storageKey);
-      setSessionId(localStorage.getItem(storageKey) || null);
+      const sessionKey = `chat_session_id_${keySuffix}`;
+      const visitorKey = `chat_visitor_id_${keySuffix}`;
+      let existingVisitorId = localStorage.getItem(visitorKey);
+      if (!existingVisitorId) {
+        existingVisitorId = createVisitorId();
+        localStorage.setItem(visitorKey, existingVisitorId);
+      }
+      setSessionStorageKey(sessionKey);
+      setSessionId(localStorage.getItem(sessionKey) || null);
+      setVisitorId(existingVisitorId);
       if (!data.tenantPublicKey) {
         setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
       } else {
@@ -68,11 +84,55 @@ const ChatWidget = ({ mode = "admin" }) => {
     return () => window.removeEventListener("message", onMessage);
   }, [mode]);
 
+  useEffect(() => {
+    if (mode !== "public" || !widgetKey || !visitorId || !apiUrl) return;
+    const checkProfile = async () => {
+      try {
+        const { data } = await client.get(`${apiUrl}/api/public/visitor-profile`, {
+          headers: {
+            "X-Widget-Key": widgetKey,
+            "X-Visitor-Id": visitorId,
+          },
+        });
+        setIsProfileRequired(!data?.profile_exists);
+      } catch (err) {
+        console.error("Error checking visitor profile:", err);
+      }
+    };
+    checkProfile();
+  }, [apiUrl, mode, visitorId, widgetKey]);
+
+  const submitVisitorProfile = async () => {
+    if (!visitorName.trim() || !visitorEmail.trim()) return;
+    setIsSavingProfile(true);
+    try {
+      await client.post(`${apiUrl}/api/public/visitor-profile`, {
+        visitor_id: visitorId,
+        name: visitorName.trim(),
+        email: visitorEmail.trim(),
+      }, {
+        headers: {
+          "X-Widget-Key": widgetKey,
+        },
+      });
+      setIsProfileRequired(false);
+    } catch (err) {
+      console.error("Error saving visitor profile:", err);
+      setPublicConfigError(err?.response?.data?.detail || "Could not save profile. Please try again.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
     if (mode === "public" && !widgetKey) {
       setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
+      return;
+    }
+    if (mode === "public" && isProfileRequired) {
+      setPublicConfigError("Please provide name and email first.");
       return;
     }
 
@@ -94,7 +154,7 @@ const ChatWidget = ({ mode = "admin" }) => {
         session_id: sessionId,
         max_results: 3,
       }, {
-        headers: mode === "public" ? { "X-Widget-Key": widgetKey } : undefined,
+        headers: mode === "public" ? { "X-Widget-Key": widgetKey, "X-Visitor-Id": visitorId } : undefined,
       });
       if (response.data.session_id) {
         setSessionId(response.data.session_id);
@@ -145,6 +205,9 @@ const ChatWidget = ({ mode = "admin" }) => {
             confidence={message.confidence}
             source={message.source}
             messageId={message.messageId}
+            mode={mode}
+            apiUrl={apiUrl}
+            widgetKey={widgetKey}
           />
         ))}
         {isLoading && (
@@ -166,12 +229,38 @@ const ChatWidget = ({ mode = "admin" }) => {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Type your message..."
-          disabled={isLoading}
+          disabled={isLoading || (mode === "public" && isProfileRequired)}
         />
-        <SendButton type="submit" disabled={isLoading || !input.trim()}>
+        <SendButton type="submit" disabled={isLoading || !input.trim() || (mode === "public" && isProfileRequired)}>
           <BsSend />
         </SendButton>
       </InputForm>
+      {mode === "public" && isProfileRequired && (
+        <ProfileCaptureContainer>
+          <ProfileTitle>Before we continue, please share your details:</ProfileTitle>
+          <Input
+            type="text"
+            value={visitorName}
+            onChange={(e) => setVisitorName(e.target.value)}
+            placeholder="Your name"
+            disabled={isSavingProfile}
+          />
+          <Input
+            type="email"
+            value={visitorEmail}
+            onChange={(e) => setVisitorEmail(e.target.value)}
+            placeholder="Your email"
+            disabled={isSavingProfile}
+          />
+          <ProfileSaveButton
+            type="button"
+            disabled={isSavingProfile || !visitorName.trim() || !visitorEmail.trim()}
+            onClick={submitVisitorProfile}
+          >
+            {isSavingProfile ? "Saving..." : "Continue to chat"}
+          </ProfileSaveButton>
+        </ProfileCaptureContainer>
+      )}
       {publicConfigError && <ConfigError>{publicConfigError}</ConfigError>}
     </WidgetContainer>
   );
@@ -280,6 +369,33 @@ const ConfigError = styled.div`
   color: #c62828;
   font-size: 0.85rem;
   padding: 8px 12px 12px;
+`;
+
+const ProfileCaptureContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #eee;
+  padding: 12px 15px;
+`;
+
+const ProfileTitle = styled.div`
+  font-size: 0.85rem;
+  color: #444;
+`;
+
+const ProfileSaveButton = styled.button`
+  border: none;
+  background: #bf362e;
+  color: white;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+
+  &:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
 `;
 
 export default ChatWidget; 

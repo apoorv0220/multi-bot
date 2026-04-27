@@ -21,7 +21,7 @@ function AppContent({ auth, onLogin, onLogout }) {
       {isAdminRoute && (
         <AppBar position="static" color="inherit" elevation={1}>
           <Toolbar>
-            <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>Migraine Chatbot Control</Typography>
+            <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>Chatbot Control</Typography>
             {auth && (
               <Stack direction="row" spacing={2} alignItems="center">
                 <Link to="/admin/chat">Chat</Link>
