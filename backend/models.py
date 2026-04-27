@@ -34,6 +34,12 @@ class ReindexScope(str, enum.Enum):
     all = "all"
 
 
+class UsageType(str, enum.Enum):
+    chat_completion = "chat_completion"
+    chat_embedding = "chat_embedding"
+    index_embedding = "index_embedding"
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
     id: Mapped[uuid.UUID] = _uuid_col()
@@ -110,6 +116,27 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     session = relationship("ChatSession", back_populates="messages")
+
+
+class UsageEvent(Base):
+    __tablename__ = "usage_events"
+    __table_args__ = (
+        Index("ix_usage_events_tenant_created", "tenant_id", "created_at"),
+        Index("ix_usage_events_session_created", "session_id", "created_at"),
+        Index("ix_usage_events_type_created", "usage_type", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("chat_messages.id"), nullable=True)
+    usage_type: Mapped[UsageType] = mapped_column(Enum(UsageType), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    prompt_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    completion_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    total_tokens: Mapped[int] = mapped_column(nullable=False, default=0)
+    meta_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class ChatVisitor(Base):

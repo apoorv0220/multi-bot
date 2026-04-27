@@ -70,7 +70,7 @@ class ProcessingProgress:
         }
 
 class Embedder:
-    def __init__(self, client=None, collection_name: Optional[str] = None, source_config: Optional[Dict[str, Any]] = None, progress_callback=None):
+    def __init__(self, client=None, collection_name: Optional[str] = None, source_config: Optional[Dict[str, Any]] = None, progress_callback=None, usage_callback=None):
         # Use the provided client or the global client
         self.qdrant_client = client or qdrant_client
         
@@ -85,6 +85,7 @@ class Embedder:
             raise ValueError("collection_name must be provided for multi-tenant indexing")
         self.source_config = source_config or {}
         self.progress_callback = progress_callback
+        self.usage_callback = usage_callback
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -187,6 +188,19 @@ class Embedder:
                     model=self.embedding_model,
                     input=text
                 )
+                usage = response.usage or {}
+                if self.usage_callback:
+                    try:
+                        self.usage_callback(
+                            {
+                                "model_name": self.embedding_model,
+                                "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+                                "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+                                "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+                            }
+                        )
+                    except Exception as usage_err:
+                        logger.warning(f"Usage callback failed: {usage_err}")
                 
                 return response.data[0].embedding
                 
@@ -207,6 +221,19 @@ class Embedder:
                             model=self.embedding_model,
                             input=shorter_text
                         )
+                        usage = response.usage or {}
+                        if self.usage_callback:
+                            try:
+                                self.usage_callback(
+                                    {
+                                        "model_name": self.embedding_model,
+                                        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+                                        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+                                        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+                                    }
+                                )
+                            except Exception as usage_err:
+                                logger.warning(f"Usage callback failed: {usage_err}")
                         return response.data[0].embedding
                     except Exception as e2:
                         logger.error(f"Error after aggressive truncation: {e2}")

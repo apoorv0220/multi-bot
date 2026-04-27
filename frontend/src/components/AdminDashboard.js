@@ -34,6 +34,8 @@ const AdminDashboard = ({ role, tenantId }) => {
   const [jobs, setJobs] = useState([]);
   const [users, setUsers] = useState([]);
   const [tenants, setTenants] = useState([]);
+  const [usageSummary, setUsageSummary] = useState(null);
+  const [overview, setOverview] = useState(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
@@ -56,16 +58,20 @@ const AdminDashboard = ({ role, tenantId }) => {
 
   const load = useCallback(async (query = searchQuery) => {
     try {
-      const [chatRes, jobRes, usersRes, tenantsRes] = await Promise.all([
+      const [chatRes, jobRes, usersRes, tenantsRes, overviewRes] = await Promise.all([
         client.get("/api/admin/chats", { params: { q: query || undefined, tenant_id: effectiveTenantId } }),
         client.get("/api/reindex/jobs", { params: { tenant_id: effectiveTenantId } }),
         client.get("/api/admin/users", { params: { tenant_id: effectiveTenantId } }),
         client.get("/api/admin/tenants"),
+        client.get("/api/admin/overview", { params: { tenant_id: effectiveTenantId } }),
       ]);
+      const usageRes = await client.get("/api/admin/usage/summary", { params: { tenant_id: effectiveTenantId } });
       setSessions(chatRes.data);
       setJobs(jobRes.data);
       setUsers(usersRes.data);
       setTenants(tenantsRes.data);
+      setUsageSummary(usageRes.data);
+      setOverview(overviewRes.data);
       if (!sourceTenantId && tenantsRes.data.length > 0) {
         const firstTenant = role === "superadmin" ? tenantsRes.data[0].id : tenantId;
         setSourceTenantId(firstTenant || "");
@@ -251,6 +257,7 @@ const AdminDashboard = ({ role, tenantId }) => {
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
+        <Tab label="Overview" />
         <Tab label="Chats" />
         <Tab label="Jobs" />
         <Tab label="Users" />
@@ -259,6 +266,29 @@ const AdminDashboard = ({ role, tenantId }) => {
 
       {tab === 0 && (
         <Grid container spacing={2}>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Total Chats</Typography><Typography variant="h4" fontWeight={700}>{overview?.total_chats || 0}</Typography></CardContent></Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Unique Users (Visitors)</Typography><Typography variant="h4" fontWeight={700}>{overview?.unique_visitors || 0}</Typography></CardContent></Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Embeddings Token Usage</Typography><Typography variant="h4" fontWeight={700}>{overview?.embedding_token_usage || 0}</Typography></CardContent></Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Chat Token Usage</Typography><Typography variant="h4" fontWeight={700}>{overview?.chat_token_usage || 0}</Typography></CardContent></Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Likes</Typography><Typography variant="h4" fontWeight={700}>{overview?.likes || 0}</Typography></CardContent></Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Dislikes</Typography><Typography variant="h4" fontWeight={700}>{overview?.dislikes || 0}</Typography></CardContent></Card>
+          </Grid>
+        </Grid>
+      )}
+
+      {tab === 1 && (
+        <Grid container spacing={2}>
           <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
@@ -266,6 +296,7 @@ const AdminDashboard = ({ role, tenantId }) => {
                   <Typography variant="h6">Tenant Chats</Typography>
                   <Chip size="small" label={`👍 ${aggregateFeedback.up}`} />
                   <Chip size="small" label={`👎 ${aggregateFeedback.down}`} />
+                  <Chip size="small" label={`Embeddings Tokens ${usageSummary?.embedding_total_tokens || 0}`} />
                 </Stack>
                 <TextField
                   size="small"
@@ -306,6 +337,13 @@ const AdminDashboard = ({ role, tenantId }) => {
                         <Typography>{m.content}</Typography>
                         {m.sender_type === "assistant" && (
                           <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                            <Chip size="small" label={`Prompt ${m?.token_usage?.prompt_tokens || 0}`} />
+                            <Chip size="small" label={`Completion ${m?.token_usage?.completion_tokens || 0}`} />
+                            <Chip size="small" label={`Total ${m?.token_usage?.total_tokens || 0}`} />
+                          </Stack>
+                        )}
+                        {m.sender_type === "assistant" && (
+                          <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
                             <Chip size="small" label={`👍 ${m?.feedback_summary?.up || 0}`} />
                             <Chip size="small" label={`👎 ${m?.feedback_summary?.down || 0}`} />
                           </Stack>
@@ -322,7 +360,7 @@ const AdminDashboard = ({ role, tenantId }) => {
         </Grid>
       )}
 
-      {tab === 1 && (
+      {tab === 2 && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Reindex Jobs</Typography>
@@ -365,7 +403,7 @@ const AdminDashboard = ({ role, tenantId }) => {
         </Card>
       )}
 
-      {tab === 2 && (
+      {tab === 3 && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Users</Typography>
@@ -390,7 +428,7 @@ const AdminDashboard = ({ role, tenantId }) => {
         </Card>
       )}
 
-      {tab === 3 && (
+      {tab === 4 && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Source Database Settings</Typography>

@@ -18,7 +18,7 @@ from pydantic import BaseModel, EmailStr
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from auth import create_access_token, decode_token, hash_password, verify_password
 from db import SessionLocal
@@ -35,6 +35,8 @@ from models import (
     ReindexScope,
     SenderType,
     Tenant,
+    UsageEvent,
+    UsageType,
     User,
     UserRole,
     UserTenant,
@@ -231,6 +233,19 @@ def _resolve_tenant_actor_user_id(db, tenant_id: str) -> uuid.UUID:
     raise HTTPException(status_code=400, detail="No active tenant user available for widget chat")
 
 
+def _resolve_effective_tenant_id_for_admin_views(db, user_ctx: dict, tenant_id: Optional[str]) -> str:
+    if user_ctx["role"] != UserRole.superadmin.value:
+        if not user_ctx.get("tenant_id"):
+            raise HTTPException(status_code=400, detail="Tenant context missing")
+        return user_ctx["tenant_id"]
+    if tenant_id:
+        return tenant_id
+    first_tenant = db.execute(select(Tenant).order_by(Tenant.created_at.asc())).scalars().first()
+    if not first_tenant:
+        raise HTTPException(status_code=400, detail="No tenants available")
+    return str(first_tenant.id)
+
+
 def _normalize_visitor_id(visitor_id: Optional[str]) -> str:
     normalized = (visitor_id or "").strip()
     if not normalized:
@@ -305,13 +320,19 @@ def ensure_collection_for_tenant(tenant_id: str):
         )
 
 # Helper function to generate embeddings
-async def generate_embedding(text: str) -> List[float]:
+async def generate_embedding(text: str) -> tuple[List[float], Dict[str, Any]]:
     try:
         response = openai.embeddings.create(
             model="text-embedding-3-small",
             input=text
         )
-        return response.data[0].embedding
+        usage = response.usage or {}
+        return response.data[0].embedding, {
+            "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+            "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+            "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+            "model_name": "text-embedding-3-small",
+        }
     except Exception as e:
         logger.error(f"Error generating embedding: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate embedding")
@@ -427,7 +448,7 @@ Examples:
         logger.warning(f"Query preprocessing failed: {e}. Using original query.")
         return original_query
 
-async def generate_answer(query: str, context_texts: List[str]) -> str:
+async def generate_answer(query: str, context_texts: List[str]) -> tuple[str, Dict[str, Any]]:
     try:
         # Set a maximum total context length (in chars) to prevent errors
         max_total_context = 14000  # Safe limit for gpt-3.5-turbo (16k tokens)
@@ -467,10 +488,44 @@ async def generate_answer(query: str, context_texts: List[str]) -> str:
             ]
         )
         
-        return response.choices[0].message.content
+        usage = response.usage or {}
+        return response.choices[0].message.content, {
+            "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+            "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+            "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+            "model_name": "gpt-3.5-turbo",
+        }
     except Exception as e:
         logger.error(f"Error generating answer: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate answer")
+
+
+def _record_usage_event(
+    db,
+    *,
+    tenant_id: uuid.UUID,
+    usage_type: UsageType,
+    model_name: str,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+    session_id: Optional[uuid.UUID] = None,
+    message_id: Optional[uuid.UUID] = None,
+    meta_json: Optional[dict] = None,
+):
+    db.add(
+        UsageEvent(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            message_id=message_id,
+            usage_type=usage_type,
+            model_name=model_name or "",
+            prompt_tokens=int(prompt_tokens or 0),
+            completion_tokens=int(completion_tokens or 0),
+            total_tokens=int(total_tokens or 0),
+            meta_json=meta_json or {},
+        )
+    )
 
 
 async def _run_chat_for_tenant(
@@ -519,7 +574,18 @@ async def _run_chat_for_tenant(
         if qdrant_client is None:
             raise HTTPException(status_code=503, detail="Qdrant unavailable")
         enhanced_query = await preprocess_query(request.message)
-        embedding = await generate_embedding(enhanced_query)
+        embedding, embedding_usage = await generate_embedding(enhanced_query)
+        _record_usage_event(
+            db,
+            tenant_id=session.tenant_id,
+            usage_type=UsageType.chat_embedding,
+            model_name=embedding_usage.get("model_name", ""),
+            prompt_tokens=embedding_usage.get("prompt_tokens", 0),
+            completion_tokens=embedding_usage.get("completion_tokens", 0),
+            total_tokens=embedding_usage.get("total_tokens", 0),
+            session_id=session.id,
+            meta_json={"source": "chat_query"},
+        )
         search_results = await search_qdrant(tenant_id, embedding, request.max_results)
         filtered_results = [result for result in search_results if result.score >= 0.3]
         context_texts: list[str] = []
@@ -541,8 +607,9 @@ async def _run_chat_for_tenant(
         if not sources:
             answer = "I could not find high-confidence context for that request."
             confidence = 0.0
+            completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "gpt-3.5-turbo"}
         else:
-            answer = await generate_answer(request.message, context_texts)
+            answer, completion_usage = await generate_answer(request.message, context_texts)
             confidence = filtered_results[0].score
         source_type = "vector_search"
 
@@ -552,8 +619,27 @@ async def _run_chat_for_tenant(
         sender_type=SenderType.assistant,
         content=answer,
         model_name="gpt-3.5-turbo",
+        token_usage_json={
+            "completion_tokens": completion_usage.get("completion_tokens", 0),
+            "prompt_tokens": completion_usage.get("prompt_tokens", 0),
+            "total_tokens": completion_usage.get("total_tokens", 0),
+            "model_name": completion_usage.get("model_name", "gpt-3.5-turbo"),
+        },
     )
     db.add(assistant_message)
+    db.flush()
+    _record_usage_event(
+        db,
+        tenant_id=session.tenant_id,
+        usage_type=UsageType.chat_completion,
+        model_name=completion_usage.get("model_name", "gpt-3.5-turbo"),
+        prompt_tokens=completion_usage.get("prompt_tokens", 0),
+        completion_tokens=completion_usage.get("completion_tokens", 0),
+        total_tokens=completion_usage.get("total_tokens", 0),
+        session_id=session.id,
+        message_id=assistant_message.id,
+        meta_json={"source": source_type},
+    )
     session.last_message_at = datetime.now(timezone.utc)
     db.commit()
     return ChatResponse(
@@ -1075,10 +1161,131 @@ async def admin_chat_detail(session_id: str, user_ctx=Depends(get_current_user),
             "sender_type": m.sender_type.value,
             "content": m.content,
             "created_at": m.created_at.isoformat(),
+            "token_usage": m.token_usage_json or {},
             "feedback_summary": feedback_by_message.get(str(m.id), {"up": 0, "down": 0}),
         }
         for m in messages
     ]
+
+
+@app.get("/api/admin/usage/summary")
+async def admin_usage_summary(
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+    tenant_id: Optional[str] = Query(default=None),
+):
+    target_tenant_id = _resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
+
+    usage_stmt = select(
+        UsageEvent.usage_type,
+        func.coalesce(func.sum(UsageEvent.prompt_tokens), 0),
+        func.coalesce(func.sum(UsageEvent.completion_tokens), 0),
+        func.coalesce(func.sum(UsageEvent.total_tokens), 0),
+    )
+    per_chat_stmt = select(
+        UsageEvent.session_id,
+        func.coalesce(func.sum(UsageEvent.total_tokens), 0),
+    ).where(UsageEvent.session_id.is_not(None))
+    per_tenant_stmt = select(
+        UsageEvent.tenant_id,
+        func.coalesce(func.sum(UsageEvent.total_tokens), 0),
+    )
+
+    tenant_uuid = uuid.UUID(target_tenant_id)
+    usage_stmt = usage_stmt.where(UsageEvent.tenant_id == tenant_uuid)
+    per_chat_stmt = per_chat_stmt.where(UsageEvent.tenant_id == tenant_uuid)
+    per_tenant_stmt = per_tenant_stmt.where(UsageEvent.tenant_id == tenant_uuid)
+
+    rows = db.execute(usage_stmt.group_by(UsageEvent.usage_type)).all()
+
+    summary = {
+        "chat_completion": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "chat_embedding": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "index_embedding": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+    for usage_type, prompt_tokens, completion_tokens, total_tokens in rows:
+        key = usage_type.value if hasattr(usage_type, "value") else str(usage_type)
+        summary[key] = {
+            "prompt_tokens": int(prompt_tokens or 0),
+            "completion_tokens": int(completion_tokens or 0),
+            "total_tokens": int(total_tokens or 0),
+        }
+
+    session_rows = db.execute(per_chat_stmt.group_by(UsageEvent.session_id)).all()
+    per_chat = [{"session_id": str(sid), "total_tokens": int(tokens or 0)} for sid, tokens in session_rows if sid]
+    per_chat.sort(key=lambda row: row["total_tokens"], reverse=True)
+
+    tenant_rows = db.execute(per_tenant_stmt.group_by(UsageEvent.tenant_id)).all()
+    per_tenant = [{"tenant_id": str(tid), "total_tokens": int(tokens or 0)} for tid, tokens in tenant_rows if tid]
+    per_tenant.sort(key=lambda row: row["total_tokens"], reverse=True)
+
+    return {
+        "tenant_id": target_tenant_id,
+        "scope": "tenant",
+        "summary": summary,
+        "embedding_total_tokens": int(summary["chat_embedding"]["total_tokens"] + summary["index_embedding"]["total_tokens"]),
+        "per_chat_tokens": per_chat[:100],
+        "per_tenant_tokens": per_tenant[:100],
+    }
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+    tenant_id: Optional[str] = Query(default=None),
+):
+    target_tenant_id = _resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
+    tenant_uuid = uuid.UUID(target_tenant_id)
+
+    total_chats = db.execute(
+        select(func.count(ChatSession.id)).where(ChatSession.tenant_id == tenant_uuid)
+    ).scalar_one()
+
+    unique_visitors = db.execute(
+        select(func.count(func.distinct(ChatSession.visitor_id))).where(
+            ChatSession.tenant_id == tenant_uuid,
+            ChatSession.visitor_id.is_not(None),
+        )
+    ).scalar_one()
+
+    likes = db.execute(
+        select(func.count(MessageFeedback.id)).where(
+            MessageFeedback.tenant_id == tenant_uuid,
+            MessageFeedback.vote == FeedbackVote.up,
+        )
+    ).scalar_one()
+    dislikes = db.execute(
+        select(func.count(MessageFeedback.id)).where(
+            MessageFeedback.tenant_id == tenant_uuid,
+            MessageFeedback.vote == FeedbackVote.down,
+        )
+    ).scalar_one()
+
+    token_rows = db.execute(
+        select(
+            UsageEvent.usage_type,
+            func.coalesce(func.sum(UsageEvent.total_tokens), 0),
+        ).where(UsageEvent.tenant_id == tenant_uuid).group_by(UsageEvent.usage_type)
+    ).all()
+    token_totals = {
+        "chat_completion": 0,
+        "chat_embedding": 0,
+        "index_embedding": 0,
+    }
+    for usage_type, total_tokens in token_rows:
+        key = usage_type.value if hasattr(usage_type, "value") else str(usage_type)
+        token_totals[key] = int(total_tokens or 0)
+
+    return {
+        "tenant_id": target_tenant_id,
+        "total_chats": int(total_chats or 0),
+        "unique_visitors": int(unique_visitors or 0),
+        "embedding_token_usage": int(token_totals["chat_embedding"] + token_totals["index_embedding"]),
+        "chat_token_usage": int(token_totals["chat_completion"]),
+        "likes": int(likes or 0),
+        "dislikes": int(dislikes or 0),
+    }
 
 
 @app.post("/api/reindex")
@@ -1123,6 +1330,19 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
                 local_db.add(local_job)
                 local_db.commit()
 
+            def on_embedding_usage(usage: Dict[str, Any]):
+                _record_usage_event(
+                    local_db,
+                    tenant_id=uuid.UUID(target_tenant_id),
+                    usage_type=UsageType.index_embedding,
+                    model_name=usage.get("model_name", ""),
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                    meta_json={"source": "reindex"},
+                )
+                local_db.commit()
+
             source_cfg = {}
             if tenant:
                 source_cfg = _parse_source_dsn(
@@ -1135,6 +1355,7 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
                 collection_name=_tenant_collection(target_tenant_id),
                 source_config=source_cfg,
                 progress_callback=on_progress,
+                usage_callback=on_embedding_usage,
             )
             await embedder.reindex_all_content()
             local_job.status = "completed"
