@@ -30,4 +30,4 @@ if [ "${ENVIRONMENT:-development}" != "development" ]; then
   alembic current
 fi
 
-exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT:-8043} --timeout 3600 --graceful-timeout 300 main:app
+exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT:-8043} --timeout 3600 --graceful-timeout 300 app:app

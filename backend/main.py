@@ -21,9 +21,12 @@ from qdrant_client.http.models import Distance, VectorParams
 from sqlalchemy import func, select
 
 from auth import create_access_token, decode_token, hash_password, verify_password
+from core.policies import require_role as policy_require_role, resolve_effective_tenant_id_for_admin_views
 from db import SessionLocal
 from embedder import Embedder
 from fuzzy_matcher import FuzzyMatcher
+from integrations.openai_client import OpenAIClientAdapter
+from integrations.vector_store import VectorStoreAdapter
 from models import (
     AuditLog,
     ChatMessage,
@@ -60,6 +63,7 @@ app.add_middleware(
 openai.api_key = os.getenv("OPENAI_API_KEY")
 qdrant_client = None
 fuzzy_matcher = FuzzyMatcher()
+openai_adapter = OpenAIClientAdapter()
 
 
 @app.on_event("startup")
@@ -172,8 +176,7 @@ def get_current_user(
 
 
 def require_role(user_ctx: dict, roles: list[str]):
-    if user_ctx["role"] not in roles:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    policy_require_role(user_ctx, roles)
 
 
 def _tenant_collection(tenant_id: str) -> str:
@@ -234,16 +237,7 @@ def _resolve_tenant_actor_user_id(db, tenant_id: str) -> uuid.UUID:
 
 
 def _resolve_effective_tenant_id_for_admin_views(db, user_ctx: dict, tenant_id: Optional[str]) -> str:
-    if user_ctx["role"] != UserRole.superadmin.value:
-        if not user_ctx.get("tenant_id"):
-            raise HTTPException(status_code=400, detail="Tenant context missing")
-        return user_ctx["tenant_id"]
-    if tenant_id:
-        return tenant_id
-    first_tenant = db.execute(select(Tenant).order_by(Tenant.created_at.asc())).scalars().first()
-    if not first_tenant:
-        raise HTTPException(status_code=400, detail="No tenants available")
-    return str(first_tenant.id)
+    return resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
 
 
 def _normalize_visitor_id(visitor_id: Optional[str]) -> str:
@@ -322,10 +316,7 @@ def ensure_collection_for_tenant(tenant_id: str):
 # Helper function to generate embeddings
 async def generate_embedding(text: str) -> tuple[List[float], Dict[str, Any]]:
     try:
-        response = openai.embeddings.create(
-            model="text-embedding-3-small",
-            input=text
-        )
+        response = openai_adapter.create_embedding(model="text-embedding-3-small", input_text=text)
         usage = response.usage or {}
         return response.data[0].embedding, {
             "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
@@ -343,38 +334,25 @@ async def search_qdrant(tenant_id: str, embedding: List[float], limit: int = 5) 
     collection_name = _tenant_collection(tenant_id)
 
     try:
+        vector_store = VectorStoreAdapter(qdrant_client)
         # First try to search in MRN Web Designs content (prioritized)
-        mrnwebdesigns_results = qdrant_client.search(
+        mrnwebdesigns_results = vector_store.search(
             collection_name=collection_name,
             query_vector=embedding,
             limit=limit,
             score_threshold=0.6,
-            query_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="source_type",
-                        match=models.MatchValue(value="mrnwebdesigns_ie")
-                    )
-                ]
-            )
+            source_type="mrnwebdesigns_ie",
         )
         
         logger.info(f"Found {len(mrnwebdesigns_results)} mrnwebdesigns.com results")
         
         # If we don't have enough results from MRN Web Designs, search external sources
         if len(mrnwebdesigns_results) < limit or max([r.score for r in mrnwebdesigns_results] + [0]) < 0.7:
-            external_results = qdrant_client.search(
+            external_results = vector_store.search(
                 collection_name=collection_name,
                 query_vector=embedding,
-                query_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="source_type",
-                            match=models.MatchValue(value="external")
-                        )
-                    ]
-                ),
-                limit=limit
+                source_type="external",
+                limit=limit,
             )
             
             # Combine and sort results
@@ -405,7 +383,7 @@ async def preprocess_query(original_query: str) -> str:
     Converts questions like "your office address" to "MRN Web Designs office address".
     """
     try:
-        response = openai.chat.completions.create(
+        response = openai_adapter.create_chat_completion(
             model="gpt-3.5-turbo",
             messages=[
                 {
@@ -1436,14 +1414,14 @@ async def exception_handling_middleware(request: Request, call_next):
         logger.exception("Unhandled error for %s %s", request.method, request.url.path)
         return JSONResponse(
             status_code=500,
-            content={"detail": f"Internal server error: {str(e)}"}
+            content={"detail": "Internal server error"}
         )
 
 # Run the app
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app", 
+        "app:app",
         host=os.getenv("API_HOST", "0.0.0.0"), 
         port=int(os.getenv("API_PORT", 8043)),
         reload=False,
