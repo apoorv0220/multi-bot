@@ -33,6 +33,25 @@ async def admin_users(
     return await admin_service.list_users(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
 
 
+@router.get("/api/admin/visitors")
+async def admin_visitors(
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+    tenant_id: Optional[str] = Query(default=None),
+):
+    return await admin_service.list_visitors(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+
+
+@router.get("/api/admin/visitors/{visitor_id}/chats")
+async def admin_visitor_chats(
+    visitor_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+    tenant_id: Optional[str] = Query(default=None),
+):
+    return await admin_service.list_visitor_chats(visitor_id=visitor_id, user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+
+
 @router.get("/api/admin/tenants")
 async def admin_tenants(user_ctx=Depends(legacy_main.get_current_user), db=Depends(legacy_main.db_session)):
     return await admin_service.list_tenants(user_ctx=user_ctx, db=db)

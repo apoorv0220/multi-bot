@@ -27,12 +27,15 @@ import {
   Typography,
 } from "@mui/material";
 
-const AdminDashboard = ({ role, tenantId }) => {
+const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [sessions, setSessions] = useState([]);
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [users, setUsers] = useState([]);
+  const [visitors, setVisitors] = useState([]);
+  const [selectedVisitorId, setSelectedVisitorId] = useState("");
+  const [visitorChats, setVisitorChats] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [usageSummary, setUsageSummary] = useState(null);
   const [overview, setOverview] = useState(null);
@@ -43,6 +46,7 @@ const AdminDashboard = ({ role, tenantId }) => {
   const [adminPassword, setAdminPassword] = useState("");
   const [adminTenantId, setAdminTenantId] = useState("");
   const [adminTenantMode, setAdminTenantMode] = useState("existing");
+  const [newUserRole, setNewUserRole] = useState(role === "admin" ? "manager" : "admin");
   const [newTenantName, setNewTenantName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceTenantId, setSourceTenantId] = useState("");
@@ -54,14 +58,16 @@ const AdminDashboard = ({ role, tenantId }) => {
   const [resetUserId, setResetUserId] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [success, setSuccess] = useState("");
-  const effectiveTenantId = role === "superadmin" ? (sourceTenantId || undefined) : (tenantId || undefined);
+  const canSelectTenant = role === "superadmin" || tenantIds.length > 1 || tenants.length > 1;
+  const effectiveTenantId = sourceTenantId || tenantId || undefined;
 
   const load = useCallback(async (query = searchQuery) => {
     try {
-      const [chatRes, jobRes, usersRes, tenantsRes, overviewRes] = await Promise.all([
+      const [chatRes, jobRes, usersRes, visitorsRes, tenantsRes, overviewRes] = await Promise.all([
         client.get("/api/admin/chats", { params: { q: query || undefined, tenant_id: effectiveTenantId } }),
         client.get("/api/reindex/jobs", { params: { tenant_id: effectiveTenantId } }),
         client.get("/api/admin/users", { params: { tenant_id: effectiveTenantId } }),
+        client.get("/api/admin/visitors", { params: { tenant_id: effectiveTenantId } }),
         client.get("/api/admin/tenants"),
         client.get("/api/admin/overview", { params: { tenant_id: effectiveTenantId } }),
       ]);
@@ -69,22 +75,23 @@ const AdminDashboard = ({ role, tenantId }) => {
       setSessions(chatRes.data);
       setJobs(jobRes.data);
       setUsers(usersRes.data);
+      setVisitors(visitorsRes.data || []);
       setTenants(tenantsRes.data);
       setUsageSummary(usageRes.data);
       setOverview(overviewRes.data);
       if (!sourceTenantId && tenantsRes.data.length > 0) {
-        const firstTenant = role === "superadmin" ? tenantsRes.data[0].id : tenantId;
+        const firstTenant = tenantIds[0] || tenantId || tenantsRes.data[0].id;
         setSourceTenantId(firstTenant || "");
       }
       if (!adminTenantId && tenantsRes.data.length > 0) {
-        const firstTenant = role === "superadmin" ? tenantsRes.data[0].id : tenantId;
+        const firstTenant = tenantIds[0] || tenantId || tenantsRes.data[0].id;
         setAdminTenantId(firstTenant || "");
       }
       setError("");
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed loading dashboard data");
     }
-  }, [adminTenantId, effectiveTenantId, role, searchQuery, sourceTenantId, tenantId]);
+  }, [adminTenantId, effectiveTenantId, searchQuery, sourceTenantId, tenantId, tenantIds]);
 
   const refreshJobsOnly = useCallback(async () => {
     try {
@@ -133,11 +140,18 @@ const AdminDashboard = ({ role, tenantId }) => {
     load();
   };
 
+  const loadVisitorChats = async (visitorId) => {
+    setSelectedVisitorId(visitorId);
+    const { data } = await client.get(`/api/admin/visitors/${visitorId}/chats`, { params: { tenant_id: effectiveTenantId } });
+    setVisitorChats(data || []);
+  };
+
   const createAdmin = async () => {
     try {
       const payload = {
         email: adminEmail,
         password: adminPassword,
+        role: newUserRole,
       };
       if (adminTenantMode === "new") {
         payload.new_tenant_name = newTenantName.trim() || undefined;
@@ -147,16 +161,17 @@ const AdminDashboard = ({ role, tenantId }) => {
       await client.post("/api/admin/users", {
         ...payload,
       });
-      setSuccess("Admin created successfully");
+      setSuccess("User created successfully");
       setCreateOpen(false);
       setAdminEmail("");
       setAdminPassword("");
       setAdminTenantId("");
       setAdminTenantMode("existing");
       setNewTenantName("");
+      setNewUserRole(role === "admin" ? "manager" : "admin");
       await load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to create admin");
+      setError(err?.response?.data?.detail || "Failed to create user");
     }
   };
 
@@ -231,7 +246,7 @@ const AdminDashboard = ({ role, tenantId }) => {
           <Typography color="text.secondary">{role === "superadmin" ? "Global control center" : "Tenant control center"}</Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
-          {role === "superadmin" && (
+          {canSelectTenant && (
             <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel>Tenant</InputLabel>
               <Select
@@ -249,7 +264,11 @@ const AdminDashboard = ({ role, tenantId }) => {
             </FormControl>
           )}
           <Button variant="outlined" onClick={reindex}>Trigger Reindex</Button>
-          {role === "superadmin" && <Button variant="contained" onClick={() => setCreateOpen(true)}>Add Admin</Button>}
+          {(role === "superadmin" || role === "admin") && (
+            <Button variant="contained" onClick={() => setCreateOpen(true)}>
+              {role === "superadmin" ? "Add Admin/Manager" : "Add Manager"}
+            </Button>
+          )}
         </Stack>
       </Stack>
 
@@ -260,6 +279,7 @@ const AdminDashboard = ({ role, tenantId }) => {
         <Tab label="Overview" />
         <Tab label="Chats" />
         <Tab label="Jobs" />
+        <Tab label="Admins" />
         <Tab label="Users" />
         <Tab label="Tenant Sources" />
       </Tabs>
@@ -429,6 +449,53 @@ const AdminDashboard = ({ role, tenantId }) => {
       )}
 
       {tab === 4 && (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={5}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" mb={1}>Users (Visitors)</Typography>
+                <List dense>
+                  {visitors.map((v) => (
+                    <ListItemButton
+                      key={v.visitor_id}
+                      selected={selectedVisitorId === v.visitor_id}
+                      onClick={() => loadVisitorChats(v.visitor_id)}
+                    >
+                      <ListItemText
+                        primary={`${v.name || "Unknown"}${v.email ? ` (${v.email})` : ""}`}
+                        secondary={`Chats: ${v.chat_count} | Last seen: ${v.last_seen_at || "N/A"}`}
+                      />
+                    </ListItemButton>
+                  ))}
+                </List>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={7}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" mb={1}>User Chats</Typography>
+                {selectedVisitorId ? (
+                  <List dense>
+                    {visitorChats.map((s) => (
+                      <ListItemButton key={s.id} onClick={() => loadSession(s.id)}>
+                        <ListItemText
+                          primary={s.title || s.id}
+                          secondary={`${s.last_message_at || "N/A"} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
+                        />
+                      </ListItemButton>
+                    ))}
+                  </List>
+                ) : (
+                  <Typography color="text.secondary">Select a user to view chats.</Typography>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+
+      {tab === 5 && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Source Database Settings</Typography>
@@ -436,7 +503,7 @@ const AdminDashboard = ({ role, tenantId }) => {
               Configure database connection details used to generate embeddings for each tenant.
             </Typography>
             <Stack spacing={2}>
-              {role === "superadmin" && (
+              {canSelectTenant && (
                 <FormControl size="small" sx={{ maxWidth: 420 }}>
                   <InputLabel>Tenant</InputLabel>
                   <Select
@@ -488,11 +555,18 @@ const AdminDashboard = ({ role, tenantId }) => {
       )}
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Create Admin</DialogTitle>
+        <DialogTitle>{role === "superadmin" ? "Create Admin/Manager" : "Create Manager"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField label="Email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} fullWidth />
             <TextField label="Password" type="password" value={adminPassword} onChange={(e) => setAdminPassword(e.target.value)} fullWidth />
+            <FormControl fullWidth>
+              <InputLabel>Role</InputLabel>
+              <Select label="Role" value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)} disabled={role === "admin"}>
+                {role === "superadmin" && <MenuItem value="admin">Admin</MenuItem>}
+                <MenuItem value="manager">Manager</MenuItem>
+              </Select>
+            </FormControl>
             <FormControl fullWidth>
               <InputLabel>Tenant Option</InputLabel>
               <Select label="Tenant Option" value={adminTenantMode} onChange={(e) => setAdminTenantMode(e.target.value)}>
@@ -530,6 +604,7 @@ const AdminDashboard = ({ role, tenantId }) => {
             disabled={
               !adminEmail ||
               !adminPassword ||
+              !newUserRole ||
               (adminTenantMode === "new" ? !newTenantName.trim() : !adminTenantId)
             }
           >

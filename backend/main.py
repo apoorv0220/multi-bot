@@ -21,7 +21,11 @@ from qdrant_client.http.models import Distance, VectorParams
 from sqlalchemy import func, select
 
 from auth import create_access_token, decode_token, hash_password, verify_password
-from core.policies import require_role as policy_require_role, resolve_effective_tenant_id_for_admin_views
+from core.policies import (
+    get_accessible_tenant_ids,
+    require_role as policy_require_role,
+    resolve_effective_tenant_id_for_admin_views,
+)
 from db import SessionLocal
 from embedder import Embedder
 from fuzzy_matcher import FuzzyMatcher
@@ -84,6 +88,7 @@ class AuthResponse(BaseModel):
     access_token: str
     role: str
     tenant_id: Optional[str] = None
+    tenant_ids: List[str] = []
 
 
 class SearchResult(BaseModel):
@@ -128,6 +133,7 @@ class AdminCreateRequest(BaseModel):
     password: str
     tenant_id: Optional[str] = None
     new_tenant_name: Optional[str] = None
+    role: Optional[str] = UserRole.admin.value
 
 
 class UserStatusRequest(BaseModel):
@@ -648,7 +654,7 @@ async def register(payload: AuthRequest, db=Depends(db_session)):
     db.commit()
     ensure_collection_for_tenant(str(tenant.id))
     token = create_access_token(str(user.id), user.role.value, str(tenant.id))
-    return AuthResponse(access_token=token, role=user.role.value, tenant_id=str(tenant.id))
+    return AuthResponse(access_token=token, role=user.role.value, tenant_id=str(tenant.id), tenant_ids=[str(tenant.id)])
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)
@@ -656,15 +662,16 @@ async def login(payload: AuthRequest, db=Depends(db_session)):
     user = db.execute(select(User).where(User.email == payload.email)).scalar_one_or_none()
     if not user or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    tenant_link = db.execute(select(UserTenant).where(UserTenant.user_id == user.id)).scalar_one_or_none()
-    tenant_id = str(tenant_link.tenant_id) if tenant_link else None
+    tenant_links = db.execute(select(UserTenant).where(UserTenant.user_id == user.id).order_by(UserTenant.created_at.asc())).scalars().all()
+    tenant_ids = [str(link.tenant_id) for link in tenant_links]
+    tenant_id = tenant_ids[0] if tenant_ids else None
     token = create_access_token(str(user.id), user.role.value, tenant_id)
-    return AuthResponse(access_token=token, role=user.role.value, tenant_id=tenant_id)
+    return AuthResponse(access_token=token, role=user.role.value, tenant_id=tenant_id, tenant_ids=tenant_ids)
 
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest, user_ctx=Depends(get_current_user), db=Depends(db_session)) -> Dict[str, Any]:
-    tenant_id = user_ctx["tenant_id"]
+    tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, None)
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Tenant context missing")
     return await _run_chat_for_tenant(request, tenant_id, user_ctx["user"].id, db)
@@ -751,7 +758,7 @@ async def add_feedback(message_id: str, payload: FeedbackRequest, user_ctx=Depen
     message = db.get(ChatMessage, uuid.UUID(message_id))
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
-    if str(message.tenant_id) != user_ctx["tenant_id"] and user_ctx["role"] != UserRole.superadmin.value:
+    if user_ctx["role"] != UserRole.superadmin.value and str(message.tenant_id) not in get_accessible_tenant_ids(db, user_ctx):
         raise HTTPException(status_code=403, detail="Forbidden")
     feedback = db.execute(
         select(MessageFeedback).where(
@@ -826,18 +833,12 @@ async def admin_chats(
     q: Optional[str] = Query(default=None),
     tenant_id: Optional[str] = Query(default=None),
 ):
-    role = user_ctx["role"]
-    if role == UserRole.superadmin.value:
-        stmt = select(ChatSession)
-        if tenant_id:
-            stmt = stmt.where(ChatSession.tenant_id == uuid.UUID(tenant_id))
-        sessions = db.execute(stmt.order_by(ChatSession.last_message_at.desc())).scalars().all()
-    else:
-        sessions = db.execute(
-            select(ChatSession)
-            .where(ChatSession.tenant_id == uuid.UUID(user_ctx["tenant_id"]))
-            .order_by(ChatSession.last_message_at.desc())
-        ).scalars().all()
+    effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
+    sessions = db.execute(
+        select(ChatSession)
+        .where(ChatSession.tenant_id == uuid.UUID(effective_tenant_id))
+        .order_by(ChatSession.last_message_at.desc())
+    ).scalars().all()
     if q:
         q_l = q.lower()
         session_ids = [s.id for s in sessions]
@@ -896,27 +897,18 @@ async def admin_users(
     db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
 ):
-    if user_ctx["role"] == UserRole.superadmin.value:
-        if tenant_id:
-            tenant_uuid = uuid.UUID(tenant_id)
-            user_ids = db.execute(select(UserTenant.user_id).where(UserTenant.tenant_id == tenant_uuid)).scalars().all()
-            users = db.execute(
-                select(User)
-                .where(User.id.in_(list(user_ids)))
-                .where(User.role != UserRole.superadmin)
-                .order_by(User.created_at.desc())
-            ).scalars().all()
-        else:
-            users = db.execute(select(User).order_by(User.created_at.desc())).scalars().all()
-    else:
-        tenant_uuid = uuid.UUID(user_ctx["tenant_id"])
-        user_ids = db.execute(select(UserTenant.user_id).where(UserTenant.tenant_id == tenant_uuid)).scalars().all()
+    effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
+    tenant_uuid = uuid.UUID(effective_tenant_id)
+    user_ids = db.execute(select(UserTenant.user_id).where(UserTenant.tenant_id == tenant_uuid)).scalars().all()
+    if user_ids:
         users = db.execute(
             select(User)
             .where(User.id.in_(list(user_ids)))
             .where(User.role != UserRole.superadmin)
             .order_by(User.created_at.desc())
         ).scalars().all()
+    else:
+        users = []
     return [
         {
             "id": str(u.id),
@@ -929,13 +921,106 @@ async def admin_users(
     ]
 
 
+@app.get("/api/admin/visitors")
+async def admin_visitors(
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+    tenant_id: Optional[str] = Query(default=None),
+):
+    effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
+    sessions = db.execute(
+        select(ChatSession)
+        .where(ChatSession.tenant_id == uuid.UUID(effective_tenant_id), ChatSession.visitor_id.is_not(None))
+        .order_by(ChatSession.last_message_at.desc())
+    ).scalars().all()
+    visitors_by_id: dict[str, dict[str, Any]] = {}
+    for s in sessions:
+        vid = s.visitor_id
+        if not vid:
+            continue
+        row = visitors_by_id.get(vid)
+        started_at = s.started_at or s.created_at
+        if not row:
+            visitors_by_id[vid] = {
+                "visitor_id": vid,
+                "name": s.visitor_name,
+                "email": s.visitor_email,
+                "first_seen_at": started_at.isoformat() if started_at else None,
+                "last_seen_at": s.last_message_at.isoformat() if s.last_message_at else None,
+                "chat_count": 1,
+            }
+            continue
+        row["chat_count"] += 1
+        if not row.get("name") and s.visitor_name:
+            row["name"] = s.visitor_name
+        if not row.get("email") and s.visitor_email:
+            row["email"] = s.visitor_email
+        if started_at and row.get("first_seen_at"):
+            row["first_seen_at"] = min(datetime.fromisoformat(row["first_seen_at"]), started_at).isoformat()
+        elif started_at and not row.get("first_seen_at"):
+            row["first_seen_at"] = started_at.isoformat()
+        if s.last_message_at and row.get("last_seen_at"):
+            row["last_seen_at"] = max(datetime.fromisoformat(row["last_seen_at"]), s.last_message_at).isoformat()
+        elif s.last_message_at and not row.get("last_seen_at"):
+            row["last_seen_at"] = s.last_message_at.isoformat()
+    visitors = list(visitors_by_id.values())
+    visitors.sort(key=lambda item: item.get("last_seen_at") or "", reverse=True)
+    return visitors
+
+
+@app.get("/api/admin/visitors/{visitor_id}/chats")
+async def admin_visitor_chats(
+    visitor_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+    tenant_id: Optional[str] = Query(default=None),
+):
+    effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
+    sessions = db.execute(
+        select(ChatSession)
+        .where(
+            ChatSession.tenant_id == uuid.UUID(effective_tenant_id),
+            ChatSession.visitor_id == visitor_id,
+        )
+        .order_by(ChatSession.last_message_at.desc())
+    ).scalars().all()
+    session_ids = [s.id for s in sessions]
+    feedback_by_session = {}
+    if session_ids:
+        message_rows = db.execute(select(ChatMessage.id, ChatMessage.session_id).where(ChatMessage.session_id.in_(session_ids))).all()
+        message_to_session = {m_id: s_id for m_id, s_id in message_rows}
+        message_ids = list(message_to_session.keys())
+        if message_ids:
+            feedback_rows = db.execute(
+                select(MessageFeedback.message_id, MessageFeedback.vote).where(MessageFeedback.message_id.in_(message_ids))
+            ).all()
+            for message_id, vote in feedback_rows:
+                sid = str(message_to_session.get(message_id))
+                if sid not in feedback_by_session:
+                    feedback_by_session[sid] = {"up": 0, "down": 0}
+                if vote == FeedbackVote.up:
+                    feedback_by_session[sid]["up"] += 1
+                elif vote == FeedbackVote.down:
+                    feedback_by_session[sid]["down"] += 1
+    return [
+        {
+            "id": str(s.id),
+            "title": s.title,
+            "last_message_at": s.last_message_at.isoformat() if s.last_message_at else None,
+            "feedback_summary": feedback_by_session.get(str(s.id), {"up": 0, "down": 0}),
+        }
+        for s in sessions
+    ]
+
+
 @app.get("/api/admin/tenants")
 async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_session)):
     if user_ctx["role"] == UserRole.superadmin.value:
         tenants = db.execute(select(Tenant).order_by(Tenant.created_at.desc())).scalars().all()
     else:
-        tenant = db.get(Tenant, uuid.UUID(user_ctx["tenant_id"]))
-        tenants = [tenant] if tenant else []
+        tenant_ids = get_accessible_tenant_ids(db, user_ctx)
+        tenant_rows = db.execute(select(Tenant).where(Tenant.id.in_([uuid.UUID(tid) for tid in tenant_ids]))).scalars().all() if tenant_ids else []
+        tenants = sorted(tenant_rows, key=lambda t: t.created_at, reverse=True)
     return [
         {
             "id": str(t.id),
@@ -957,7 +1042,7 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
     tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    if user_ctx["role"] != UserRole.superadmin.value and str(tenant.id) != user_ctx["tenant_id"]:
+    if user_ctx["role"] != UserRole.superadmin.value and str(tenant.id) not in get_accessible_tenant_ids(db, user_ctx):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     tenant.source_db_url = payload.source_db_url
@@ -982,8 +1067,18 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
 
 @app.post("/api/admin/users")
 async def create_admin_user(payload: AdminCreateRequest, user_ctx=Depends(get_current_user), db=Depends(db_session)):
-    require_role(user_ctx, [UserRole.superadmin.value])
+    require_role(user_ctx, [UserRole.superadmin.value, UserRole.admin.value])
     existing = db.execute(select(User).where(User.email == payload.email)).scalar_one_or_none()
+    target_role_raw = (payload.role or UserRole.admin.value).strip().lower()
+    try:
+        target_role = UserRole(target_role_raw)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid role") from exc
+    if user_ctx["role"] == UserRole.admin.value and target_role != UserRole.manager:
+        raise HTTPException(status_code=403, detail="Admins can only create managers")
+    if target_role == UserRole.superadmin:
+        raise HTTPException(status_code=400, detail="Cannot create superadmin via this endpoint")
+
     if existing:
         raise HTTPException(status_code=400, detail="Email already in use")
     has_tenant_id = bool(payload.tenant_id)
@@ -996,6 +1091,8 @@ async def create_admin_user(payload: AdminCreateRequest, user_ctx=Depends(get_cu
         tenant = db.get(Tenant, uuid.UUID(payload.tenant_id))
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
+        if user_ctx["role"] != UserRole.superadmin.value and str(tenant.id) not in get_accessible_tenant_ids(db, user_ctx):
+            raise HTTPException(status_code=403, detail="Forbidden")
     else:
         tenant_name = payload.new_tenant_name.strip()
         existing_tenant = db.execute(select(Tenant).where(Tenant.name == tenant_name)).scalar_one_or_none()
@@ -1010,6 +1107,8 @@ async def create_admin_user(payload: AdminCreateRequest, user_ctx=Depends(get_cu
         tenant = Tenant(name=tenant_name, slug=slug, status="active")
         db.add(tenant)
         db.flush()
+        if user_ctx["role"] == UserRole.admin.value:
+            db.add(UserTenant(user_id=user_ctx["user"].id, tenant_id=tenant.id, membership_role="owner"))
         db.add(
             AuditLog(
                 actor_user_id=user_ctx["user"].id,
@@ -1025,7 +1124,7 @@ async def create_admin_user(payload: AdminCreateRequest, user_ctx=Depends(get_cu
     user = User(
         email=payload.email,
         password_hash=hash_password(payload.password),
-        role=UserRole.admin,
+        role=target_role,
         is_active=True,
     )
     db.add(user)
@@ -1036,10 +1135,10 @@ async def create_admin_user(payload: AdminCreateRequest, user_ctx=Depends(get_cu
             actor_user_id=user_ctx["user"].id,
             actor_role=user_ctx["role"],
             tenant_id=tenant.id,
-            action="admin_created",
+            action="user_created",
             target_type="user",
             target_id=str(user.id),
-            details_json={"email": payload.email},
+            details_json={"email": payload.email, "role": target_role.value},
         )
     )
     db.commit()
@@ -1053,13 +1152,13 @@ async def update_user_status(user_id: str, payload: UserStatusRequest, user_ctx=
         raise HTTPException(status_code=404, detail="User not found")
     if target_user.role == UserRole.superadmin and user_ctx["role"] != UserRole.superadmin.value:
         raise HTTPException(status_code=403, detail="Cannot modify superadmin user")
+    if user_ctx["role"] == UserRole.admin.value and target_user.role == UserRole.admin:
+        raise HTTPException(status_code=403, detail="Admins cannot modify other admins")
 
     if user_ctx["role"] != UserRole.superadmin.value:
-        tenant_uuid = uuid.UUID(user_ctx["tenant_id"])
-        membership = db.execute(
-            select(UserTenant).where(UserTenant.user_id == target_user.id, UserTenant.tenant_id == tenant_uuid)
-        ).scalar_one_or_none()
-        if not membership:
+        actor_tenants = get_accessible_tenant_ids(db, user_ctx)
+        membership = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+        if not any(str(m.tenant_id) in actor_tenants for m in membership):
             raise HTTPException(status_code=403, detail="Forbidden")
 
     target_user.is_active = payload.is_active
@@ -1085,12 +1184,12 @@ async def reset_user_password(user_id: str, payload: ResetPasswordRequest, user_
         raise HTTPException(status_code=404, detail="User not found")
     if target_user.role == UserRole.superadmin and user_ctx["role"] != UserRole.superadmin.value:
         raise HTTPException(status_code=403, detail="Cannot modify superadmin user")
+    if user_ctx["role"] == UserRole.admin.value and target_user.role == UserRole.admin:
+        raise HTTPException(status_code=403, detail="Admins cannot modify other admins")
     if user_ctx["role"] != UserRole.superadmin.value:
-        tenant_uuid = uuid.UUID(user_ctx["tenant_id"])
-        membership = db.execute(
-            select(UserTenant).where(UserTenant.user_id == target_user.id, UserTenant.tenant_id == tenant_uuid)
-        ).scalar_one_or_none()
-        if not membership:
+        actor_tenants = get_accessible_tenant_ids(db, user_ctx)
+        membership = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+        if not any(str(m.tenant_id) in actor_tenants for m in membership):
             raise HTTPException(status_code=403, detail="Forbidden")
 
     target_user.password_hash = hash_password(payload.new_password)
@@ -1114,7 +1213,7 @@ async def admin_chat_detail(session_id: str, user_ctx=Depends(get_current_user),
     session = db.get(ChatSession, uuid.UUID(session_id))
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if user_ctx["role"] != UserRole.superadmin.value and str(session.tenant_id) != user_ctx["tenant_id"]:
+    if user_ctx["role"] != UserRole.superadmin.value and str(session.tenant_id) not in get_accessible_tenant_ids(db, user_ctx):
         raise HTTPException(status_code=403, detail="Forbidden")
     messages = db.execute(
         select(ChatMessage).where(ChatMessage.session_id == session.id).order_by(ChatMessage.created_at.asc())
@@ -1268,10 +1367,10 @@ async def admin_overview(
 
 @app.post("/api/reindex")
 async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_user), db=Depends(db_session)):
-    target_tenant_id = request.tenant_id or user_ctx["tenant_id"]
+    target_tenant_id = request.tenant_id or resolve_effective_tenant_id_for_admin_views(db, user_ctx, None)
     if not target_tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID required")
-    if user_ctx["role"] != UserRole.superadmin.value and target_tenant_id != user_ctx["tenant_id"]:
+    if user_ctx["role"] != UserRole.superadmin.value and target_tenant_id not in get_accessible_tenant_ids(db, user_ctx):
         raise HTTPException(status_code=403, detail="Admins can only reindex own tenant")
     ensure_collection_for_tenant(target_tenant_id)
     scope = ReindexScope.all if user_ctx["role"] == UserRole.superadmin.value and request.tenant_id is None else ReindexScope.tenant
@@ -1371,9 +1470,12 @@ async def list_reindex_jobs(
                 or (j.meta_json or {}).get("target_tenant_id") == tenant_id
             ]
     else:
+        tenant_ids = get_accessible_tenant_ids(db, user_ctx)
         jobs = db.execute(
-            select(ReindexJob).where(ReindexJob.tenant_id == uuid.UUID(user_ctx["tenant_id"])).order_by(ReindexJob.created_at.desc())
-        ).scalars().all()
+            select(ReindexJob).where(
+                ReindexJob.tenant_id.in_([uuid.UUID(tid) for tid in tenant_ids])
+            ).order_by(ReindexJob.created_at.desc())
+        ).scalars().all() if tenant_ids else []
     tenant_ids = set()
     for j in jobs:
         if j.tenant_id:

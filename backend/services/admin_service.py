@@ -13,6 +13,14 @@ async def list_users(*, user_ctx, db, tenant_id=None):
     return await legacy_main.admin_users(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
 
 
+async def list_visitors(*, user_ctx, db, tenant_id=None):
+    return await legacy_main.admin_visitors(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+
+
+async def list_visitor_chats(*, visitor_id, user_ctx, db, tenant_id=None):
+    return await legacy_main.admin_visitor_chats(visitor_id=visitor_id, user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+
+
 async def list_tenants(*, user_ctx, db):
     return await legacy_main.admin_tenants(user_ctx=user_ctx, db=db)
 

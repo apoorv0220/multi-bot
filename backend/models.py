@@ -16,6 +16,7 @@ def _uuid_col():
 class UserRole(str, enum.Enum):
     superadmin = "superadmin"
     admin = "admin"
+    manager = "manager"
 
 
 class SenderType(str, enum.Enum):

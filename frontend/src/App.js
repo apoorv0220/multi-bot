@@ -37,7 +37,7 @@ function AppContent({ auth, onLogin, onLogout }) {
           <Routes>
             <Route path="/" element={<Navigate to="/admin/chat" replace />} />
             <Route path="/admin/chat" element={auth ? <ChatWidget mode="admin" /> : <LoginPage onLogin={onLogin} />} />
-            <Route path="/admin/dashboard" element={auth ? <AdminDashboard role={auth.role} tenantId={auth.tenant_id} /> : <LoginPage onLogin={onLogin} />} />
+            <Route path="/admin/dashboard" element={auth ? <AdminDashboard role={auth.role} tenantId={auth.tenant_id} tenantIds={auth.tenant_ids || []} /> : <LoginPage onLogin={onLogin} />} />
             <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
           </Routes>
         </Box>
@@ -62,7 +62,16 @@ function App() {
     if (loadToken()) {
       const cachedRole = localStorage.getItem("role");
       const cachedTenant = localStorage.getItem("tenant_id");
-      if (cachedRole) setAuth({ role: cachedRole, tenant_id: cachedTenant });
+      const cachedTenantIdsRaw = localStorage.getItem("tenant_ids");
+      let cachedTenantIds = [];
+      if (cachedTenantIdsRaw) {
+        try {
+          cachedTenantIds = JSON.parse(cachedTenantIdsRaw);
+        } catch (err) {
+          cachedTenantIds = [];
+        }
+      }
+      if (cachedRole) setAuth({ role: cachedRole, tenant_id: cachedTenant, tenant_ids: cachedTenantIds });
     }
   }, []);
 
@@ -70,11 +79,15 @@ function App() {
     setAuth(data);
     localStorage.setItem("role", data.role);
     localStorage.setItem("tenant_id", data.tenant_id || "");
+    localStorage.setItem("tenant_ids", JSON.stringify(data.tenant_ids || []));
   };
 
   const onLogout = () => {
     setAuthToken(null);
     setAuth(null);
+    localStorage.removeItem("role");
+    localStorage.removeItem("tenant_id");
+    localStorage.removeItem("tenant_ids");
   };
 
   return (
