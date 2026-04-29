@@ -54,6 +54,14 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [sourceDbType, setSourceDbType] = useState("mysql");
   const [sourceTablePrefix, setSourceTablePrefix] = useState("wp_");
   const [sourceUrlTable, setSourceUrlTable] = useState("wp_custom_urls");
+  const [monthlyMessageLimit, setMonthlyMessageLimit] = useState(15000);
+  const [quotaReachedMessage, setQuotaReachedMessage] = useState("Monthly message limit reached. Please try again next month.");
+  const [blockedIps, setBlockedIps] = useState([]);
+  const [blockedCountries, setBlockedCountries] = useState([]);
+  const [newBlockedIp, setNewBlockedIp] = useState("");
+  const [newBlockedIpReason, setNewBlockedIpReason] = useState("");
+  const [newBlockedCountry, setNewBlockedCountry] = useState("");
+  const [newBlockedCountryReason, setNewBlockedCountryReason] = useState("");
   const [resetOpen, setResetOpen] = useState(false);
   const [resetUserId, setResetUserId] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -102,6 +110,19 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   }, [effectiveTenantId]);
 
+  const loadSecuritySettings = useCallback(async () => {
+    if (!effectiveTenantId) return;
+    try {
+      const { data } = await client.get(`/api/admin/tenants/${effectiveTenantId}/security`);
+      setBlockedIps(data.blocked_ips || []);
+      setBlockedCountries(data.blocked_countries || []);
+      setMonthlyMessageLimit(Number(data.monthly_message_limit || 15000));
+      setQuotaReachedMessage(data.quota_reached_message || "Monthly message limit reached. Please try again next month.");
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading security settings");
+    }
+  }, [effectiveTenantId]);
+
   useEffect(() => {
     load("");
   }, [load]);
@@ -128,6 +149,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setSourceTablePrefix(t.source_table_prefix || "wp_");
     setSourceUrlTable(t.source_url_table || "wp_custom_urls");
   }, [sourceTenantId, tenants]);
+
+  useEffect(() => {
+    loadSecuritySettings();
+  }, [loadSecuritySettings]);
 
   const loadSession = async (id) => {
     setSelected(id);
@@ -216,6 +241,68 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   };
 
+  const saveQuotaSettings = async () => {
+    try {
+      const payload = {
+        quota_reached_message: quotaReachedMessage,
+      };
+      if (role === "superadmin") {
+        payload.monthly_message_limit = Number(monthlyMessageLimit || 15000);
+      }
+      await client.patch(`/api/admin/tenants/${effectiveTenantId}/quota`, payload);
+      setSuccess("Quota settings updated");
+      await loadSecuritySettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to update quota settings");
+    }
+  };
+
+  const addBlockedIp = async () => {
+    try {
+      await client.post(`/api/admin/tenants/${effectiveTenantId}/blocked-ips`, {
+        ip_address: newBlockedIp,
+        reason: newBlockedIpReason,
+      });
+      setNewBlockedIp("");
+      setNewBlockedIpReason("");
+      await loadSecuritySettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to add blocked IP");
+    }
+  };
+
+  const removeBlockedIp = async (id) => {
+    try {
+      await client.delete(`/api/admin/tenants/${effectiveTenantId}/blocked-ips/${id}`);
+      await loadSecuritySettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to remove blocked IP");
+    }
+  };
+
+  const addBlockedCountry = async () => {
+    try {
+      await client.post(`/api/admin/tenants/${effectiveTenantId}/blocked-countries`, {
+        country_code: newBlockedCountry,
+        reason: newBlockedCountryReason,
+      });
+      setNewBlockedCountry("");
+      setNewBlockedCountryReason("");
+      await loadSecuritySettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to add blocked country");
+    }
+  };
+
+  const removeBlockedCountry = async (id) => {
+    try {
+      await client.delete(`/api/admin/tenants/${effectiveTenantId}/blocked-countries/${id}`);
+      await loadSecuritySettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to remove blocked country");
+    }
+  };
+
   const exportTranscript = () => {
     if (!selected || !messages.length) return;
     const lines = messages.map((m) => `[${m.created_at}] ${m.sender_type.toUpperCase()}: ${m.content}`);
@@ -281,6 +368,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         <Tab label="Jobs" />
         <Tab label="Admins" />
         <Tab label="Users" />
+        <Tab label="Security" />
         <Tab label="Tenant Sources" />
       </Tabs>
 
@@ -496,6 +584,64 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       )}
 
       {tab === 5 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" mb={1}>Tenant Security and Quota Controls</Typography>
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Monthly Visitor Message Limit"
+                  type="number"
+                  value={monthlyMessageLimit}
+                  onChange={(e) => setMonthlyMessageLimit(e.target.value)}
+                  disabled={role !== "superadmin"}
+                />
+                <Button variant="contained" onClick={saveQuotaSettings}>Save Quota</Button>
+              </Stack>
+              <TextField
+                label="Quota Reached Message"
+                value={quotaReachedMessage}
+                onChange={(e) => setQuotaReachedMessage(e.target.value)}
+                fullWidth
+              />
+
+              <Typography variant="subtitle1">Blocked IPs</Typography>
+              <Stack direction="row" spacing={1}>
+                <TextField label="IP address" value={newBlockedIp} onChange={(e) => setNewBlockedIp(e.target.value)} />
+                <TextField label="Reason" value={newBlockedIpReason} onChange={(e) => setNewBlockedIpReason(e.target.value)} />
+                <Button variant="outlined" onClick={addBlockedIp}>Add IP</Button>
+              </Stack>
+              <Stack spacing={1}>
+                {blockedIps.map((item) => (
+                  <Stack key={item.id} direction="row" spacing={1} alignItems="center">
+                    <Chip label={item.ip_address} />
+                    {item.reason && <Chip variant="outlined" label={item.reason} />}
+                    <Button size="small" color="error" onClick={() => removeBlockedIp(item.id)}>Remove</Button>
+                  </Stack>
+                ))}
+              </Stack>
+
+              <Typography variant="subtitle1">Blocked Countries (ISO alpha-2)</Typography>
+              <Stack direction="row" spacing={1}>
+                <TextField label="Country code" value={newBlockedCountry} onChange={(e) => setNewBlockedCountry(e.target.value.toUpperCase())} />
+                <TextField label="Reason" value={newBlockedCountryReason} onChange={(e) => setNewBlockedCountryReason(e.target.value)} />
+                <Button variant="outlined" onClick={addBlockedCountry}>Add Country</Button>
+              </Stack>
+              <Stack spacing={1}>
+                {blockedCountries.map((item) => (
+                  <Stack key={item.id} direction="row" spacing={1} alignItems="center">
+                    <Chip label={item.country_code} />
+                    {item.reason && <Chip variant="outlined" label={item.reason} />}
+                    <Button size="small" color="error" onClick={() => removeBlockedCountry(item.id)}>Remove</Button>
+                  </Stack>
+                ))}
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 6 && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Source Database Settings</Typography>

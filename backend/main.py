@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import ipaddress
 import re
 import time
 import uuid
@@ -19,6 +20,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams
 from sqlalchemy import func, select
+import geoip2.database
+from geoip2.errors import AddressNotFoundError
 
 from auth import create_access_token, decode_token, hash_password, verify_password
 from core.policies import (
@@ -42,6 +45,8 @@ from models import (
     ReindexScope,
     SenderType,
     Tenant,
+    TenantBlockedCountry,
+    TenantBlockedIP,
     UsageEvent,
     UsageType,
     User,
@@ -151,6 +156,21 @@ class TenantSourceConfigRequest(BaseModel):
     source_url_table: Optional[str] = None
 
 
+class TenantQuotaConfigRequest(BaseModel):
+    monthly_message_limit: Optional[int] = None
+    quota_reached_message: Optional[str] = None
+
+
+class BlockedIPRequest(BaseModel):
+    ip_address: str
+    reason: Optional[str] = ""
+
+
+class BlockedCountryRequest(BaseModel):
+    country_code: str
+    reason: Optional[str] = ""
+
+
 def db_session():
     db = SessionLocal()
     try:
@@ -217,6 +237,106 @@ def _origin_allowed(origin: Optional[str]) -> bool:
     if not allowed_set:
         return True
     return bool(origin and origin in allowed_set)
+
+
+def _extract_client_ip(request: Optional[Request]) -> Optional[str]:
+    if request is None:
+        return None
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        candidate = forwarded_for.split(",")[0].strip()
+        try:
+            return str(ipaddress.ip_address(candidate))
+        except Exception:
+            pass
+    if request.client and request.client.host:
+        try:
+            return str(ipaddress.ip_address(request.client.host))
+        except Exception:
+            return request.client.host
+    return None
+
+
+def _resolve_country_code_from_ip(ip_address: Optional[str]) -> Optional[str]:
+    if not ip_address:
+        return None
+    db_path = os.getenv("GEOIP_DB_PATH", "").strip()
+    if not db_path or not os.path.exists(db_path):
+        return None
+    try:
+        with geoip2.database.Reader(db_path) as reader:
+            response = reader.country(ip_address)
+            code = (response.country.iso_code or "").upper()
+            return code or None
+    except AddressNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
+def _utc_month_bounds(now_utc: Optional[datetime] = None) -> tuple[datetime, datetime]:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    start = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
+    return start, end
+
+
+def _enforce_public_security_and_quota(
+    *,
+    db,
+    tenant_id: str,
+    request_obj: Optional[Request],
+):
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    client_ip = _extract_client_ip(request_obj)
+    if client_ip:
+        blocked_ip = db.execute(
+            select(TenantBlockedIP).where(
+                TenantBlockedIP.tenant_id == tenant.id,
+                TenantBlockedIP.ip_address == client_ip,
+            )
+        ).scalar_one_or_none()
+        if blocked_ip:
+            raise HTTPException(status_code=403, detail="Access blocked for this IP")
+
+    country_code = _resolve_country_code_from_ip(client_ip)
+    if country_code:
+        blocked_country = db.execute(
+            select(TenantBlockedCountry).where(
+                TenantBlockedCountry.tenant_id == tenant.id,
+                TenantBlockedCountry.country_code == country_code,
+            )
+        ).scalar_one_or_none()
+        if blocked_country:
+            raise HTTPException(status_code=403, detail=f"Access blocked for country: {country_code}")
+
+    start_utc, end_utc = _utc_month_bounds()
+    monthly_messages = db.execute(
+        select(func.count(ChatMessage.id))
+        .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+        .where(
+            ChatMessage.tenant_id == tenant.id,
+            ChatMessage.sender_type == SenderType.user,
+            ChatSession.visitor_id.is_not(None),
+            ChatMessage.created_at >= start_utc,
+            ChatMessage.created_at < end_utc,
+        )
+    ).scalar_one()
+    if monthly_messages >= (tenant.monthly_message_limit or 15000):
+        raise HTTPException(
+            status_code=429,
+            detail="tenant_message_quota_exceeded",
+            headers={
+                "X-Quota-Exceeded": "true",
+                "X-Quota-Message": tenant.quota_reached_message,
+            },
+        )
 
 
 def _resolve_embed_tenant_id(embed_key: Optional[str]) -> str:
@@ -512,6 +632,13 @@ def _record_usage_event(
     )
 
 
+def _ensure_manage_tenant(db, user_ctx: dict, tenant_id: str, allow_admin: bool = True):
+    allowed_roles = [UserRole.superadmin.value, UserRole.admin.value, UserRole.manager.value] if allow_admin else [UserRole.superadmin.value]
+    require_role(user_ctx, allowed_roles)
+    if user_ctx["role"] != UserRole.superadmin.value and tenant_id not in get_accessible_tenant_ids(db, user_ctx):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 async def _run_chat_for_tenant(
     request: ChatRequest,
     tenant_id: str,
@@ -681,6 +808,7 @@ async def chat(request: ChatRequest, user_ctx=Depends(get_current_user), db=Depe
 async def public_chat(
     request: ChatRequest,
     db=Depends(db_session),
+    request_obj: Request = None,
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
     origin: Optional[str] = Header(default=None),
@@ -688,6 +816,7 @@ async def public_chat(
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
     visitor_id = _normalize_visitor_id(x_visitor_id)
     visitor = _get_visitor_profile(db, tenant_id, visitor_id)
     if not visitor:
@@ -706,6 +835,7 @@ async def public_chat(
 @app.get("/api/public/visitor-profile")
 async def get_public_visitor_profile(
     db=Depends(db_session),
+    request_obj: Request = None,
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
     origin: Optional[str] = Header(default=None),
@@ -713,6 +843,7 @@ async def get_public_visitor_profile(
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
     visitor_id = _normalize_visitor_id(x_visitor_id)
     visitor = _get_visitor_profile(db, tenant_id, visitor_id)
     return {"profile_exists": bool(visitor)}
@@ -722,12 +853,14 @@ async def get_public_visitor_profile(
 async def upsert_public_visitor_profile(
     payload: PublicVisitorProfileRequest,
     db=Depends(db_session),
+    request_obj: Request = None,
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
 ):
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
     visitor_id = _normalize_visitor_id(payload.visitor_id)
     name = payload.name.strip()
     if not name:
@@ -788,12 +921,14 @@ async def add_public_feedback(
     message_id: str,
     payload: FeedbackRequest,
     db=Depends(db_session),
+    request_obj: Request = None,
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
 ):
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
     message = db.get(ChatMessage, uuid.UUID(message_id))
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -1063,6 +1198,201 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
     )
     db.commit()
     return {"status": "ok", "tenant_id": str(tenant.id)}
+
+
+@app.get("/api/admin/tenants/{tenant_id}/security")
+async def get_tenant_security_settings(tenant_id: str, user_ctx=Depends(get_current_user), db=Depends(db_session)):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    blocked_ips = db.execute(
+        select(TenantBlockedIP).where(TenantBlockedIP.tenant_id == tenant.id).order_by(TenantBlockedIP.created_at.desc())
+    ).scalars().all()
+    blocked_countries = db.execute(
+        select(TenantBlockedCountry).where(TenantBlockedCountry.tenant_id == tenant.id).order_by(TenantBlockedCountry.created_at.desc())
+    ).scalars().all()
+    return {
+        "tenant_id": tenant_id,
+        "monthly_message_limit": tenant.monthly_message_limit,
+        "quota_reached_message": tenant.quota_reached_message,
+        "blocked_ips": [{"id": str(item.id), "ip_address": item.ip_address, "reason": item.reason} for item in blocked_ips],
+        "blocked_countries": [{"id": str(item.id), "country_code": item.country_code, "reason": item.reason} for item in blocked_countries],
+    }
+
+
+@app.patch("/api/admin/tenants/{tenant_id}/quota")
+async def update_tenant_quota_settings(
+    tenant_id: str,
+    payload: TenantQuotaConfigRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    if payload.monthly_message_limit is not None:
+        require_role(user_ctx, [UserRole.superadmin.value])
+        if payload.monthly_message_limit < 1:
+            raise HTTPException(status_code=400, detail="monthly_message_limit must be positive")
+        tenant.monthly_message_limit = payload.monthly_message_limit
+    if payload.quota_reached_message is not None:
+        tenant.quota_reached_message = payload.quota_reached_message.strip() or tenant.quota_reached_message
+
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_quota_updated",
+            target_type="tenant",
+            target_id=str(tenant.id),
+            details_json={
+                "monthly_message_limit": tenant.monthly_message_limit,
+                "quota_reached_message_updated": payload.quota_reached_message is not None,
+            },
+        )
+    )
+    db.commit()
+    return {
+        "status": "ok",
+        "tenant_id": tenant_id,
+        "monthly_message_limit": tenant.monthly_message_limit,
+        "quota_reached_message": tenant.quota_reached_message,
+    }
+
+
+@app.post("/api/admin/tenants/{tenant_id}/blocked-ips")
+async def add_tenant_blocked_ip(
+    tenant_id: str,
+    payload: BlockedIPRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    ip_value = payload.ip_address.strip()
+    try:
+        ip_value = str(ipaddress.ip_address(ip_value))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid IP address") from exc
+    existing = db.execute(
+        select(TenantBlockedIP).where(TenantBlockedIP.tenant_id == tenant.id, TenantBlockedIP.ip_address == ip_value)
+    ).scalar_one_or_none()
+    if existing:
+        return {"status": "ok", "id": str(existing.id), "ip_address": existing.ip_address, "reason": existing.reason}
+    blocked = TenantBlockedIP(tenant_id=tenant.id, ip_address=ip_value, reason=(payload.reason or "").strip())
+    db.add(blocked)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_blocked_ip_added",
+            target_type="tenant_blocked_ip",
+            target_id=ip_value,
+            details_json={"reason": blocked.reason},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": str(blocked.id), "ip_address": blocked.ip_address, "reason": blocked.reason}
+
+
+@app.delete("/api/admin/tenants/{tenant_id}/blocked-ips/{blocked_ip_id}")
+async def remove_tenant_blocked_ip(
+    tenant_id: str,
+    blocked_ip_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    blocked = db.get(TenantBlockedIP, uuid.UUID(blocked_ip_id))
+    if not blocked or str(blocked.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Blocked IP not found")
+    db.delete(blocked)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=blocked.tenant_id,
+            action="tenant_blocked_ip_removed",
+            target_type="tenant_blocked_ip",
+            target_id=blocked.ip_address,
+            details_json={},
+        )
+    )
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.post("/api/admin/tenants/{tenant_id}/blocked-countries")
+async def add_tenant_blocked_country(
+    tenant_id: str,
+    payload: BlockedCountryRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    country_code = (payload.country_code or "").strip().upper()
+    if len(country_code) != 2 or not country_code.isalpha():
+        raise HTTPException(status_code=400, detail="country_code must be ISO alpha-2")
+    existing = db.execute(
+        select(TenantBlockedCountry).where(
+            TenantBlockedCountry.tenant_id == tenant.id,
+            TenantBlockedCountry.country_code == country_code,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return {"status": "ok", "id": str(existing.id), "country_code": existing.country_code, "reason": existing.reason}
+    blocked = TenantBlockedCountry(tenant_id=tenant.id, country_code=country_code, reason=(payload.reason or "").strip())
+    db.add(blocked)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_blocked_country_added",
+            target_type="tenant_blocked_country",
+            target_id=country_code,
+            details_json={"reason": blocked.reason},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": str(blocked.id), "country_code": blocked.country_code, "reason": blocked.reason}
+
+
+@app.delete("/api/admin/tenants/{tenant_id}/blocked-countries/{blocked_country_id}")
+async def remove_tenant_blocked_country(
+    tenant_id: str,
+    blocked_country_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    blocked = db.get(TenantBlockedCountry, uuid.UUID(blocked_country_id))
+    if not blocked or str(blocked.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Blocked country not found")
+    db.delete(blocked)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=blocked.tenant_id,
+            action="tenant_blocked_country_removed",
+            target_type="tenant_blocked_country",
+            target_id=blocked.country_code,
+            details_json={},
+        )
+    )
+    db.commit()
+    return {"status": "ok"}
 
 
 @app.post("/api/admin/users")

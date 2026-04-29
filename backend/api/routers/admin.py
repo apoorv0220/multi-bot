@@ -67,6 +67,75 @@ async def update_tenant_source_config(
     return await admin_service.update_tenant_source_config(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
 
+@router.get("/api/admin/tenants/{tenant_id}/security")
+async def get_tenant_security_settings(
+    tenant_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.get_tenant_security_settings(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+@router.patch("/api/admin/tenants/{tenant_id}/quota")
+async def update_tenant_quota_settings(
+    tenant_id: str,
+    payload: legacy_main.TenantQuotaConfigRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.update_tenant_quota_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.post("/api/admin/tenants/{tenant_id}/blocked-ips")
+async def add_tenant_blocked_ip(
+    tenant_id: str,
+    payload: legacy_main.BlockedIPRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.add_tenant_blocked_ip(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.delete("/api/admin/tenants/{tenant_id}/blocked-ips/{blocked_ip_id}")
+async def remove_tenant_blocked_ip(
+    tenant_id: str,
+    blocked_ip_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.remove_tenant_blocked_ip(
+        tenant_id=tenant_id,
+        blocked_ip_id=blocked_ip_id,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
+@router.post("/api/admin/tenants/{tenant_id}/blocked-countries")
+async def add_tenant_blocked_country(
+    tenant_id: str,
+    payload: legacy_main.BlockedCountryRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.add_tenant_blocked_country(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.delete("/api/admin/tenants/{tenant_id}/blocked-countries/{blocked_country_id}")
+async def remove_tenant_blocked_country(
+    tenant_id: str,
+    blocked_country_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.remove_tenant_blocked_country(
+        tenant_id=tenant_id,
+        blocked_country_id=blocked_country_id,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
 @router.post("/api/admin/users")
 async def create_admin_user(payload: legacy_main.AdminCreateRequest, user_ctx=Depends(legacy_main.get_current_user), db=Depends(legacy_main.db_session)):
     return await admin_service.create_admin_user(payload=payload, user_ctx=user_ctx, db=db)

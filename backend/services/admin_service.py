@@ -29,6 +29,35 @@ async def update_tenant_source_config(*, tenant_id, payload, user_ctx, db):
     return await legacy_main.update_tenant_source_config(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
 
+async def get_tenant_security_settings(*, tenant_id, user_ctx, db):
+    return await legacy_main.get_tenant_security_settings(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+async def update_tenant_quota_settings(*, tenant_id, payload, user_ctx, db):
+    return await legacy_main.update_tenant_quota_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def add_tenant_blocked_ip(*, tenant_id, payload, user_ctx, db):
+    return await legacy_main.add_tenant_blocked_ip(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def remove_tenant_blocked_ip(*, tenant_id, blocked_ip_id, user_ctx, db):
+    return await legacy_main.remove_tenant_blocked_ip(tenant_id=tenant_id, blocked_ip_id=blocked_ip_id, user_ctx=user_ctx, db=db)
+
+
+async def add_tenant_blocked_country(*, tenant_id, payload, user_ctx, db):
+    return await legacy_main.add_tenant_blocked_country(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def remove_tenant_blocked_country(*, tenant_id, blocked_country_id, user_ctx, db):
+    return await legacy_main.remove_tenant_blocked_country(
+        tenant_id=tenant_id,
+        blocked_country_id=blocked_country_id,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
 async def create_admin_user(*, payload, user_ctx, db):
     return await legacy_main.create_admin_user(payload=payload, user_ctx=user_ctx, db=db)
 

@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 
 import main as legacy_main
 from services import chat_service, public_service
@@ -12,6 +12,7 @@ router = APIRouter(tags=["public"])
 @router.post("/api/public/chat", response_model=legacy_main.ChatResponse)
 async def public_chat(
     request: legacy_main.ChatRequest,
+    request_obj: Request,
     db=Depends(legacy_main.db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
@@ -23,11 +24,13 @@ async def public_chat(
         x_widget_key=x_widget_key,
         x_visitor_id=x_visitor_id,
         origin=origin,
+        request_obj=request_obj,
     )
 
 
 @router.get("/api/public/visitor-profile")
 async def get_public_visitor_profile(
+    request_obj: Request,
     db=Depends(legacy_main.db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
@@ -38,12 +41,14 @@ async def get_public_visitor_profile(
         x_widget_key=x_widget_key,
         x_visitor_id=x_visitor_id,
         origin=origin,
+        request_obj=request_obj,
     )
 
 
 @router.post("/api/public/visitor-profile")
 async def upsert_public_visitor_profile(
     payload: legacy_main.PublicVisitorProfileRequest,
+    request_obj: Request,
     db=Depends(legacy_main.db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
@@ -53,6 +58,7 @@ async def upsert_public_visitor_profile(
         db=db,
         x_widget_key=x_widget_key,
         origin=origin,
+        request_obj=request_obj,
     )
 
 
@@ -60,14 +66,16 @@ async def upsert_public_visitor_profile(
 async def add_public_feedback(
     message_id: str,
     payload: legacy_main.FeedbackRequest,
+    request_obj: Request,
     db=Depends(legacy_main.db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
 ):
-    return await legacy_main.add_public_feedback(
+    return await public_service.add_public_feedback(
         message_id=message_id,
         payload=payload,
         db=db,
         x_widget_key=x_widget_key,
         origin=origin,
+        request_obj=request_obj,
     )

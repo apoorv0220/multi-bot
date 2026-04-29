@@ -51,6 +51,12 @@ class Tenant(Base):
     source_db_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_table_prefix: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_url_table: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    monthly_message_limit: Mapped[int] = mapped_column(default=15000, nullable=False)
+    quota_reached_message: Mapped[str] = mapped_column(
+        Text,
+        default="Monthly message limit reached. Please try again next month.",
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
@@ -155,6 +161,34 @@ class ChatVisitor(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class TenantBlockedIP(Base):
+    __tablename__ = "tenant_blocked_ips"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "ip_address", name="uq_tenant_blocked_ip"),
+        Index("ix_tenant_blocked_ips_tenant", "tenant_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    ip_address: Mapped[str] = mapped_column(String(64), nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class TenantBlockedCountry(Base):
+    __tablename__ = "tenant_blocked_countries"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "country_code", name="uq_tenant_blocked_country"),
+        Index("ix_tenant_blocked_countries_tenant", "tenant_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    country_code: Mapped[str] = mapped_column(String(2), nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class MessageFeedback(Base):

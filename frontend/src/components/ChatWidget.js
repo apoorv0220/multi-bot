@@ -36,6 +36,8 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [visitorName, setVisitorName] = useState("");
   const [visitorEmail, setVisitorEmail] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [quotaBlocked, setQuotaBlocked] = useState(false);
+  const [quotaMessage, setQuotaMessage] = useState("");
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -131,6 +133,10 @@ const ChatWidget = ({ mode = "admin" }) => {
       setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
       return;
     }
+    if (mode === "public" && quotaBlocked) {
+      setPublicConfigError(quotaMessage || "Monthly message limit reached.");
+      return;
+    }
     if (mode === "public" && isProfileRequired) {
       setPublicConfigError("Please provide name and email first.");
       return;
@@ -172,8 +178,18 @@ const ChatWidget = ({ mode = "admin" }) => {
         messageId: response.data.message_id,
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
+      if (mode === "public") {
+        setQuotaBlocked(false);
+      }
     } catch (err) {
       console.error('Error querying API:', err);
+      if (mode === "public" && err?.response?.status === 429 && err?.response?.data?.detail === "tenant_message_quota_exceeded") {
+        const limitMessage = err?.response?.headers?.["x-quota-message"] || "Monthly message limit reached. Please try again next month.";
+        setQuotaBlocked(true);
+        setQuotaMessage(limitMessage);
+        setPublicConfigError(limitMessage);
+        return;
+      }
       // Add error message
       const errorMessage = {
         type: 'bot',
@@ -229,9 +245,9 @@ const ChatWidget = ({ mode = "admin" }) => {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Type your message..."
-          disabled={isLoading || (mode === "public" && isProfileRequired)}
+          disabled={isLoading || (mode === "public" && (isProfileRequired || quotaBlocked))}
         />
-        <SendButton type="submit" disabled={isLoading || !input.trim() || (mode === "public" && isProfileRequired)}>
+        <SendButton type="submit" disabled={isLoading || !input.trim() || (mode === "public" && (isProfileRequired || quotaBlocked))}>
           <BsSend />
         </SendButton>
       </InputForm>
