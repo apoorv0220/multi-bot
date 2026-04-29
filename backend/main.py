@@ -12,7 +12,7 @@ from urllib.parse import unquote, urlparse
 
 import openai
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
@@ -171,6 +171,15 @@ class BlockedCountryRequest(BaseModel):
     reason: Optional[str] = ""
 
 
+class TenantBrandingConfigRequest(BaseModel):
+    brand_name: Optional[str] = None
+    widget_header_title: Optional[str] = None
+    widget_welcome_message: Optional[str] = None
+    privacy_policy_url: Optional[str] = None
+    avatar_url: Optional[str] = None
+    cors_allowed_origins: Optional[str] = None
+
+
 def db_session():
     db = SessionLocal()
     try:
@@ -237,6 +246,15 @@ def _origin_allowed(origin: Optional[str]) -> bool:
     if not allowed_set:
         return True
     return bool(origin and origin in allowed_set)
+
+
+def _tenant_origin_allowed(tenant: Optional[Tenant], origin: Optional[str]) -> bool:
+    if tenant and tenant.cors_allowed_origins:
+        allowed = {item.strip() for item in tenant.cors_allowed_origins.split(",") if item.strip()}
+        if "*" in allowed:
+            return True
+        return bool(origin and origin in allowed)
+    return _origin_allowed(origin)
 
 
 def _extract_client_ip(request: Optional[Request]) -> Optional[str]:
@@ -849,6 +867,28 @@ async def get_public_visitor_profile(
     return {"profile_exists": bool(visitor)}
 
 
+@app.get("/api/public/config")
+async def get_public_widget_config(
+    db=Depends(db_session),
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    origin: Optional[str] = Header(default=None),
+):
+    tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if not _tenant_origin_allowed(tenant, origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
+    return {
+        "tenant_id": tenant_id,
+        "brand_name": tenant.brand_name,
+        "header_title": tenant.widget_header_title,
+        "welcome_message": tenant.widget_welcome_message,
+        "avatar_url": tenant.avatar_url,
+        "privacy_policy_url": tenant.privacy_policy_url,
+    }
+
+
 @app.post("/api/public/visitor-profile")
 async def upsert_public_visitor_profile(
     payload: PublicVisitorProfileRequest,
@@ -1167,6 +1207,12 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "source_table_prefix": t.source_table_prefix,
             "source_url_table": t.source_url_table,
             "has_source_db_url": bool(t.source_db_url),
+            "brand_name": t.brand_name,
+            "widget_header_title": t.widget_header_title,
+            "widget_welcome_message": t.widget_welcome_message,
+            "privacy_policy_url": t.privacy_policy_url,
+            "avatar_url": t.avatar_url,
+            "cors_allowed_origins": t.cors_allowed_origins,
         }
         for t in tenants
     ]
@@ -1198,6 +1244,100 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
     )
     db.commit()
     return {"status": "ok", "tenant_id": str(tenant.id)}
+
+
+@app.patch("/api/admin/tenants/{tenant_id}/branding")
+async def update_tenant_branding(
+    tenant_id: str,
+    payload: TenantBrandingConfigRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if payload.brand_name is not None:
+        tenant.brand_name = payload.brand_name.strip() or None
+    if payload.widget_header_title is not None:
+        tenant.widget_header_title = payload.widget_header_title.strip() or None
+    if payload.widget_welcome_message is not None:
+        tenant.widget_welcome_message = payload.widget_welcome_message.strip() or None
+    if payload.privacy_policy_url is not None:
+        privacy_url = payload.privacy_policy_url.strip() if payload.privacy_policy_url else ""
+        if privacy_url and not (privacy_url.startswith("http://") or privacy_url.startswith("https://")):
+            raise HTTPException(status_code=400, detail="privacy_policy_url must be a valid URL")
+        tenant.privacy_policy_url = privacy_url or None
+    if payload.avatar_url is not None:
+        tenant.avatar_url = payload.avatar_url.strip() or None
+    if payload.cors_allowed_origins is not None:
+        tenant.cors_allowed_origins = payload.cors_allowed_origins.strip() or None
+
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_branding_updated",
+            target_type="tenant",
+            target_id=str(tenant.id),
+            details_json={"brand_name": tenant.brand_name, "has_avatar": bool(tenant.avatar_url)},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "tenant_id": tenant_id}
+
+
+@app.post("/api/admin/tenants/{tenant_id}/avatar")
+async def upload_tenant_avatar(
+    tenant_id: str,
+    file: UploadFile = File(...),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Avatar exceeds 10MB limit")
+    uploads_dir = os.getenv("TENANT_ASSETS_DIR", "/tmp/tenant-assets")
+    os.makedirs(uploads_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
+    output_name = f"tenant-{tenant_id}-avatar{ext}"
+    output_path = os.path.join(uploads_dir, output_name)
+    with open(output_path, "wb") as f:
+        f.write(content)
+    public_base = os.getenv("ASSETS_PUBLIC_BASE_URL", "http://localhost:8043")
+    tenant.avatar_url = f"{public_base.rstrip('/')}/api/assets/{output_name}"
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_avatar_uploaded",
+            target_type="tenant",
+            target_id=str(tenant.id),
+            details_json={"filename": output_name},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "avatar_url": tenant.avatar_url}
+
+
+@app.get("/api/assets/{filename}")
+async def get_uploaded_asset(filename: str):
+    from fastapi.responses import FileResponse
+
+    uploads_dir = os.getenv("TENANT_ASSETS_DIR", "/tmp/tenant-assets")
+    safe_name = os.path.basename(filename)
+    path = os.path.join(uploads_dir, safe_name)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return FileResponse(path)
 
 
 @app.get("/api/admin/tenants/{tenant_id}/security")
@@ -1848,6 +1988,43 @@ async def exception_handling_middleware(request: Request, call_next):
             status_code=500,
             content={"detail": "Internal server error"}
         )
+
+
+async def tenant_cors_enforcement_middleware(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if not origin or not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    tenant_obj: Optional[Tenant] = None
+    x_widget_key = request.headers.get("x-widget-key")
+    if x_widget_key:
+        tenant_id = _resolve_embed_tenant_id(x_widget_key)
+        with SessionLocal() as db:
+            tenant_obj = db.get(Tenant, uuid.UUID(tenant_id))
+
+    if tenant_obj is None:
+        tenant_id = request.query_params.get("tenant_id")
+        if tenant_id:
+            with SessionLocal() as db:
+                tenant_obj = db.get(Tenant, uuid.UUID(tenant_id))
+
+    if tenant_obj is None:
+        authz = request.headers.get("authorization", "")
+        if authz.lower().startswith("bearer "):
+            token = authz.split(" ", 1)[1]
+            try:
+                claims = decode_token(token)
+                claim_tenant_ids = claims.get("tenant_ids") or []
+                fallback_tenant_id = claims.get("tenant_id") or (claim_tenant_ids[0] if claim_tenant_ids else None)
+                if fallback_tenant_id:
+                    with SessionLocal() as db:
+                        tenant_obj = db.get(Tenant, uuid.UUID(fallback_tenant_id))
+            except Exception:
+                tenant_obj = None
+
+    if tenant_obj and not _tenant_origin_allowed(tenant_obj, origin):
+        return JSONResponse(status_code=403, content={"detail": "Origin not allowed for tenant"})
+    return await call_next(request)
 
 # Run the app
 if __name__ == "__main__":

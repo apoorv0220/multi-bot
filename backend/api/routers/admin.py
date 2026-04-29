@@ -1,6 +1,6 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 import main as legacy_main
 from services import admin_service, usage_service
@@ -65,6 +65,26 @@ async def update_tenant_source_config(
     db=Depends(legacy_main.db_session),
 ):
     return await admin_service.update_tenant_source_config(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.patch("/api/admin/tenants/{tenant_id}/branding")
+async def update_tenant_branding(
+    tenant_id: str,
+    payload: legacy_main.TenantBrandingConfigRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.update_tenant_branding(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.post("/api/admin/tenants/{tenant_id}/avatar")
+async def upload_tenant_avatar(
+    tenant_id: str,
+    file: UploadFile = File(...),
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.upload_tenant_avatar(tenant_id=tenant_id, file=file, user_ctx=user_ctx, db=db)
 
 
 @router.get("/api/admin/tenants/{tenant_id}/security")

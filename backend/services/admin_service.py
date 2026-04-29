@@ -29,6 +29,14 @@ async def update_tenant_source_config(*, tenant_id, payload, user_ctx, db):
     return await legacy_main.update_tenant_source_config(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
 
+async def update_tenant_branding(*, tenant_id, payload, user_ctx, db):
+    return await legacy_main.update_tenant_branding(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def upload_tenant_avatar(*, tenant_id, file, user_ctx, db):
+    return await legacy_main.upload_tenant_avatar(tenant_id=tenant_id, file=file, user_ctx=user_ctx, db=db)
+
+
 async def get_tenant_security_settings(*, tenant_id, user_ctx, db):
     return await legacy_main.get_tenant_security_settings(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 

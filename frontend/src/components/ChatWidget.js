@@ -24,6 +24,9 @@ const createBotMessage = (text) => ({
 const ChatWidget = ({ mode = "admin" }) => {
   const [messages, setMessages] = useState([createBotMessage(resolveInitialGreeting())]);
   const [headerTitle, setHeaderTitle] = useState(FALLBACK_HEADER_TITLE);
+  const [brandName, setBrandName] = useState("Nethues");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || "");
@@ -103,6 +106,29 @@ const ChatWidget = ({ mode = "admin" }) => {
     };
     checkProfile();
   }, [apiUrl, mode, visitorId, widgetKey]);
+
+  useEffect(() => {
+    if (mode !== "public" || !widgetKey || !apiUrl) return;
+    const loadWidgetConfig = async () => {
+      try {
+        const { data } = await client.get(`${apiUrl}/api/public/config`, {
+          headers: { "X-Widget-Key": widgetKey },
+        });
+        if (data?.header_title) {
+          setHeaderTitle(data.header_title);
+        }
+        if (data?.welcome_message) {
+          setMessages((prev) => (prev.length === 1 ? [createBotMessage(data.welcome_message)] : prev));
+        }
+        setBrandName(data?.brand_name || "Nethues");
+        setAvatarUrl(data?.avatar_url || "");
+        setPrivacyPolicyUrl(data?.privacy_policy_url || "");
+      } catch (err) {
+        console.error("Error loading widget config:", err);
+      }
+    };
+    loadWidgetConfig();
+  }, [apiUrl, mode, widgetKey]);
 
   const submitVisitorProfile = async () => {
     if (!visitorName.trim() || !visitorEmail.trim()) return;
@@ -206,8 +232,12 @@ const ChatWidget = ({ mode = "admin" }) => {
   return (
     <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
       <WidgetHeader className="mrnwebdesigns-chatbot-widget-header">
-        <WidgetTitle>{headerTitle}</WidgetTitle>
+        <HeaderRow>
+          {avatarUrl ? <HeaderAvatar src={avatarUrl} alt="brand avatar" /> : null}
+          <WidgetTitle>{headerTitle}</WidgetTitle>
+        </HeaderRow>
       </WidgetHeader>
+      <PoweredBy>Powered by {brandName || "Nethues"}</PoweredBy>
       
       <MessageContainer className="mrnwebdesigns-chatbot-widget-message-container">
         {messages.map((message, index) => (
@@ -277,6 +307,11 @@ const ChatWidget = ({ mode = "admin" }) => {
           </ProfileSaveButton>
         </ProfileCaptureContainer>
       )}
+      {privacyPolicyUrl && (
+        <PrivacyPolicyLink href={privacyPolicyUrl} target="_blank" rel="noreferrer">
+          Privacy Policy
+        </PrivacyPolicyLink>
+      )}
       {publicConfigError && <ConfigError>{publicConfigError}</ConfigError>}
     </WidgetContainer>
   );
@@ -306,6 +341,26 @@ const WidgetHeader = styled.div`
 const WidgetTitle = styled.h2`
   margin: 0;
   font-size: 1.2rem;
+`;
+
+const HeaderRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const HeaderAvatar = styled.img`
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.2);
+`;
+
+const PoweredBy = styled.div`
+  font-size: 0.75rem;
+  color: #666;
+  padding: 6px 15px 0;
 `;
 
 const MessageContainer = styled.div`
@@ -385,6 +440,13 @@ const ConfigError = styled.div`
   color: #c62828;
   font-size: 0.85rem;
   padding: 8px 12px 12px;
+`;
+
+const PrivacyPolicyLink = styled.a`
+  color: #555;
+  font-size: 0.75rem;
+  padding: 0 15px 8px;
+  text-decoration: underline;
 `;
 
 const ProfileCaptureContainer = styled.div`

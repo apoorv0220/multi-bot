@@ -21,6 +21,7 @@ app.add_middleware(
 )
 
 app.add_event_handler("startup", legacy_main.startup_event)
+app.middleware("http")(legacy_main.tenant_cors_enforcement_middleware)
 app.middleware("http")(legacy_main.exception_handling_middleware)
 
 app.include_router(auth.router)

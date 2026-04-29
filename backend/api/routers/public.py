@@ -45,6 +45,15 @@ async def get_public_visitor_profile(
     )
 
 
+@router.get("/api/public/config")
+async def get_public_config(
+    db=Depends(legacy_main.db_session),
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    origin: Optional[str] = Header(default=None),
+):
+    return await public_service.get_widget_config(db=db, x_widget_key=x_widget_key, origin=origin)
+
+
 @router.post("/api/public/visitor-profile")
 async def upsert_public_visitor_profile(
     payload: legacy_main.PublicVisitorProfileRequest,
@@ -79,3 +88,8 @@ async def add_public_feedback(
         origin=origin,
         request_obj=request_obj,
     )
+
+
+@router.get("/api/assets/{filename}")
+async def get_uploaded_asset(filename: str):
+    return await legacy_main.get_uploaded_asset(filename=filename)

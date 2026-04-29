@@ -54,6 +54,12 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [sourceDbType, setSourceDbType] = useState("mysql");
   const [sourceTablePrefix, setSourceTablePrefix] = useState("wp_");
   const [sourceUrlTable, setSourceUrlTable] = useState("wp_custom_urls");
+  const [brandName, setBrandName] = useState("");
+  const [widgetHeaderTitle, setWidgetHeaderTitle] = useState("");
+  const [widgetWelcomeMessage, setWidgetWelcomeMessage] = useState("");
+  const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
+  const [corsAllowedOrigins, setCorsAllowedOrigins] = useState("");
+  const [avatarUpload, setAvatarUpload] = useState(null);
   const [monthlyMessageLimit, setMonthlyMessageLimit] = useState(15000);
   const [quotaReachedMessage, setQuotaReachedMessage] = useState("Monthly message limit reached. Please try again next month.");
   const [blockedIps, setBlockedIps] = useState([]);
@@ -148,6 +154,11 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setSourceDbType(t.source_db_type || "mysql");
     setSourceTablePrefix(t.source_table_prefix || "wp_");
     setSourceUrlTable(t.source_url_table || "wp_custom_urls");
+    setBrandName(t.brand_name || "");
+    setWidgetHeaderTitle(t.widget_header_title || "");
+    setWidgetWelcomeMessage(t.widget_welcome_message || "");
+    setPrivacyPolicyUrl(t.privacy_policy_url || "");
+    setCorsAllowedOrigins(t.cors_allowed_origins || "");
   }, [sourceTenantId, tenants]);
 
   useEffect(() => {
@@ -238,6 +249,30 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       await load();
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to update source settings");
+    }
+  };
+
+  const saveBrandingConfig = async () => {
+    try {
+      await client.patch(`/api/admin/tenants/${sourceTenantId}/branding`, {
+        brand_name: brandName || null,
+        widget_header_title: widgetHeaderTitle || null,
+        widget_welcome_message: widgetWelcomeMessage || null,
+        privacy_policy_url: privacyPolicyUrl || null,
+        cors_allowed_origins: corsAllowedOrigins || null,
+      });
+      if (avatarUpload) {
+        const fd = new FormData();
+        fd.append("file", avatarUpload);
+        await client.post(`/api/admin/tenants/${sourceTenantId}/avatar`, fd, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+        setAvatarUpload(null);
+      }
+      setSuccess("Branding and widget configuration updated");
+      await load();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to update branding settings");
     }
   };
 
@@ -369,6 +404,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         <Tab label="Admins" />
         <Tab label="Users" />
         <Tab label="Security" />
+        <Tab label="Branding" />
         <Tab label="Tenant Sources" />
       </Tabs>
 
@@ -642,6 +678,43 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       )}
 
       {tab === 6 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" mb={1}>Tenant Branding and Widget Settings</Typography>
+            <Stack spacing={2}>
+              <TextField label="Brand Name" value={brandName} onChange={(e) => setBrandName(e.target.value)} fullWidth />
+              <TextField label="Widget Header Title" value={widgetHeaderTitle} onChange={(e) => setWidgetHeaderTitle(e.target.value)} fullWidth />
+              <TextField
+                label="Welcome Message"
+                value={widgetWelcomeMessage}
+                onChange={(e) => setWidgetWelcomeMessage(e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+              />
+              <TextField
+                label="Privacy Policy URL"
+                value={privacyPolicyUrl}
+                onChange={(e) => setPrivacyPolicyUrl(e.target.value)}
+                fullWidth
+              />
+              <TextField
+                label="CORS Allowed Origins (comma-separated)"
+                value={corsAllowedOrigins}
+                onChange={(e) => setCorsAllowedOrigins(e.target.value)}
+                fullWidth
+              />
+              <Button variant="outlined" component="label">
+                Upload Avatar (max 10MB)
+                <input hidden type="file" accept="image/*" onChange={(e) => setAvatarUpload(e.target.files?.[0] || null)} />
+              </Button>
+              <Button variant="contained" onClick={saveBrandingConfig} disabled={!sourceTenantId}>Save Branding</Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 7 && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Source Database Settings</Typography>

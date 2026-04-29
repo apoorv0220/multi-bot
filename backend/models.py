@@ -51,6 +51,12 @@ class Tenant(Base):
     source_db_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_table_prefix: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_url_table: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    brand_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    widget_header_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    widget_welcome_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    privacy_policy_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    cors_allowed_origins: Mapped[str | None] = mapped_column(Text, nullable=True)
     monthly_message_limit: Mapped[int] = mapped_column(default=15000, nullable=False)
     quota_reached_message: Mapped[str] = mapped_column(
         Text,
