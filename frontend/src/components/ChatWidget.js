@@ -218,7 +218,7 @@ const ChatWidget = ({ mode = "admin" }) => {
     if (!visitorName.trim() || !visitorEmail.trim()) return;
     setIsSavingProfile(true);
     try {
-      await client.post(`${apiUrl}/api/public/visitor-profile`, {
+      const { data } = await client.post(`${apiUrl}/api/public/visitor-profile`, {
         visitor_id: visitorId,
         name: visitorName.trim(),
         email: visitorEmail.trim(),
@@ -227,6 +227,13 @@ const ChatWidget = ({ mode = "admin" }) => {
           "X-Widget-Key": widgetKey,
         },
       });
+      const resolvedVisitorId = data?.visitor_id;
+      if (resolvedVisitorId && resolvedVisitorId !== visitorId) {
+        const keySuffix = widgetKey || "default";
+        const visitorKey = `chat_visitor_id_${keySuffix}`;
+        localStorage.setItem(visitorKey, resolvedVisitorId);
+        setVisitorId(resolvedVisitorId);
+      }
       setIsProfileRequired(false);
     } catch (err) {
       console.error("Error saving visitor profile:", err);

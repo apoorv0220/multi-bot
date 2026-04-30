@@ -425,6 +425,24 @@ def _get_visitor_profile(db, tenant_id: str, visitor_id: str) -> Optional[ChatVi
     ).scalar_one_or_none()
 
 
+def _normalize_visitor_email(email: str) -> tuple[str, str]:
+    trimmed = (email or "").strip()
+    if not trimmed:
+        raise HTTPException(status_code=400, detail="email is required")
+    return trimmed, trimmed.lower()
+
+
+def _get_visitor_profile_by_email(db, tenant_id: str, email_normalized: str) -> Optional[ChatVisitor]:
+    return db.execute(
+        select(ChatVisitor)
+        .where(
+            ChatVisitor.tenant_id == uuid.UUID(tenant_id),
+            func.lower(ChatVisitor.email) == email_normalized,
+        )
+        .order_by(ChatVisitor.updated_at.desc())
+    ).scalars().first()
+
+
 def _parse_source_dsn(dsn: Optional[str], table_prefix: Optional[str], url_table: Optional[str]) -> Dict[str, Any]:
     if not dsn:
         return {
@@ -1009,21 +1027,32 @@ async def upsert_public_visitor_profile(
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
+    email_trimmed, email_normalized = _normalize_visitor_email(str(payload.email))
     visitor = _get_visitor_profile(db, tenant_id, visitor_id)
     if visitor:
         visitor.name = name
-        visitor.email = payload.email
+        visitor.email = email_trimmed
+        resolved_visitor_id = visitor.visitor_id
     else:
-        db.add(
-            ChatVisitor(
-                tenant_id=uuid.UUID(tenant_id),
-                visitor_id=visitor_id,
-                name=name,
-                email=payload.email,
+        # Hybrid identity model: device visitor_id remains client-local, while
+        # matching email across devices resolves to a canonical visitor profile.
+        canonical = _get_visitor_profile_by_email(db, tenant_id, email_normalized)
+        if canonical:
+            canonical.name = name
+            canonical.email = email_trimmed
+            resolved_visitor_id = canonical.visitor_id
+        else:
+            db.add(
+                ChatVisitor(
+                    tenant_id=uuid.UUID(tenant_id),
+                    visitor_id=visitor_id,
+                    name=name,
+                    email=email_trimmed,
+                )
             )
-        )
+            resolved_visitor_id = visitor_id
     db.commit()
-    return {"status": "ok", "profile_exists": True}
+    return {"status": "ok", "profile_exists": True, "visitor_id": resolved_visitor_id}
 
 @app.get("/health")
 async def health_check():

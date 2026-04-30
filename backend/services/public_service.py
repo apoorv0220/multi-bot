@@ -22,21 +22,30 @@ async def upsert_visitor_profile(*, payload, db, x_widget_key, origin, request_o
     name = payload.name.strip()
     if not name:
         raise legacy_main.HTTPException(status_code=400, detail="name is required")
+    email_trimmed, email_normalized = legacy_main._normalize_visitor_email(str(payload.email))
     visitor = legacy_main._get_visitor_profile(db, tenant_id, visitor_id)
     if visitor:
         visitor.name = name
-        visitor.email = payload.email
+        visitor.email = email_trimmed
+        resolved_visitor_id = visitor.visitor_id
     else:
-        db.add(
-            legacy_main.ChatVisitor(
-                tenant_id=legacy_main.uuid.UUID(tenant_id),
-                visitor_id=visitor_id,
-                name=name,
-                email=payload.email,
+        canonical = legacy_main._get_visitor_profile_by_email(db, tenant_id, email_normalized)
+        if canonical:
+            canonical.name = name
+            canonical.email = email_trimmed
+            resolved_visitor_id = canonical.visitor_id
+        else:
+            db.add(
+                legacy_main.ChatVisitor(
+                    tenant_id=legacy_main.uuid.UUID(tenant_id),
+                    visitor_id=visitor_id,
+                    name=name,
+                    email=email_trimmed,
+                )
             )
-        )
+            resolved_visitor_id = visitor_id
     db.commit()
-    return {"status": "ok", "profile_exists": True}
+    return {"status": "ok", "profile_exists": True, "visitor_id": resolved_visitor_id}
 
 
 async def add_public_feedback(*, message_id, payload, db, x_widget_key, origin, request_obj=None):
