@@ -21,10 +21,27 @@ const createBotMessage = (text) => ({
   timestamp: new Date(),
 });
 
+/** Relative /api/assets/... or legacy absolute URLs (e.g. localhost) → current api base */
+const resolvePublicAssetUrl = (raw, apiBase) => {
+  if (!raw) return "";
+  const base = String(apiBase || "").replace(/\/$/, "");
+  if (!base) return raw;
+  if (raw.startsWith("/")) return `${base}${raw}`;
+  try {
+    const u = new URL(raw);
+    const path = u.pathname + u.search;
+    if (path.includes("/api/assets/")) return `${base}${path}`;
+  } catch {
+    /* ignore */
+  }
+  return raw;
+};
+
 const ChatWidget = ({ mode = "admin" }) => {
   const [messages, setMessages] = useState([createBotMessage(resolveInitialGreeting())]);
   const [headerTitle, setHeaderTitle] = useState(FALLBACK_HEADER_TITLE);
   const [brandName, setBrandName] = useState("Nethues");
+  const [primaryColor, setPrimaryColor] = useState("#bf362e");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [input, setInput] = useState('');
@@ -134,7 +151,8 @@ const ChatWidget = ({ mode = "admin" }) => {
           setMessages((prev) => (prev.length === 1 ? [createBotMessage(data.welcome_message)] : prev));
         }
         setBrandName(data?.brand_name || "Nethues");
-        setAvatarUrl(data?.avatar_url || "");
+        setPrimaryColor(data?.primary_color || "#bf362e");
+        setAvatarUrl(resolvePublicAssetUrl(data?.avatar_url || "", apiUrl));
         setPrivacyPolicyUrl(data?.privacy_policy_url || "");
         setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
       } catch (err) {
@@ -329,7 +347,7 @@ const ChatWidget = ({ mode = "admin" }) => {
 
   return (
     <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
-      <WidgetHeader className="mrnwebdesigns-chatbot-widget-header">
+      <WidgetHeader className="mrnwebdesigns-chatbot-widget-header" $primaryColor={primaryColor}>
         <HeaderRow>
           {avatarUrl ? <HeaderAvatar src={avatarUrl} alt="brand avatar" /> : null}
           <WidgetTitle>{headerTitle}</WidgetTitle>
@@ -375,7 +393,11 @@ const ChatWidget = ({ mode = "admin" }) => {
           placeholder="Type your message..."
           disabled={isLoading || (mode === "public" && (isProfileRequired || quotaBlocked))}
         />
-        <SendButton type="submit" disabled={isLoading || !input.trim() || (mode === "public" && (isProfileRequired || quotaBlocked))}>
+        <SendButton
+          type="submit"
+          disabled={isLoading || !input.trim() || (mode === "public" && (isProfileRequired || quotaBlocked))}
+          $primaryColor={primaryColor}
+        >
           <BsSend />
         </SendButton>
       </InputForm>
@@ -452,7 +474,7 @@ const WidgetHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  background: #bf362e;
+  background: ${(props) => props.$primaryColor || "#bf362e"};
   color: white;
 `;
 
@@ -505,12 +527,12 @@ const Input = styled.input`
   outline: none;
   
   &:focus {
-    border-color: #bf362e;
+    border-color: ${(props) => props.$primaryColor || "#bf362e"};
   }
 `;
 
 const SendButton = styled.button`
-  background: #bf362e;
+  background: ${(props) => props.$primaryColor || "#bf362e"};
   color: white;
   border: none;
   border-radius: 50%;
@@ -527,7 +549,7 @@ const SendButton = styled.button`
   }
   
   &:hover:not(:disabled) {
-    background: #5a8f15;
+    filter: brightness(0.92);
   }
 `;
 

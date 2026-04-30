@@ -64,6 +64,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [sourceTablePrefix, setSourceTablePrefix] = useState("wp_");
   const [sourceUrlTable, setSourceUrlTable] = useState("wp_custom_urls");
   const [brandName, setBrandName] = useState("");
+  const [widgetPrimaryColor, setWidgetPrimaryColor] = useState("#bf362e");
   const [widgetHeaderTitle, setWidgetHeaderTitle] = useState("");
   const [widgetWelcomeMessage, setWidgetWelcomeMessage] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
@@ -254,6 +255,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setSourceTablePrefix(t.source_table_prefix || "wp_");
     setSourceUrlTable(t.source_url_table || "wp_custom_urls");
     setBrandName(t.brand_name || "");
+    setWidgetPrimaryColor(t.widget_primary_color || "#bf362e");
     setWidgetHeaderTitle(t.widget_header_title || "");
     setWidgetWelcomeMessage(t.widget_welcome_message || "");
     setPrivacyPolicyUrl(t.privacy_policy_url || "");
@@ -450,6 +452,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     try {
       await client.patch(`/api/admin/tenants/${sourceTenantId}/branding`, {
         brand_name: brandName || null,
+        widget_primary_color: widgetPrimaryColor || null,
         widget_header_title: widgetHeaderTitle || null,
         widget_welcome_message: widgetWelcomeMessage || null,
         privacy_policy_url: privacyPolicyUrl || null,
@@ -1074,6 +1077,13 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
             <Typography variant="h6" mb={1}>Tenant Branding and Widget Settings</Typography>
             <Stack spacing={2}>
               <TextField label="Brand Name" value={brandName} onChange={(e) => setBrandName(e.target.value)} fullWidth />
+              <TextField
+                label="Widget Primary Color"
+                value={widgetPrimaryColor}
+                onChange={(e) => setWidgetPrimaryColor(e.target.value)}
+                placeholder="#bf362e"
+                fullWidth
+              />
               <TextField label="Widget Header Title" value={widgetHeaderTitle} onChange={(e) => setWidgetHeaderTitle(e.target.value)} fullWidth />
               <TextField
                 label="Welcome Message"

@@ -58,6 +58,7 @@ class Tenant(Base):
     source_table_prefix: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_url_table: Mapped[str | None] = mapped_column(String(255), nullable=True)
     brand_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    widget_primary_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     widget_header_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     widget_welcome_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     privacy_policy_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)

@@ -177,6 +177,7 @@ class BlockedCountryRequest(BaseModel):
 
 class TenantBrandingConfigRequest(BaseModel):
     brand_name: Optional[str] = None
+    widget_primary_color: Optional[str] = None
     widget_header_title: Optional[str] = None
     widget_welcome_message: Optional[str] = None
     privacy_policy_url: Optional[str] = None
@@ -441,6 +442,19 @@ def _get_visitor_profile_by_email(db, tenant_id: str, email_normalized: str) -> 
         )
         .order_by(ChatVisitor.updated_at.desc())
     ).scalars().first()
+
+
+def _normalize_avatar_url_for_widget(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    avatar = value.strip()
+    if not avatar:
+        return None
+    marker = "/api/assets/"
+    marker_idx = avatar.find(marker)
+    if marker_idx >= 0:
+        return avatar[marker_idx:]
+    return avatar
 
 
 def _parse_source_dsn(dsn: Optional[str], table_prefix: Optional[str], url_table: Optional[str]) -> Dict[str, Any]:
@@ -1004,9 +1018,10 @@ async def get_public_widget_config(
     return {
         "tenant_id": tenant_id,
         "brand_name": tenant.brand_name,
+        "primary_color": tenant.widget_primary_color,
         "header_title": tenant.widget_header_title,
         "welcome_message": tenant.widget_welcome_message,
-        "avatar_url": tenant.avatar_url,
+        "avatar_url": _normalize_avatar_url_for_widget(tenant.avatar_url),
         "privacy_policy_url": tenant.privacy_policy_url,
         "idle_rating_wait_seconds": tenant.idle_rating_wait_seconds,
     }
@@ -1450,10 +1465,11 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "source_url_table": t.source_url_table,
             "has_source_db_url": bool(t.source_db_url),
             "brand_name": t.brand_name,
+            "widget_primary_color": t.widget_primary_color,
             "widget_header_title": t.widget_header_title,
             "widget_welcome_message": t.widget_welcome_message,
             "privacy_policy_url": t.privacy_policy_url,
-            "avatar_url": t.avatar_url,
+            "avatar_url": _normalize_avatar_url_for_widget(t.avatar_url),
             "cors_allowed_origins": t.cors_allowed_origins,
             "idle_rating_wait_seconds": t.idle_rating_wait_seconds,
         }
@@ -1502,6 +1518,11 @@ async def update_tenant_branding(
         raise HTTPException(status_code=404, detail="Tenant not found")
     if payload.brand_name is not None:
         tenant.brand_name = payload.brand_name.strip() or None
+    if payload.widget_primary_color is not None:
+        color_value = payload.widget_primary_color.strip() if payload.widget_primary_color else ""
+        if color_value and not re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", color_value):
+            raise HTTPException(status_code=400, detail="widget_primary_color must be a valid hex color")
+        tenant.widget_primary_color = color_value or None
     if payload.widget_header_title is not None:
         tenant.widget_header_title = payload.widget_header_title.strip() or None
     if payload.widget_welcome_message is not None:
@@ -1554,8 +1575,7 @@ async def upload_tenant_avatar(
     output_path = os.path.join(uploads_dir, output_name)
     with open(output_path, "wb") as f:
         f.write(content)
-    public_base = os.getenv("ASSETS_PUBLIC_BASE_URL", "http://localhost:8043")
-    tenant.avatar_url = f"{public_base.rstrip('/')}/api/assets/{output_name}"
+    tenant.avatar_url = f"/api/assets/{output_name}"
     db.add(
         AuditLog(
             actor_user_id=user_ctx["user"].id,

@@ -9,7 +9,9 @@
     window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl ||
     runtimeConfig.API_BASE_URL ||
     `${window.location.protocol}//${window.location.host}`;
-  const primaryColor = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.primaryColor || '#bf362e';
+  // Optional embed override for the launcher bubble only. Chat panel colors come from
+  // tenant branding (GET /api/public/config → primary_color) when we fetch below.
+  const embedPrimaryColorOverride = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.primaryColor || null;
   const tenantPublicKey = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.tenantPublicKey || null;
   const chatbotInitialText =
     window.MRNWEBDESIGNS_CHATBOT_CONFIG?.chatbotInitialText || null;
@@ -59,8 +61,8 @@
     return iframe;
   }
   
-  // Create toggle button
-  function createToggleButton() {
+  // Create toggle button (launcher color: DB primary_color when fetched, else embed override, else default)
+  function createToggleButton(launcherColor) {
     const button = document.createElement('button');
     button.id = 'mrnwebdesigns-chatbot-toggle';
     button.innerHTML = `
@@ -74,7 +76,7 @@
     button.style.width = '60px';
     button.style.height = '60px';
     button.style.borderRadius = '50%';
-    button.style.backgroundColor = primaryColor;
+    button.style.backgroundColor = launcherColor || '#bf362e';
     button.style.color = 'white';
     button.style.border = 'none';
     button.style.boxShadow = '0 4px 25px rgba(0, 0, 0, 0.1)';
@@ -146,12 +148,33 @@
     }, 300); // Match the transition duration
   }
   
+  async function resolveLauncherPrimaryColor() {
+    let color = embedPrimaryColorOverride || '#bf362e';
+    if (!tenantPublicKey || !apiUrl) return color;
+    try {
+      const base = String(apiUrl).replace(/\/$/, '');
+      const res = await fetch(`${base}/api/public/config`, {
+        headers: { 'X-Widget-Key': tenantPublicKey },
+      });
+      if (!res.ok) return color;
+      const data = await res.json();
+      if (data && typeof data.primary_color === 'string' && data.primary_color.trim()) {
+        color = data.primary_color.trim();
+      }
+    } catch (e) {
+      // keep fallback
+    }
+    return color;
+  }
+
   // Initialize widget
-  function initWidget() {
+  async function initWidget() {
     // Check if widget already exists
     if (document.getElementById('mrnwebdesigns-chatbot-iframe')) {
       return;
     }
+
+    const launcherColor = await resolveLauncherPrimaryColor();
     
     // Create and append iframe
     const iframe = createChatbotIframe();
@@ -163,7 +186,7 @@
     document.body.appendChild(iframe);
     
     // Create and append toggle button
-    const button = createToggleButton();
+    const button = createToggleButton(launcherColor);
     document.body.appendChild(button);
     
     // Add event listener to toggle button
@@ -180,7 +203,7 @@
   
   // Wait for DOM to be fully loaded
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initWidget);
+    document.addEventListener('DOMContentLoaded', function() { initWidget(); });
   } else {
     initWidget();
   }
