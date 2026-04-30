@@ -41,8 +41,14 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [quotaBlocked, setQuotaBlocked] = useState(false);
   const [quotaMessage, setQuotaMessage] = useState("");
+  const [idleRatingWaitSeconds, setIdleRatingWaitSeconds] = useState(120);
+  const [showRatingPrompt, setShowRatingPrompt] = useState(false);
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
+  const idleTimerRef = useRef(null);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -71,6 +77,7 @@ const ChatWidget = ({ mode = "admin" }) => {
       const keySuffix = data.tenantPublicKey || "default";
       const sessionKey = `chat_session_id_${keySuffix}`;
       const visitorKey = `chat_visitor_id_${keySuffix}`;
+      const ratedSessionKey = `chat_session_rating_submitted_${keySuffix}`;
       let existingVisitorId = localStorage.getItem(visitorKey);
       if (!existingVisitorId) {
         existingVisitorId = createVisitorId();
@@ -79,6 +86,12 @@ const ChatWidget = ({ mode = "admin" }) => {
       setSessionStorageKey(sessionKey);
       setSessionId(localStorage.getItem(sessionKey) || null);
       setVisitorId(existingVisitorId);
+      const existingSession = localStorage.getItem(sessionKey) || null;
+      if (existingSession && localStorage.getItem(`${ratedSessionKey}_${existingSession}`) === "true") {
+        setRatingSubmitted(true);
+      } else {
+        setRatingSubmitted(false);
+      }
       if (!data.tenantPublicKey) {
         setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
       } else {
@@ -123,12 +136,83 @@ const ChatWidget = ({ mode = "admin" }) => {
         setBrandName(data?.brand_name || "Nethues");
         setAvatarUrl(data?.avatar_url || "");
         setPrivacyPolicyUrl(data?.privacy_policy_url || "");
+        setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
       } catch (err) {
         console.error("Error loading widget config:", err);
       }
     };
     loadWidgetConfig();
   }, [apiUrl, mode, widgetKey]);
+
+  useEffect(() => {
+    if (mode !== "public" || !widgetKey || !visitorId || !apiUrl || !sessionId) return;
+    const checkExistingRating = async () => {
+      try {
+        const { data } = await client.get(`${apiUrl}/api/public/session-rating/${sessionId}`, {
+          headers: {
+            "X-Widget-Key": widgetKey,
+            "X-Visitor-Id": visitorId,
+          },
+        });
+        if (data?.submitted) {
+          setRatingSubmitted(true);
+          setSelectedRating(Number(data.rating || 0));
+          setShowRatingPrompt(false);
+        } else {
+          setRatingSubmitted(false);
+        }
+      } catch (err) {
+        console.error("Error checking session rating:", err);
+      }
+    };
+    checkExistingRating();
+  }, [apiUrl, mode, sessionId, visitorId, widgetKey]);
+
+  useEffect(() => () => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+  }, []);
+
+  const resetIdleRatingTimer = () => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    if (mode !== "public" || !sessionId || ratingSubmitted || isProfileRequired || quotaBlocked) return;
+    idleTimerRef.current = setTimeout(() => {
+      setShowRatingPrompt(true);
+    }, Math.max(Number(idleRatingWaitSeconds || 120), 5) * 1000);
+  };
+
+  const submitSessionRating = async (rating) => {
+    if (!sessionId || ratingSubmitted) return;
+    setIsSubmittingRating(true);
+    try {
+      await client.post(`${apiUrl}/api/public/session-rating`, {
+        session_id: sessionId,
+        rating,
+      }, {
+        headers: {
+          "X-Widget-Key": widgetKey,
+          "X-Visitor-Id": visitorId,
+        },
+      });
+      setSelectedRating(rating);
+      setRatingSubmitted(true);
+      setShowRatingPrompt(false);
+      const suffix = widgetKey || "default";
+      localStorage.setItem(`chat_session_rating_submitted_${suffix}_${sessionId}`, "true");
+    } catch (err) {
+      if (err?.response?.status === 409) {
+        setRatingSubmitted(true);
+        setShowRatingPrompt(false);
+        return;
+      }
+      setPublicConfigError(err?.response?.data?.detail || "Could not submit rating.");
+    } finally {
+      setIsSubmittingRating(false);
+    }
+  };
 
   const submitVisitorProfile = async () => {
     if (!visitorName.trim() || !visitorEmail.trim()) return;
@@ -177,6 +261,8 @@ const ChatWidget = ({ mode = "admin" }) => {
     setMessages((prevMessages) => [...prevMessages, userMessage]);
     setInput('');
     setIsLoading(true);
+    setShowRatingPrompt(false);
+    resetIdleRatingTimer();
 
     try {
       const endpoint = mode === "public" ? "/api/public/chat" : "/api/chat";
@@ -189,8 +275,13 @@ const ChatWidget = ({ mode = "admin" }) => {
         headers: mode === "public" ? { "X-Widget-Key": widgetKey, "X-Visitor-Id": visitorId } : undefined,
       });
       if (response.data.session_id) {
+        const previousSessionId = sessionId;
         setSessionId(response.data.session_id);
         localStorage.setItem(sessionStorageKey, response.data.session_id);
+        if (previousSessionId !== response.data.session_id) {
+          setRatingSubmitted(false);
+          setSelectedRating(0);
+        }
       }
 
       // Add bot response with the new response format
@@ -306,6 +397,26 @@ const ChatWidget = ({ mode = "admin" }) => {
             {isSavingProfile ? "Saving..." : "Continue to chat"}
           </ProfileSaveButton>
         </ProfileCaptureContainer>
+      )}
+      {mode === "public" && showRatingPrompt && !ratingSubmitted && sessionId && (
+        <RatingContainer>
+          <ProfileTitle>Please rate your overall experience:</ProfileTitle>
+          <StarRow>
+            {[1, 2, 3, 4, 5].map((star) => (
+              <StarButton
+                key={star}
+                type="button"
+                disabled={isSubmittingRating}
+                onClick={() => submitSessionRating(star)}
+              >
+                {star}
+              </StarButton>
+            ))}
+          </StarRow>
+        </RatingContainer>
+      )}
+      {mode === "public" && ratingSubmitted && selectedRating > 0 && (
+        <RatingSubmittedText>Thanks for rating: {selectedRating}/5</RatingSubmittedText>
       )}
       {privacyPolicyUrl && (
         <PrivacyPolicyLink href={privacyPolicyUrl} target="_blank" rel="noreferrer">
@@ -474,6 +585,33 @@ const ProfileSaveButton = styled.button`
     background: #ccc;
     cursor: not-allowed;
   }
+`;
+
+const RatingContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #eee;
+  padding: 12px 15px;
+`;
+
+const StarRow = styled.div`
+  display: flex;
+  gap: 6px;
+`;
+
+const StarButton = styled.button`
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+`;
+
+const RatingSubmittedText = styled.div`
+  color: #2e7d32;
+  font-size: 0.8rem;
+  padding: 0 15px 8px;
 `;
 
 export default ChatWidget; 

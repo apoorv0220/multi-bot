@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { client } from "../api";
 import {
   Alert,
@@ -19,10 +20,9 @@ import {
   ListItemButton,
   ListItemText,
   MenuItem,
+  Pagination,
   Select,
   Stack,
-  Tab,
-  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -35,12 +35,20 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [users, setUsers] = useState([]);
   const [visitors, setVisitors] = useState([]);
   const [selectedVisitorId, setSelectedVisitorId] = useState("");
+  const [selectedVisitorSessionId, setSelectedVisitorSessionId] = useState("");
   const [visitorChats, setVisitorChats] = useState([]);
+  const [chatsPage, setChatsPage] = useState(1);
+  const [chatsTotal, setChatsTotal] = useState(0);
+  const [adminsPage, setAdminsPage] = useState(1);
+  const [adminsTotal, setAdminsTotal] = useState(0);
+  const [visitorsPage, setVisitorsPage] = useState(1);
+  const [visitorsTotal, setVisitorsTotal] = useState(0);
+  const [visitorChatsPage, setVisitorChatsPage] = useState(1);
+  const [visitorChatsTotal, setVisitorChatsTotal] = useState(0);
   const [tenants, setTenants] = useState([]);
   const [usageSummary, setUsageSummary] = useState(null);
   const [overview, setOverview] = useState(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [adminEmail, setAdminEmail] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
@@ -49,6 +57,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [newUserRole, setNewUserRole] = useState(role === "admin" ? "manager" : "admin");
   const [newTenantName, setNewTenantName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [chatFilter, setChatFilter] = useState("");
   const [sourceTenantId, setSourceTenantId] = useState("");
   const [sourceDbUrl, setSourceDbUrl] = useState("");
   const [sourceDbType, setSourceDbType] = useState("mysql");
@@ -62,6 +71,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [avatarUpload, setAvatarUpload] = useState(null);
   const [monthlyMessageLimit, setMonthlyMessageLimit] = useState(15000);
   const [quotaReachedMessage, setQuotaReachedMessage] = useState("Monthly message limit reached. Please try again next month.");
+  const [idleRatingWaitSeconds, setIdleRatingWaitSeconds] = useState(120);
   const [blockedIps, setBlockedIps] = useState([]);
   const [blockedCountries, setBlockedCountries] = useState([]);
   const [newBlockedIp, setNewBlockedIp] = useState("");
@@ -77,40 +87,29 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [newCategoryResponse, setNewCategoryResponse] = useState("");
   const [newWordByCategory, setNewWordByCategory] = useState({});
   const [success, setSuccess] = useState("");
+  const sessionRequestRef = useRef(0);
+  const location = useLocation();
+  const navigate = useNavigate();
   const canSelectTenant = role === "superadmin" || tenantIds.length > 1 || tenants.length > 1;
   const effectiveTenantId = sourceTenantId || tenantId || undefined;
+  const PAGE_SIZE = 10;
+  const routeTail = (location.pathname.replace("/admin/dashboard/", "") || "overview").replace(/^\/+/, "");
+  const routeParts = routeTail.split("/").filter(Boolean);
+  const section = routeParts[0] || "overview";
+  const usersSubsection = section === "users" ? (routeParts[1] || "admins") : "admins";
+  const settingsSubsection = section === "settings" ? (routeParts[1] || "security") : "security";
 
-  const load = useCallback(async (query = searchQuery) => {
-    try {
-      const [chatRes, jobRes, usersRes, visitorsRes, tenantsRes, overviewRes] = await Promise.all([
-        client.get("/api/admin/chats", { params: { q: query || undefined, tenant_id: effectiveTenantId } }),
-        client.get("/api/reindex/jobs", { params: { tenant_id: effectiveTenantId } }),
-        client.get("/api/admin/users", { params: { tenant_id: effectiveTenantId } }),
-        client.get("/api/admin/visitors", { params: { tenant_id: effectiveTenantId } }),
-        client.get("/api/admin/tenants"),
-        client.get("/api/admin/overview", { params: { tenant_id: effectiveTenantId } }),
-      ]);
-      const usageRes = await client.get("/api/admin/usage/summary", { params: { tenant_id: effectiveTenantId } });
-      setSessions(chatRes.data);
-      setJobs(jobRes.data);
-      setUsers(usersRes.data);
-      setVisitors(visitorsRes.data || []);
-      setTenants(tenantsRes.data);
-      setUsageSummary(usageRes.data);
-      setOverview(overviewRes.data);
-      if (!sourceTenantId && tenantsRes.data.length > 0) {
-        const firstTenant = tenantIds[0] || tenantId || tenantsRes.data[0].id;
-        setSourceTenantId(firstTenant || "");
-      }
-      if (!adminTenantId && tenantsRes.data.length > 0) {
-        const firstTenant = tenantIds[0] || tenantId || tenantsRes.data[0].id;
-        setAdminTenantId(firstTenant || "");
-      }
-      setError("");
-    } catch (err) {
-      setError(err?.response?.data?.detail || "Failed loading dashboard data");
-    }
-  }, [adminTenantId, effectiveTenantId, searchQuery, sourceTenantId, tenantId, tenantIds]);
+  const navigateSection = (nextSection) => {
+    navigate(`/admin/dashboard/${nextSection}`);
+  };
+
+  const navigateUsersSubsection = (nextSubsection) => {
+    navigate(`/admin/dashboard/users/${nextSubsection}`);
+  };
+
+  const navigateSettingsSubsection = (nextSubsection) => {
+    navigate(`/admin/dashboard/settings/${nextSubsection}`);
+  };
 
   const refreshJobsOnly = useCallback(async () => {
     try {
@@ -129,6 +128,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       setBlockedCountries(data.blocked_countries || []);
       setMonthlyMessageLimit(Number(data.monthly_message_limit || 15000));
       setQuotaReachedMessage(data.quota_reached_message || "Monthly message limit reached. Please try again next month.");
+      setIdleRatingWaitSeconds(Number(data.idle_rating_wait_seconds || 120));
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed loading security settings");
     }
@@ -144,17 +144,101 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   }, [effectiveTenantId]);
 
-  useEffect(() => {
-    load("");
-  }, [load]);
+  const loadTenants = useCallback(async () => {
+    try {
+      const { data } = await client.get("/api/admin/tenants");
+      setTenants(data || []);
+      if (!sourceTenantId && data?.length > 0) {
+        const firstTenant = tenantIds[0] || tenantId || data[0].id;
+        setSourceTenantId(firstTenant || "");
+      }
+      if (!adminTenantId && data?.length > 0) {
+        const firstTenant = tenantIds[0] || tenantId || data[0].id;
+        setAdminTenantId(firstTenant || "");
+      }
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading tenants");
+    }
+  }, [adminTenantId, sourceTenantId, tenantId, tenantIds]);
+
+  const loadOverviewSection = useCallback(async () => {
+    if (!effectiveTenantId) return;
+    try {
+      const { data } = await client.get("/api/admin/overview", { params: { tenant_id: effectiveTenantId } });
+      setOverview(data);
+      setError("");
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading overview");
+    }
+  }, [effectiveTenantId]);
+
+  const loadChatsSection = useCallback(async (query = chatFilter, page = 1) => {
+    if (!effectiveTenantId) return;
+    try {
+      const [chatRes, usageRes] = await Promise.all([
+        client.get("/api/admin/chats", {
+          params: { q: query || undefined, tenant_id: effectiveTenantId, page, page_size: PAGE_SIZE },
+        }),
+        client.get("/api/admin/usage/summary", { params: { tenant_id: effectiveTenantId } }),
+      ]);
+      setSessions(chatRes.data?.items || []);
+      setChatsTotal(Number(chatRes.data?.total || 0));
+      setChatsPage(Number(chatRes.data?.page || page));
+      setUsageSummary(usageRes.data);
+      setError("");
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading chats");
+    }
+  }, [effectiveTenantId, chatFilter]);
+
+  const loadJobsSection = useCallback(async () => {
+    if (!effectiveTenantId) return;
+    try {
+      const { data } = await client.get("/api/reindex/jobs", { params: { tenant_id: effectiveTenantId } });
+      setJobs(data || []);
+      setError("");
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading jobs");
+    }
+  }, [effectiveTenantId]);
+
+  const loadAdminsSection = useCallback(async (page = 1) => {
+    if (!effectiveTenantId) return;
+    try {
+      const { data } = await client.get("/api/admin/users", {
+        params: { tenant_id: effectiveTenantId, page, page_size: PAGE_SIZE },
+      });
+      setUsers(data?.items || []);
+      setAdminsTotal(Number(data?.total || 0));
+      setAdminsPage(Number(data?.page || page));
+      setError("");
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading admins");
+    }
+  }, [effectiveTenantId]);
+
+  const loadVisitorsSection = useCallback(async (page = 1) => {
+    if (!effectiveTenantId) return;
+    try {
+      const { data } = await client.get("/api/admin/visitors", {
+        params: { tenant_id: effectiveTenantId, page, page_size: PAGE_SIZE },
+      });
+      setVisitors(data?.items || []);
+      setVisitorsTotal(Number(data?.total || 0));
+      setVisitorsPage(Number(data?.page || page));
+      setError("");
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading visitors");
+    }
+  }, [effectiveTenantId]);
 
   useEffect(() => {
-    if (tab !== 1) return undefined;
+    if (section !== "jobs") return undefined;
     const id = setInterval(() => {
       refreshJobsOnly();
     }, 5000);
     return () => clearInterval(id);
-  }, [tab, refreshJobsOnly]);
+  }, [section, refreshJobsOnly]);
 
   useEffect(() => {
     if (role !== "superadmin") return;
@@ -177,28 +261,119 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   }, [sourceTenantId, tenants]);
 
   useEffect(() => {
-    loadSecuritySettings();
-  }, [loadSecuritySettings]);
+    setChatsPage(1);
+    setAdminsPage(1);
+    setVisitorsPage(1);
+    setVisitorChatsPage(1);
+    setSelectedVisitorId("");
+    setSelectedVisitorSessionId("");
+    setVisitorChats([]);
+    setSearchQuery("");
+    setChatFilter("");
+  }, [effectiveTenantId]);
 
   useEffect(() => {
-    loadBlockWordSettings();
-  }, [loadBlockWordSettings]);
+    loadTenants();
+  }, [loadTenants]);
+
+  useEffect(() => {
+    const validSections = ["overview", "chats", "jobs", "users", "settings"];
+    if (!validSections.includes(section)) {
+      navigate("/admin/dashboard/overview", { replace: true });
+      return;
+    }
+    if (section === "users" && !["admins", "visitors"].includes(usersSubsection)) {
+      navigate("/admin/dashboard/users/admins", { replace: true });
+      return;
+    }
+    if (section === "settings" && !["security", "branding", "moderation", "db-settings"].includes(settingsSubsection)) {
+      navigate("/admin/dashboard/settings/security", { replace: true });
+    }
+  }, [navigate, section, usersSubsection, settingsSubsection]);
+
+  useEffect(() => {
+    if (!effectiveTenantId) return;
+    if (section === "overview") {
+      loadOverviewSection();
+      return;
+    }
+    if (section === "chats") {
+      loadChatsSection(chatFilter, chatsPage);
+      return;
+    }
+    if (section === "jobs") {
+      loadJobsSection();
+      return;
+    }
+    if (section === "users") {
+      if (usersSubsection === "admins") {
+        loadAdminsSection(adminsPage);
+      } else {
+        loadVisitorsSection(visitorsPage);
+      }
+      return;
+    }
+    if (section === "settings") {
+      if (settingsSubsection === "security") {
+        loadSecuritySettings();
+      } else if (settingsSubsection === "moderation") {
+        loadBlockWordSettings();
+      }
+    }
+  }, [
+    effectiveTenantId,
+    section,
+    usersSubsection,
+    settingsSubsection,
+    chatFilter,
+    chatsPage,
+    adminsPage,
+    visitorsPage,
+    loadOverviewSection,
+    loadChatsSection,
+    loadJobsSection,
+    loadAdminsSection,
+    loadVisitorsSection,
+    loadSecuritySettings,
+    loadBlockWordSettings,
+  ]);
 
   const loadSession = async (id) => {
     setSelected(id);
+    setMessages([]);
+    const requestSeq = ++sessionRequestRef.current;
     const { data } = await client.get(`/api/admin/chats/${id}`);
-    setMessages(data);
+    if (requestSeq === sessionRequestRef.current) {
+      setMessages(data);
+    }
   };
 
   const reindex = async () => {
     await client.post("/api/reindex", role === "superadmin" ? { tenant_id: sourceTenantId || undefined } : { tenant_id: tenantId });
-    load();
+    await loadJobsSection();
   };
 
-  const loadVisitorChats = async (visitorId) => {
+  const loadVisitorChats = useCallback(async (visitorId, page = 1) => {
     setSelectedVisitorId(visitorId);
-    const { data } = await client.get(`/api/admin/visitors/${visitorId}/chats`, { params: { tenant_id: effectiveTenantId } });
-    setVisitorChats(data || []);
+    setSelectedVisitorSessionId("");
+    setSelected(null);
+    setMessages([]);
+    const { data } = await client.get(`/api/admin/visitors/${visitorId}/chats`, {
+      params: { tenant_id: effectiveTenantId, page, page_size: PAGE_SIZE },
+    });
+    setVisitorChats(data?.items || []);
+    setVisitorChatsTotal(Number(data?.total || 0));
+    setVisitorChatsPage(Number(data?.page || page));
+  }, [effectiveTenantId]);
+
+  useEffect(() => {
+    if (!effectiveTenantId || !selectedVisitorId || section !== "users" || usersSubsection !== "visitors") return;
+    loadVisitorChats(selectedVisitorId, visitorChatsPage);
+  }, [effectiveTenantId, selectedVisitorId, visitorChatsPage, section, usersSubsection, loadVisitorChats]);
+
+  const loadVisitorSession = async (sessionId) => {
+    setSelectedVisitorSessionId(sessionId);
+    await loadSession(sessionId);
   };
 
   const createAdmin = async () => {
@@ -224,7 +399,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       setAdminTenantMode("existing");
       setNewTenantName("");
       setNewUserRole(role === "admin" ? "manager" : "admin");
-      await load();
+      await loadAdminsSection(adminsPage);
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to create user");
     }
@@ -234,7 +409,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     try {
       await client.post(`/api/admin/users/${userId}/status`, { is_active: isActive });
       setSuccess(`User ${isActive ? "activated" : "deactivated"} successfully`);
-      await load();
+      await loadAdminsSection(adminsPage);
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to update user status");
     }
@@ -265,7 +440,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         source_url_table: sourceUrlTable || null,
       });
       setSuccess("Tenant source settings updated");
-      await load();
+      await loadTenants();
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to update source settings");
     }
@@ -289,7 +464,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         setAvatarUpload(null);
       }
       setSuccess("Branding and widget configuration updated");
-      await load();
+      await loadTenants();
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to update branding settings");
     }
@@ -304,10 +479,25 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         payload.monthly_message_limit = Number(monthlyMessageLimit || 15000);
       }
       await client.patch(`/api/admin/tenants/${effectiveTenantId}/quota`, payload);
+      await client.patch(`/api/admin/tenants/${effectiveTenantId}/branding`, {
+        cors_allowed_origins: corsAllowedOrigins || null,
+      });
       setSuccess("Quota settings updated");
       await loadSecuritySettings();
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to update quota settings");
+    }
+  };
+
+  const saveIdleRatingSettings = async () => {
+    try {
+      await client.patch(`/api/admin/tenants/${effectiveTenantId}/idle-rating`, {
+        idle_rating_wait_seconds: Number(idleRatingWaitSeconds || 120),
+      });
+      setSuccess("Idle rating wait time updated");
+      await loadSecuritySettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to update idle rating settings");
     }
   };
 
@@ -427,12 +617,58 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
 
   return (
     <Box sx={{ p: 3 }}>
-      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", md: "240px minmax(0, 1fr)" },
+          gap: 2,
+          minHeight: "calc(100vh - 120px)",
+          alignItems: "stretch",
+        }}
+      >
+        <Box
+          component="aside"
+          sx={{
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: 2,
+            p: 2,
+            bgcolor: "background.paper",
+            minHeight: "100%",
+            position: { md: "sticky" },
+            top: { md: 16 },
+            alignSelf: "start",
+          }}
+        >
+              <Stack spacing={1.25}>
+                <Button variant={section === "overview" ? "contained" : "text"} onClick={() => navigateSection("overview")}>Overview</Button>
+                <Button variant={section === "chats" ? "contained" : "text"} onClick={() => navigateSection("chats")}>Chats</Button>
+                <Button variant={section === "jobs" ? "contained" : "text"} onClick={() => navigateSection("jobs")}>Jobs</Button>
+                <Button variant={section === "users" ? "contained" : "text"} onClick={() => navigateSection("users/admins")}>Users</Button>
+                {section === "users" && (
+                  <Stack pl={1}>
+                    <Button size="small" variant={usersSubsection === "admins" ? "contained" : "text"} onClick={() => navigateUsersSubsection("admins")}>Admins</Button>
+                    <Button size="small" variant={usersSubsection === "visitors" ? "contained" : "text"} onClick={() => navigateUsersSubsection("visitors")}>Visitors</Button>
+                  </Stack>
+                )}
+                <Button variant={section === "settings" ? "contained" : "text"} onClick={() => navigateSection("settings/security")}>Settings</Button>
+                {section === "settings" && (
+                  <Stack pl={1}>
+                    <Button size="small" variant={settingsSubsection === "security" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("security")}>Security</Button>
+                    <Button size="small" variant={settingsSubsection === "branding" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("branding")}>Branding</Button>
+                    <Button size="small" variant={settingsSubsection === "moderation" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("moderation")}>Moderation</Button>
+                    <Button size="small" variant={settingsSubsection === "db-settings" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("db-settings")}>DB Settings</Button>
+                  </Stack>
+                )}
+              </Stack>
+        </Box>
+        <Box component="main" sx={{ minWidth: 0 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2} gap={2} flexWrap="wrap">
         <Box>
           <Typography variant="h4" fontWeight={700}>Admin Dashboard</Typography>
           <Typography color="text.secondary">{role === "superadmin" ? "Global control center" : "Tenant control center"}</Typography>
         </Box>
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
           {canSelectTenant && (
             <FormControl size="small" sx={{ minWidth: 220 }}>
               <InputLabel>Tenant</InputLabel>
@@ -462,19 +698,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }}>{success}</Alert>}
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Overview" />
-        <Tab label="Chats" />
-        <Tab label="Jobs" />
-        <Tab label="Admins" />
-        <Tab label="Users" />
-        <Tab label="Security" />
-        <Tab label="Branding" />
-        <Tab label="Moderation" />
-        <Tab label="Tenant Sources" />
-      </Tabs>
-
-      {tab === 0 && (
+      {section === "overview" && (
         <Grid container spacing={2}>
           <Grid item xs={12} sm={6} md={4}>
             <Card><CardContent><Typography color="text.secondary">Total Chats</Typography><Typography variant="h4" fontWeight={700}>{overview?.total_chats || 0}</Typography></CardContent></Card>
@@ -494,83 +718,105 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
           <Grid item xs={12} sm={6} md={4}>
             <Card><CardContent><Typography color="text.secondary">Dislikes</Typography><Typography variant="h4" fontWeight={700}>{overview?.dislikes || 0}</Typography></CardContent></Card>
           </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Session Ratings</Typography><Typography variant="h4" fontWeight={700}>{overview?.rating_count || 0}</Typography></CardContent></Card>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Card><CardContent><Typography color="text.secondary">Average Rating</Typography><Typography variant="h4" fontWeight={700}>{overview?.average_rating || 0}</Typography></CardContent></Card>
+          </Grid>
         </Grid>
       )}
 
-      {tab === 1 && (
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <Card>
-              <CardContent>
-                <Stack direction="row" spacing={1} mb={1} alignItems="center">
-                  <Typography variant="h6">Tenant Chats</Typography>
-                  <Chip size="small" label={`👍 ${aggregateFeedback.up}`} />
-                  <Chip size="small" label={`👎 ${aggregateFeedback.down}`} />
-                  <Chip size="small" label={`Embeddings Tokens ${usageSummary?.embedding_total_tokens || 0}`} />
-                </Stack>
-                <TextField
+      {section === "chats" && (
+        <Box
+          sx={{
+            display: "grid",
+            gridTemplateColumns: { xs: "1fr", lg: "minmax(420px, 1fr) minmax(420px, 1fr)" },
+            gap: 2,
+            alignItems: "start",
+          }}
+        >
+          <Card sx={{ minWidth: 0 }}>
+            <CardContent>
+              <Stack direction="row" spacing={1} mb={1} alignItems="center">
+                <Typography variant="h6">Tenant Chats</Typography>
+                <Chip size="small" label={`👍 ${aggregateFeedback.up}`} />
+                <Chip size="small" label={`👎 ${aggregateFeedback.down}`} />
+                <Chip size="small" label={`Embeddings Tokens ${usageSummary?.embedding_total_tokens || 0}`} />
+              </Stack>
+              <TextField
+                size="small"
+                label="Search chats"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    setChatFilter(e.currentTarget.value);
+                    setChatsPage(1);
+                    loadChatsSection(e.currentTarget.value, 1);
+                  }
+                }}
+                fullWidth
+                sx={{ mb: 1 }}
+              />
+              <List dense sx={{ maxHeight: 520, overflowY: "auto" }}>
+                {sessions.map((s) => (
+                  <ListItemButton key={s.id} selected={selected === s.id} onClick={() => loadSession(s.id)}>
+                    <ListItemText
+                      primary={s.title || s.id}
+                      secondary={`${s.visitor_name || "Unknown"}${s.visitor_email ? ` (${s.visitor_email})` : ""} | ${s.id} | ${s.last_message_at} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
+                      secondaryTypographyProps={{ sx: { wordBreak: "break-word" } }}
+                    />
+                  </ListItemButton>
+                ))}
+              </List>
+              <Stack direction="row" justifyContent="center" sx={{ mt: 1 }}>
+                <Pagination
+                  count={Math.max(1, Math.ceil(chatsTotal / PAGE_SIZE))}
+                  page={chatsPage}
+                  onChange={(_, value) => setChatsPage(value)}
                   size="small"
-                  label="Search chats"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") load(e.currentTarget.value);
-                  }}
-                  fullWidth
-                  sx={{ mb: 1 }}
                 />
-                <List dense>
-                  {sessions.map((s) => (
-                    <ListItemButton key={s.id} selected={selected === s.id} onClick={() => loadSession(s.id)}>
-                      <ListItemText
-                        primary={s.title || s.id}
-                        secondary={`${s.visitor_name || "Unknown"}${s.visitor_email ? ` (${s.visitor_email})` : ""} | ${s.id} | ${s.last_message_at} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
-                      />
-                    </ListItemButton>
+              </Stack>
+            </CardContent>
+          </Card>
+          <Card sx={{ minWidth: 0 }}>
+            <CardContent>
+              <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                <Typography variant="h6">Conversation</Typography>
+                <Button size="small" onClick={exportTranscript} disabled={!selected}>Export</Button>
+              </Stack>
+              {selected ? (
+                <Stack spacing={1.5} sx={{ maxHeight: 560, overflowY: "auto" }}>
+                  {messages.map((m) => (
+                    <Box key={m.id} sx={{ p: 1.5, borderRadius: 1, bgcolor: m.sender_type === "assistant" ? "grey.100" : "primary.50" }}>
+                      <Typography variant="caption" color="text.secondary">{m.sender_type}</Typography>
+                      <Typography sx={{ wordBreak: "break-word" }}>{m.content}</Typography>
+                      {m.sender_type === "assistant" && (
+                        <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: "wrap" }}>
+                          <Chip size="small" label={`Prompt ${m?.token_usage?.prompt_tokens || 0}`} />
+                          <Chip size="small" label={`Completion ${m?.token_usage?.completion_tokens || 0}`} />
+                          <Chip size="small" label={`Total ${m?.token_usage?.total_tokens || 0}`} />
+                        </Stack>
+                      )}
+                      {m.sender_type === "assistant" && (
+                        <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
+                          <Chip size="small" label={`👍 ${m?.feedback_summary?.up || 0}`} />
+                          <Chip size="small" label={`👎 ${m?.feedback_summary?.down || 0}`} />
+                        </Stack>
+                      )}
+                    </Box>
                   ))}
-                </List>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} md={8}>
-            <Card>
-              <CardContent>
-                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-                  <Typography variant="h6">Conversation</Typography>
-                  <Button size="small" onClick={exportTranscript} disabled={!selected}>Export</Button>
                 </Stack>
-                {selected ? (
-                  <Stack spacing={1.5}>
-                    {messages.map((m) => (
-                      <Box key={m.id} sx={{ p: 1.5, borderRadius: 1, bgcolor: m.sender_type === "assistant" ? "grey.100" : "primary.50" }}>
-                        <Typography variant="caption" color="text.secondary">{m.sender_type}</Typography>
-                        <Typography>{m.content}</Typography>
-                        {m.sender_type === "assistant" && (
-                          <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                            <Chip size="small" label={`Prompt ${m?.token_usage?.prompt_tokens || 0}`} />
-                            <Chip size="small" label={`Completion ${m?.token_usage?.completion_tokens || 0}`} />
-                            <Chip size="small" label={`Total ${m?.token_usage?.total_tokens || 0}`} />
-                          </Stack>
-                        )}
-                        {m.sender_type === "assistant" && (
-                          <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-                            <Chip size="small" label={`👍 ${m?.feedback_summary?.up || 0}`} />
-                            <Chip size="small" label={`👎 ${m?.feedback_summary?.down || 0}`} />
-                          </Stack>
-                        )}
-                      </Box>
-                    ))}
-                  </Stack>
-                ) : (
-                  <Typography color="text.secondary">Select a chat session.</Typography>
-                )}
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
+              ) : (
+                <Typography color="text.secondary">Select a chat session.</Typography>
+              )}
+            </CardContent>
+          </Card>
+        </Box>
       )}
 
-      {tab === 2 && (
+      {section === "jobs" && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Reindex Jobs</Typography>
@@ -613,10 +859,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         </Card>
       )}
 
-      {tab === 3 && (
+      {section === "users" && usersSubsection === "admins" && (
         <Card>
           <CardContent>
-            <Typography variant="h6" mb={1}>Users</Typography>
+            <Typography variant="h6" mb={1}>Admins</Typography>
             <Stack spacing={1}>
               {users.map((u) => (
                 <Stack key={u.id} direction="row" spacing={1} alignItems="center">
@@ -634,22 +880,33 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 </Stack>
               ))}
             </Stack>
+            <Stack direction="row" justifyContent="center" sx={{ mt: 1 }}>
+              <Pagination
+                count={Math.max(1, Math.ceil(adminsTotal / PAGE_SIZE))}
+                page={adminsPage}
+                onChange={(_, value) => setAdminsPage(value)}
+                size="small"
+              />
+            </Stack>
           </CardContent>
         </Card>
       )}
 
-      {tab === 4 && (
+      {section === "users" && usersSubsection === "visitors" && (
         <Grid container spacing={2}>
-          <Grid item xs={12} md={5}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography variant="h6" mb={1}>Users (Visitors)</Typography>
+                <Typography variant="h6" mb={1}>Visitors</Typography>
                 <List dense>
                   {visitors.map((v) => (
                     <ListItemButton
                       key={v.visitor_id}
                       selected={selectedVisitorId === v.visitor_id}
-                      onClick={() => loadVisitorChats(v.visitor_id)}
+                      onClick={() => {
+                        setVisitorChatsPage(1);
+                        loadVisitorChats(v.visitor_id, 1);
+                      }}
                     >
                       <ListItemText
                         primary={`${v.name || "Unknown"}${v.email ? ` (${v.email})` : ""}`}
@@ -658,26 +915,79 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                     </ListItemButton>
                   ))}
                 </List>
+                <Stack direction="row" justifyContent="center" sx={{ mt: 1 }}>
+                  <Pagination
+                    count={Math.max(1, Math.ceil(visitorsTotal / PAGE_SIZE))}
+                    page={visitorsPage}
+                    onChange={(_, value) => setVisitorsPage(value)}
+                    size="small"
+                  />
+                </Stack>
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} md={7}>
+          <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography variant="h6" mb={1}>User Chats</Typography>
+                <Typography variant="h6" mb={1}>Visitor Chats</Typography>
                 {selectedVisitorId ? (
-                  <List dense>
-                    {visitorChats.map((s) => (
-                      <ListItemButton key={s.id} onClick={() => loadSession(s.id)}>
-                        <ListItemText
-                          primary={s.title || s.id}
-                          secondary={`${s.last_message_at || "N/A"} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
-                        />
-                      </ListItemButton>
-                    ))}
-                  </List>
+                  <>
+                    <List dense>
+                      {visitorChats.map((s) => (
+                        <ListItemButton
+                          key={s.id}
+                          selected={selectedVisitorSessionId === s.id}
+                          onClick={() => loadVisitorSession(s.id)}
+                        >
+                          <ListItemText
+                            primary={s.title || s.id}
+                            secondary={`${s.last_message_at || "N/A"} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
+                          />
+                        </ListItemButton>
+                      ))}
+                    </List>
+                    <Stack direction="row" justifyContent="center" sx={{ mt: 1 }}>
+                      <Pagination
+                        count={Math.max(1, Math.ceil(visitorChatsTotal / PAGE_SIZE))}
+                        page={visitorChatsPage}
+                        onChange={(_, value) => setVisitorChatsPage(value)}
+                        size="small"
+                      />
+                    </Stack>
+                  </>
                 ) : (
                   <Typography color="text.secondary">Select a user to view chats.</Typography>
+                )}
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                  <Typography variant="h6">Conversation</Typography>
+                  <Button size="small" onClick={exportTranscript} disabled={!selectedVisitorSessionId}>Export</Button>
+                </Stack>
+                {!selectedVisitorId ? (
+                  <Typography color="text.secondary">Select a visitor first.</Typography>
+                ) : !selectedVisitorSessionId ? (
+                  <Typography color="text.secondary">Select a visitor chat to view transcript.</Typography>
+                ) : (
+                  <Stack spacing={1.5} sx={{ maxHeight: 560, overflowY: "auto" }}>
+                    {messages.map((m) => (
+                      <Box key={m.id} sx={{ p: 1.5, borderRadius: 1, bgcolor: m.sender_type === "assistant" ? "grey.100" : "primary.50" }}>
+                        <Typography variant="caption" color="text.secondary">{m.sender_type}</Typography>
+                        <Typography sx={{ wordBreak: "break-word" }}>{m.content}</Typography>
+                        {m.sender_type === "assistant" && (
+                          <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: "wrap" }}>
+                            <Chip size="small" label={`Prompt ${m?.token_usage?.prompt_tokens || 0}`} />
+                            <Chip size="small" label={`Completion ${m?.token_usage?.completion_tokens || 0}`} />
+                            <Chip size="small" label={`Total ${m?.token_usage?.total_tokens || 0}`} />
+                          </Stack>
+                        )}
+                      </Box>
+                    ))}
+                  </Stack>
                 )}
               </CardContent>
             </Card>
@@ -685,7 +995,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         </Grid>
       )}
 
-      {tab === 5 && (
+      {section === "settings" && settingsSubsection === "security" && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Security and Quota Controls</Typography>
@@ -706,6 +1016,21 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 onChange={(e) => setQuotaReachedMessage(e.target.value)}
                 fullWidth
               />
+              <TextField
+                label="CORS Allowed Origins (comma-separated)"
+                value={corsAllowedOrigins}
+                onChange={(e) => setCorsAllowedOrigins(e.target.value)}
+                fullWidth
+              />
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Idle Rating Wait (seconds)"
+                  type="number"
+                  value={idleRatingWaitSeconds}
+                  onChange={(e) => setIdleRatingWaitSeconds(e.target.value)}
+                />
+                <Button variant="contained" onClick={saveIdleRatingSettings}>Save Idle Rating</Button>
+              </Stack>
 
               <Typography variant="subtitle1">Blocked IPs</Typography>
               <Stack direction="row" spacing={1}>
@@ -743,7 +1068,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         </Card>
       )}
 
-      {tab === 6 && (
+      {section === "settings" && settingsSubsection === "branding" && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Branding and Widget Settings</Typography>
@@ -764,12 +1089,6 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 onChange={(e) => setPrivacyPolicyUrl(e.target.value)}
                 fullWidth
               />
-              <TextField
-                label="CORS Allowed Origins (comma-separated)"
-                value={corsAllowedOrigins}
-                onChange={(e) => setCorsAllowedOrigins(e.target.value)}
-                fullWidth
-              />
               <Button variant="outlined" component="label">
                 Upload Avatar (max 10MB)
                 <input hidden type="file" accept="image/*" onChange={(e) => setAvatarUpload(e.target.files?.[0] || null)} />
@@ -780,7 +1099,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         </Card>
       )}
 
-      {tab === 7 && (
+      {section === "settings" && settingsSubsection === "moderation" && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Block-word Categories</Typography>
@@ -847,7 +1166,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         </Card>
       )}
 
-      {tab === 8 && (
+      {section === "settings" && settingsSubsection === "db-settings" && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Source Database Settings</Typography>
@@ -905,6 +1224,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
           </CardContent>
         </Card>
       )}
+      </Box>
+      </Box>
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{role === "superadmin" ? "Create Admin/Manager" : "Create Manager"}</DialogTitle>

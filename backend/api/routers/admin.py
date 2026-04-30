@@ -15,8 +15,17 @@ async def admin_chats(
     db=Depends(legacy_main.db_session),
     q: Optional[str] = Query(default=None),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
-    return await admin_service.list_chats(user_ctx=user_ctx, db=db, q=q, tenant_id=tenant_id)
+    return await admin_service.list_chats(
+        user_ctx=user_ctx,
+        db=db,
+        q=q,
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/api/admin/chats/{session_id}")
@@ -29,8 +38,10 @@ async def admin_users(
     user_ctx=Depends(legacy_main.get_current_user),
     db=Depends(legacy_main.db_session),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
-    return await admin_service.list_users(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+    return await admin_service.list_users(user_ctx=user_ctx, db=db, tenant_id=tenant_id, page=page, page_size=page_size)
 
 
 @router.get("/api/admin/visitors")
@@ -38,8 +49,10 @@ async def admin_visitors(
     user_ctx=Depends(legacy_main.get_current_user),
     db=Depends(legacy_main.db_session),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
-    return await admin_service.list_visitors(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+    return await admin_service.list_visitors(user_ctx=user_ctx, db=db, tenant_id=tenant_id, page=page, page_size=page_size)
 
 
 @router.get("/api/admin/visitors/{visitor_id}/chats")
@@ -48,8 +61,17 @@ async def admin_visitor_chats(
     user_ctx=Depends(legacy_main.get_current_user),
     db=Depends(legacy_main.db_session),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
-    return await admin_service.list_visitor_chats(visitor_id=visitor_id, user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+    return await admin_service.list_visitor_chats(
+        visitor_id=visitor_id,
+        user_ctx=user_ctx,
+        db=db,
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/api/admin/tenants")
@@ -104,6 +126,16 @@ async def update_tenant_quota_settings(
     db=Depends(legacy_main.db_session),
 ):
     return await admin_service.update_tenant_quota_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.patch("/api/admin/tenants/{tenant_id}/idle-rating")
+async def update_tenant_idle_rating_settings(
+    tenant_id: str,
+    payload: legacy_main.TenantIdleRatingConfigRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.update_tenant_idle_rating_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
 
 @router.post("/api/admin/tenants/{tenant_id}/blocked-ips")

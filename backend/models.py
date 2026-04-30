@@ -63,6 +63,7 @@ class Tenant(Base):
     privacy_policy_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     cors_allowed_origins: Mapped[str | None] = mapped_column(Text, nullable=True)
+    idle_rating_wait_seconds: Mapped[int] = mapped_column(default=120, nullable=False)
     monthly_message_limit: Mapped[int] = mapped_column(default=15000, nullable=False)
     quota_reached_message: Mapped[str] = mapped_column(
         Text,
@@ -230,6 +231,21 @@ class TenantBlockWord(Base):
     id: Mapped[uuid.UUID] = _uuid_col()
     category_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenant_block_word_categories.id"), nullable=False)
     word: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class SessionExperienceRating(Base):
+    __tablename__ = "session_experience_ratings"
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_session_experience_rating_session"),
+        Index("ix_session_experience_ratings_tenant", "tenant_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chat_sessions.id"), nullable=False)
+    visitor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    rating: Mapped[int] = mapped_column(nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

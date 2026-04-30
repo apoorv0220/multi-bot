@@ -77,3 +77,25 @@ async def add_public_feedback(*, message_id, payload, db, x_widget_key, origin, 
 
 async def get_widget_config(*, db, x_widget_key, origin):
     return await legacy_main.get_public_widget_config(db=db, x_widget_key=x_widget_key, origin=origin)
+
+
+async def get_session_rating_status(*, session_id, db, x_widget_key, x_visitor_id, origin, request_obj=None):
+    return await legacy_main.get_public_session_rating_status(
+        session_id=session_id,
+        db=db,
+        x_widget_key=x_widget_key,
+        x_visitor_id=x_visitor_id,
+        origin=origin,
+        request_obj=request_obj,
+    )
+
+
+async def submit_session_rating(*, payload, db, x_widget_key, x_visitor_id, origin, request_obj=None):
+    return await legacy_main.submit_public_session_rating(
+        payload=payload,
+        db=db,
+        x_widget_key=x_widget_key,
+        x_visitor_id=x_visitor_id,
+        origin=origin,
+        request_obj=request_obj,
+    )

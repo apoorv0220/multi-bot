@@ -1,24 +1,31 @@
 import main as legacy_main
 
 
-async def list_chats(*, user_ctx, db, q=None, tenant_id=None):
-    return await legacy_main.admin_chats(user_ctx=user_ctx, db=db, q=q, tenant_id=tenant_id)
+async def list_chats(*, user_ctx, db, q=None, tenant_id=None, page=1, page_size=20):
+    return await legacy_main.admin_chats(user_ctx=user_ctx, db=db, q=q, tenant_id=tenant_id, page=page, page_size=page_size)
 
 
 async def chat_detail(*, session_id, user_ctx, db):
     return await legacy_main.admin_chat_detail(session_id=session_id, user_ctx=user_ctx, db=db)
 
 
-async def list_users(*, user_ctx, db, tenant_id=None):
-    return await legacy_main.admin_users(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+async def list_users(*, user_ctx, db, tenant_id=None, page=1, page_size=20):
+    return await legacy_main.admin_users(user_ctx=user_ctx, db=db, tenant_id=tenant_id, page=page, page_size=page_size)
 
 
-async def list_visitors(*, user_ctx, db, tenant_id=None):
-    return await legacy_main.admin_visitors(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+async def list_visitors(*, user_ctx, db, tenant_id=None, page=1, page_size=20):
+    return await legacy_main.admin_visitors(user_ctx=user_ctx, db=db, tenant_id=tenant_id, page=page, page_size=page_size)
 
 
-async def list_visitor_chats(*, visitor_id, user_ctx, db, tenant_id=None):
-    return await legacy_main.admin_visitor_chats(visitor_id=visitor_id, user_ctx=user_ctx, db=db, tenant_id=tenant_id)
+async def list_visitor_chats(*, visitor_id, user_ctx, db, tenant_id=None, page=1, page_size=20):
+    return await legacy_main.admin_visitor_chats(
+        visitor_id=visitor_id,
+        user_ctx=user_ctx,
+        db=db,
+        tenant_id=tenant_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 async def list_tenants(*, user_ctx, db):
@@ -43,6 +50,10 @@ async def get_tenant_security_settings(*, tenant_id, user_ctx, db):
 
 async def update_tenant_quota_settings(*, tenant_id, payload, user_ctx, db):
     return await legacy_main.update_tenant_quota_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def update_tenant_idle_rating_settings(*, tenant_id, payload, user_ctx, db):
+    return await legacy_main.update_tenant_idle_rating_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
 
 async def add_tenant_blocked_ip(*, tenant_id, payload, user_ctx, db):

@@ -90,6 +90,44 @@ async def add_public_feedback(
     )
 
 
+@router.get("/api/public/session-rating/{session_id}")
+async def get_public_session_rating_status(
+    session_id: str,
+    request_obj: Request,
+    db=Depends(legacy_main.db_session),
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
+    origin: Optional[str] = Header(default=None),
+):
+    return await public_service.get_session_rating_status(
+        session_id=session_id,
+        db=db,
+        x_widget_key=x_widget_key,
+        x_visitor_id=x_visitor_id,
+        origin=origin,
+        request_obj=request_obj,
+    )
+
+
+@router.post("/api/public/session-rating")
+async def submit_public_session_rating(
+    payload: legacy_main.PublicSessionRatingRequest,
+    request_obj: Request,
+    db=Depends(legacy_main.db_session),
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
+    origin: Optional[str] = Header(default=None),
+):
+    return await public_service.submit_session_rating(
+        payload=payload,
+        db=db,
+        x_widget_key=x_widget_key,
+        x_visitor_id=x_visitor_id,
+        origin=origin,
+        request_obj=request_obj,
+    )
+
+
 @router.get("/api/assets/{filename}")
 async def get_uploaded_asset(filename: str):
     return await legacy_main.get_uploaded_asset(filename=filename)

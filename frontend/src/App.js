@@ -25,7 +25,7 @@ function AppContent({ auth, onLogin, onLogout }) {
             {auth && (
               <Stack direction="row" spacing={2} alignItems="center">
                 <Link to="/admin/chat">Chat</Link>
-                <Link to="/admin/dashboard">Dashboard</Link>
+                <Link to="/admin/dashboard/overview">Dashboard</Link>
                 <Button onClick={onLogout} variant="outlined">Logout</Button>
               </Stack>
             )}
@@ -37,7 +37,8 @@ function AppContent({ auth, onLogin, onLogout }) {
           <Routes>
             <Route path="/" element={<Navigate to="/admin/chat" replace />} />
             <Route path="/admin/chat" element={auth ? <ChatWidget mode="admin" /> : <LoginPage onLogin={onLogin} />} />
-            <Route path="/admin/dashboard" element={auth ? <AdminDashboard role={auth.role} tenantId={auth.tenant_id} tenantIds={auth.tenant_ids || []} /> : <LoginPage onLogin={onLogin} />} />
+            <Route path="/admin/dashboard/*" element={auth ? <AdminDashboard role={auth.role} tenantId={auth.tenant_id} tenantIds={auth.tenant_ids || []} /> : <LoginPage onLogin={onLogin} />} />
+            <Route path="/admin/dashboard" element={<Navigate to="/admin/dashboard/overview" replace />} />
             <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
           </Routes>
         </Box>

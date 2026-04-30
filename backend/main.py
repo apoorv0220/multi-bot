@@ -44,6 +44,7 @@ from models import (
     MessageFeedback,
     ReindexJob,
     ReindexScope,
+    SessionExperienceRating,
     SenderType,
     Tenant,
     TenantBlockWord,
@@ -191,6 +192,15 @@ class BlockWordCategoryRequest(BaseModel):
 
 class BlockWordRequest(BaseModel):
     word: str
+
+
+class TenantIdleRatingConfigRequest(BaseModel):
+    idle_rating_wait_seconds: int
+
+
+class PublicSessionRatingRequest(BaseModel):
+    session_id: str
+    rating: int
 
 
 def db_session():
@@ -979,6 +989,7 @@ async def get_public_widget_config(
         "welcome_message": tenant.widget_welcome_message,
         "avatar_url": tenant.avatar_url,
         "privacy_policy_url": tenant.privacy_policy_url,
+        "idle_rating_wait_seconds": tenant.idle_rating_wait_seconds,
     }
 
 
@@ -1094,13 +1105,89 @@ async def add_public_feedback(
     return {"status": "ok"}
 
 
+@app.get("/api/public/session-rating/{session_id}")
+async def get_public_session_rating_status(
+    session_id: str,
+    db=Depends(db_session),
+    request_obj: Request = None,
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
+    origin: Optional[str] = Header(default=None),
+):
+    tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not _tenant_origin_allowed(tenant, origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
+    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    _normalize_visitor_id(x_visitor_id)
+    session = db.get(ChatSession, uuid.UUID(session_id))
+    if not session or str(session.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    existing = db.execute(
+        select(SessionExperienceRating).where(SessionExperienceRating.session_id == session.id)
+    ).scalar_one_or_none()
+    return {"session_id": session_id, "submitted": bool(existing), "rating": existing.rating if existing else None}
+
+
+@app.post("/api/public/session-rating")
+async def submit_public_session_rating(
+    payload: PublicSessionRatingRequest,
+    db=Depends(db_session),
+    request_obj: Request = None,
+    x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
+    x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
+    origin: Optional[str] = Header(default=None),
+):
+    tenant_id = _resolve_embed_tenant_id(x_widget_key)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not _tenant_origin_allowed(tenant, origin):
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
+    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    visitor_id = _normalize_visitor_id(x_visitor_id)
+    if payload.rating < 1 or payload.rating > 5:
+        raise HTTPException(status_code=400, detail="rating must be between 1 and 5")
+    session = db.get(ChatSession, uuid.UUID(payload.session_id))
+    if not session or str(session.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    existing = db.execute(
+        select(SessionExperienceRating).where(SessionExperienceRating.session_id == session.id)
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=409, detail="rating_already_submitted")
+    db.add(
+        SessionExperienceRating(
+            tenant_id=session.tenant_id,
+            session_id=session.id,
+            visitor_id=visitor_id,
+            rating=payload.rating,
+        )
+    )
+    db.add(
+        AuditLog(
+            actor_user_id=session.created_by_user_id,
+            actor_role="public",
+            tenant_id=session.tenant_id,
+            action="session_experience_rating_submitted",
+            target_type="chat_session",
+            target_id=str(session.id),
+            details_json={"rating": payload.rating},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "session_id": payload.session_id, "rating": payload.rating}
+
+
 @app.get("/api/admin/chats")
 async def admin_chats(
     user_ctx=Depends(get_current_user),
     db=Depends(db_session),
     q: Optional[str] = Query(default=None),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
     effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
     sessions = db.execute(
         select(ChatSession)
@@ -1124,7 +1211,11 @@ async def admin_chats(
             or q_l in (s.visitor_email or "").lower()
             or s.id in message_session_ids
         ]
-    session_ids = [s.id for s in sessions]
+    total = len(sessions)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    sessions_page = sessions[start_idx:end_idx]
+    session_ids = [s.id for s in sessions_page]
     feedback_by_session = {}
     if session_ids:
         message_rows = db.execute(
@@ -1145,7 +1236,7 @@ async def admin_chats(
                     feedback_by_session[sid]["up"] += 1
                 elif vote == FeedbackVote.down:
                     feedback_by_session[sid]["down"] += 1
-    return [
+    items = [
         {
             "id": str(s.id),
             "tenant_id": str(s.tenant_id),
@@ -1156,8 +1247,9 @@ async def admin_chats(
             "last_message_at": s.last_message_at.isoformat(),
             "feedback_summary": feedback_by_session.get(str(s.id), {"up": 0, "down": 0}),
         }
-        for s in sessions
+        for s in sessions_page
     ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/admin/users")
@@ -1165,7 +1257,11 @@ async def admin_users(
     user_ctx=Depends(get_current_user),
     db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
     effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
     tenant_uuid = uuid.UUID(effective_tenant_id)
     user_ids = db.execute(select(UserTenant.user_id).where(UserTenant.tenant_id == tenant_uuid)).scalars().all()
@@ -1178,7 +1274,11 @@ async def admin_users(
         ).scalars().all()
     else:
         users = []
-    return [
+    total = len(users)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    users_page = users[start_idx:end_idx]
+    items = [
         {
             "id": str(u.id),
             "email": u.email,
@@ -1186,8 +1286,9 @@ async def admin_users(
             "is_active": u.is_active,
             "created_at": u.created_at.isoformat(),
         }
-        for u in users
+        for u in users_page
     ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/admin/visitors")
@@ -1195,7 +1296,11 @@ async def admin_visitors(
     user_ctx=Depends(get_current_user),
     db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
     effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
     sessions = db.execute(
         select(ChatSession)
@@ -1234,7 +1339,11 @@ async def admin_visitors(
             row["last_seen_at"] = s.last_message_at.isoformat()
     visitors = list(visitors_by_id.values())
     visitors.sort(key=lambda item: item.get("last_seen_at") or "", reverse=True)
-    return visitors
+    total = len(visitors)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    items = visitors[start_idx:end_idx]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/admin/visitors/{visitor_id}/chats")
@@ -1243,7 +1352,11 @@ async def admin_visitor_chats(
     user_ctx=Depends(get_current_user),
     db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
 ):
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
     effective_tenant_id = resolve_effective_tenant_id_for_admin_views(db, user_ctx, tenant_id)
     sessions = db.execute(
         select(ChatSession)
@@ -1271,15 +1384,20 @@ async def admin_visitor_chats(
                     feedback_by_session[sid]["up"] += 1
                 elif vote == FeedbackVote.down:
                     feedback_by_session[sid]["down"] += 1
-    return [
+    total = len(sessions)
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    sessions_page = sessions[start_idx:end_idx]
+    items = [
         {
             "id": str(s.id),
             "title": s.title,
             "last_message_at": s.last_message_at.isoformat() if s.last_message_at else None,
             "feedback_summary": feedback_by_session.get(str(s.id), {"up": 0, "down": 0}),
         }
-        for s in sessions
+        for s in sessions_page
     ]
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
 @app.get("/api/admin/tenants")
@@ -1307,6 +1425,7 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "privacy_policy_url": t.privacy_policy_url,
             "avatar_url": t.avatar_url,
             "cors_allowed_origins": t.cors_allowed_origins,
+            "idle_rating_wait_seconds": t.idle_rating_wait_seconds,
         }
         for t in tenants
     ]
@@ -1450,9 +1569,39 @@ async def get_tenant_security_settings(tenant_id: str, user_ctx=Depends(get_curr
         "tenant_id": tenant_id,
         "monthly_message_limit": tenant.monthly_message_limit,
         "quota_reached_message": tenant.quota_reached_message,
+        "idle_rating_wait_seconds": tenant.idle_rating_wait_seconds,
         "blocked_ips": [{"id": str(item.id), "ip_address": item.ip_address, "reason": item.reason} for item in blocked_ips],
         "blocked_countries": [{"id": str(item.id), "country_code": item.country_code, "reason": item.reason} for item in blocked_countries],
     }
+
+
+@app.patch("/api/admin/tenants/{tenant_id}/idle-rating")
+async def update_tenant_idle_rating_settings(
+    tenant_id: str,
+    payload: TenantIdleRatingConfigRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if payload.idle_rating_wait_seconds < 5:
+        raise HTTPException(status_code=400, detail="idle_rating_wait_seconds must be >= 5")
+    tenant.idle_rating_wait_seconds = int(payload.idle_rating_wait_seconds)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_idle_rating_updated",
+            target_type="tenant",
+            target_id=str(tenant.id),
+            details_json={"idle_rating_wait_seconds": tenant.idle_rating_wait_seconds},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "tenant_id": tenant_id, "idle_rating_wait_seconds": tenant.idle_rating_wait_seconds}
 
 
 @app.get("/api/admin/tenants/{tenant_id}/block-word-categories")
@@ -2142,6 +2291,15 @@ async def admin_overview(
         key = usage_type.value if hasattr(usage_type, "value") else str(usage_type)
         token_totals[key] = int(total_tokens or 0)
 
+    rating_rows = db.execute(
+        select(
+            func.count(SessionExperienceRating.id),
+            func.coalesce(func.avg(SessionExperienceRating.rating), 0),
+        ).where(SessionExperienceRating.tenant_id == tenant_uuid)
+    ).one()
+    rating_count = int(rating_rows[0] or 0)
+    average_rating = float(rating_rows[1] or 0.0)
+
     return {
         "tenant_id": target_tenant_id,
         "total_chats": int(total_chats or 0),
@@ -2150,6 +2308,8 @@ async def admin_overview(
         "chat_token_usage": int(token_totals["chat_completion"]),
         "likes": int(likes or 0),
         "dislikes": int(dislikes or 0),
+        "rating_count": rating_count,
+        "average_rating": round(average_rating, 2),
     }
 
 
