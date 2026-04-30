@@ -820,6 +820,7 @@ async def _run_chat_for_tenant(
         sources = fuzzy_response.get("sources", [])
         confidence = fuzzy_response.get("confidence", 1.0)
         source_type = "fuzzy"
+        completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "fuzzy-match"}
     else:
         if qdrant_client is None:
             raise HTTPException(status_code=503, detail="Qdrant unavailable")
@@ -2501,21 +2502,30 @@ async def tenant_cors_enforcement_middleware(request: Request, call_next):
     origin = request.headers.get("origin")
     if not origin or not request.url.path.startswith("/api/"):
         return await call_next(request)
+    is_public_api = request.url.path.startswith("/api/public/")
 
     tenant_obj: Optional[Tenant] = None
     x_widget_key = request.headers.get("x-widget-key")
     if x_widget_key:
-        tenant_id = _resolve_embed_tenant_id(x_widget_key)
-        with SessionLocal() as db:
-            tenant_obj = db.get(Tenant, uuid.UUID(tenant_id))
+        try:
+            tenant_id = _resolve_embed_tenant_id(x_widget_key)
+            with SessionLocal() as db:
+                tenant_obj = db.get(Tenant, uuid.UUID(tenant_id))
+        except Exception:
+            # Do not fail middleware-level CORS on invalid widget key;
+            # let the route return a proper auth error with CORS headers.
+            tenant_obj = None
 
     if tenant_obj is None:
         tenant_id = request.query_params.get("tenant_id")
         if tenant_id:
-            with SessionLocal() as db:
-                tenant_obj = db.get(Tenant, uuid.UUID(tenant_id))
+            try:
+                with SessionLocal() as db:
+                    tenant_obj = db.get(Tenant, uuid.UUID(tenant_id))
+            except Exception:
+                tenant_obj = None
 
-    if tenant_obj is None:
+    if tenant_obj is None and not is_public_api:
         authz = request.headers.get("authorization", "")
         if authz.lower().startswith("bearer "):
             token = authz.split(" ", 1)[1]
