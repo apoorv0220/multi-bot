@@ -66,6 +66,48 @@ async def remove_tenant_blocked_country(*, tenant_id, blocked_country_id, user_c
     )
 
 
+async def list_block_word_categories(*, tenant_id, user_ctx, db):
+    return await legacy_main.list_tenant_block_word_categories(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+async def create_block_word_category(*, tenant_id, payload, user_ctx, db):
+    return await legacy_main.create_tenant_block_word_category(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def update_block_word_category(*, tenant_id, category_id, payload, user_ctx, db):
+    return await legacy_main.update_tenant_block_word_category(
+        tenant_id=tenant_id,
+        category_id=category_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
+async def delete_block_word_category(*, tenant_id, category_id, user_ctx, db):
+    return await legacy_main.delete_tenant_block_word_category(tenant_id=tenant_id, category_id=category_id, user_ctx=user_ctx, db=db)
+
+
+async def add_block_word(*, tenant_id, category_id, payload, user_ctx, db):
+    return await legacy_main.add_tenant_block_word(
+        tenant_id=tenant_id,
+        category_id=category_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
+async def delete_block_word(*, tenant_id, category_id, word_id, user_ctx, db):
+    return await legacy_main.delete_tenant_block_word(
+        tenant_id=tenant_id,
+        category_id=category_id,
+        word_id=word_id,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
 async def create_admin_user(*, payload, user_ctx, db):
     return await legacy_main.create_admin_user(payload=payload, user_ctx=user_ctx, db=db)
 

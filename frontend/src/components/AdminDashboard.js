@@ -71,6 +71,11 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [resetOpen, setResetOpen] = useState(false);
   const [resetUserId, setResetUserId] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [blockWordCategories, setBlockWordCategories] = useState([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryMode, setNewCategoryMode] = useState("exact");
+  const [newCategoryResponse, setNewCategoryResponse] = useState("");
+  const [newWordByCategory, setNewWordByCategory] = useState({});
   const [success, setSuccess] = useState("");
   const canSelectTenant = role === "superadmin" || tenantIds.length > 1 || tenants.length > 1;
   const effectiveTenantId = sourceTenantId || tenantId || undefined;
@@ -129,6 +134,16 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   }, [effectiveTenantId]);
 
+  const loadBlockWordSettings = useCallback(async () => {
+    if (!effectiveTenantId) return;
+    try {
+      const { data } = await client.get(`/api/admin/tenants/${effectiveTenantId}/block-word-categories`);
+      setBlockWordCategories(data || []);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading block-word settings");
+    }
+  }, [effectiveTenantId]);
+
   useEffect(() => {
     load("");
   }, [load]);
@@ -164,6 +179,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   useEffect(() => {
     loadSecuritySettings();
   }, [loadSecuritySettings]);
+
+  useEffect(() => {
+    loadBlockWordSettings();
+  }, [loadBlockWordSettings]);
 
   const loadSession = async (id) => {
     setSelected(id);
@@ -338,6 +357,52 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   };
 
+  const createBlockWordCategory = async () => {
+    try {
+      await client.post(`/api/admin/tenants/${effectiveTenantId}/block-word-categories`, {
+        name: newCategoryName,
+        match_mode: newCategoryMode,
+        response_message: newCategoryResponse,
+      });
+      setNewCategoryName("");
+      setNewCategoryMode("exact");
+      setNewCategoryResponse("");
+      await loadBlockWordSettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to create category");
+    }
+  };
+
+  const deleteBlockWordCategory = async (categoryId) => {
+    try {
+      await client.delete(`/api/admin/tenants/${effectiveTenantId}/block-word-categories/${categoryId}`);
+      await loadBlockWordSettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to delete category");
+    }
+  };
+
+  const addWordToCategory = async (categoryId) => {
+    const word = (newWordByCategory[categoryId] || "").trim();
+    if (!word) return;
+    try {
+      await client.post(`/api/admin/tenants/${effectiveTenantId}/block-word-categories/${categoryId}/words`, { word });
+      setNewWordByCategory((prev) => ({ ...prev, [categoryId]: "" }));
+      await loadBlockWordSettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to add word");
+    }
+  };
+
+  const deleteWordFromCategory = async (categoryId, wordId) => {
+    try {
+      await client.delete(`/api/admin/tenants/${effectiveTenantId}/block-word-categories/${categoryId}/words/${wordId}`);
+      await loadBlockWordSettings();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to delete word");
+    }
+  };
+
   const exportTranscript = () => {
     if (!selected || !messages.length) return;
     const lines = messages.map((m) => `[${m.created_at}] ${m.sender_type.toUpperCase()}: ${m.content}`);
@@ -405,6 +470,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         <Tab label="Users" />
         <Tab label="Security" />
         <Tab label="Branding" />
+        <Tab label="Moderation" />
         <Tab label="Tenant Sources" />
       </Tabs>
 
@@ -715,6 +781,73 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       )}
 
       {tab === 7 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" mb={1}>Block-word Categories</Typography>
+            <Stack spacing={2}>
+              <Stack direction="row" spacing={1}>
+                <TextField
+                  label="Category name"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                />
+                <FormControl sx={{ minWidth: 160 }}>
+                  <InputLabel>Match Mode</InputLabel>
+                  <Select label="Match Mode" value={newCategoryMode} onChange={(e) => setNewCategoryMode(e.target.value)}>
+                    <MenuItem value="exact">Exact</MenuItem>
+                    <MenuItem value="substring">Substring</MenuItem>
+                    <MenuItem value="regex">Regex</MenuItem>
+                  </Select>
+                </FormControl>
+              </Stack>
+              <TextField
+                label="Category response message"
+                value={newCategoryResponse}
+                onChange={(e) => setNewCategoryResponse(e.target.value)}
+                fullWidth
+              />
+              <Button variant="contained" onClick={createBlockWordCategory} disabled={!newCategoryName.trim() || !newCategoryResponse.trim()}>
+                Add Category
+              </Button>
+              <Stack spacing={1.5}>
+                {blockWordCategories.map((category) => (
+                  <Card key={category.id} variant="outlined">
+                    <CardContent>
+                      <Stack direction="row" spacing={1} alignItems="center" mb={1}>
+                        <Chip label={category.name} />
+                        <Chip variant="outlined" label={category.match_mode} />
+                        <Button size="small" color="error" onClick={() => deleteBlockWordCategory(category.id)}>Delete Category</Button>
+                      </Stack>
+                      <Typography variant="body2" color="text.secondary" mb={1}>{category.response_message}</Typography>
+                      <Stack direction="row" spacing={1} mb={1}>
+                        <TextField
+                          size="small"
+                          label="Add trigger word"
+                          value={newWordByCategory[category.id] || ""}
+                          onChange={(e) => setNewWordByCategory((prev) => ({ ...prev, [category.id]: e.target.value }))}
+                        />
+                        <Button size="small" variant="outlined" onClick={() => addWordToCategory(category.id)}>Add Word</Button>
+                      </Stack>
+                      <Stack direction="row" spacing={1} flexWrap="wrap">
+                        {(category.words || []).map((w) => (
+                          <Chip
+                            key={w.id}
+                            label={w.word}
+                            onDelete={() => deleteWordFromCategory(category.id, w.id)}
+                            sx={{ mb: 1 }}
+                          />
+                        ))}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {tab === 8 && (
         <Card>
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Source Database Settings</Typography>

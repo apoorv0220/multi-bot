@@ -41,6 +41,12 @@ class UsageType(str, enum.Enum):
     index_embedding = "index_embedding"
 
 
+class BlockWordMatchMode(str, enum.Enum):
+    exact = "exact"
+    substring = "substring"
+    regex = "regex"
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
     id: Mapped[uuid.UUID] = _uuid_col()
@@ -103,6 +109,7 @@ class ChatSession(Base):
     visitor_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     visitor_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     visitor_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    block_triggered: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     last_message_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -194,6 +201,35 @@ class TenantBlockedCountry(Base):
     tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
     country_code: Mapped[str] = mapped_column(String(2), nullable=False)
     reason: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class TenantBlockWordCategory(Base):
+    __tablename__ = "tenant_block_word_categories"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_tenant_block_word_category_name"),
+        Index("ix_tenant_block_word_categories_tenant", "tenant_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    match_mode: Mapped[str] = mapped_column(String(20), nullable=False, default=BlockWordMatchMode.exact.value)
+    response_message: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class TenantBlockWord(Base):
+    __tablename__ = "tenant_block_words"
+    __table_args__ = (
+        UniqueConstraint("category_id", "word", name="uq_tenant_block_word"),
+        Index("ix_tenant_block_words_category", "category_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    category_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenant_block_word_categories.id"), nullable=False)
+    word: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 

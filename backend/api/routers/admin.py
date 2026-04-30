@@ -156,6 +156,86 @@ async def remove_tenant_blocked_country(
     )
 
 
+@router.get("/api/admin/tenants/{tenant_id}/block-word-categories")
+async def list_block_word_categories(
+    tenant_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.list_block_word_categories(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+@router.post("/api/admin/tenants/{tenant_id}/block-word-categories")
+async def create_block_word_category(
+    tenant_id: str,
+    payload: legacy_main.BlockWordCategoryRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.create_block_word_category(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.patch("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}")
+async def update_block_word_category(
+    tenant_id: str,
+    category_id: str,
+    payload: legacy_main.BlockWordCategoryRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.update_block_word_category(
+        tenant_id=tenant_id,
+        category_id=category_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
+@router.delete("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}")
+async def delete_block_word_category(
+    tenant_id: str,
+    category_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.delete_block_word_category(tenant_id=tenant_id, category_id=category_id, user_ctx=user_ctx, db=db)
+
+
+@router.post("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}/words")
+async def add_block_word(
+    tenant_id: str,
+    category_id: str,
+    payload: legacy_main.BlockWordRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.add_block_word(
+        tenant_id=tenant_id,
+        category_id=category_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
+@router.delete("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}/words/{word_id}")
+async def delete_block_word(
+    tenant_id: str,
+    category_id: str,
+    word_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.delete_block_word(
+        tenant_id=tenant_id,
+        category_id=category_id,
+        word_id=word_id,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
 @router.post("/api/admin/users")
 async def create_admin_user(payload: legacy_main.AdminCreateRequest, user_ctx=Depends(legacy_main.get_current_user), db=Depends(legacy_main.db_session)):
     return await admin_service.create_admin_user(payload=payload, user_ctx=user_ctx, db=db)

@@ -36,6 +36,7 @@ from integrations.openai_client import OpenAIClientAdapter
 from integrations.vector_store import VectorStoreAdapter
 from models import (
     AuditLog,
+    BlockWordMatchMode,
     ChatMessage,
     ChatSession,
     ChatVisitor,
@@ -45,6 +46,8 @@ from models import (
     ReindexScope,
     SenderType,
     Tenant,
+    TenantBlockWord,
+    TenantBlockWordCategory,
     TenantBlockedCountry,
     TenantBlockedIP,
     UsageEvent,
@@ -178,6 +181,16 @@ class TenantBrandingConfigRequest(BaseModel):
     privacy_policy_url: Optional[str] = None
     avatar_url: Optional[str] = None
     cors_allowed_origins: Optional[str] = None
+
+
+class BlockWordCategoryRequest(BaseModel):
+    name: str
+    match_mode: str
+    response_message: str
+
+
+class BlockWordRequest(BaseModel):
+    word: str
 
 
 def db_session():
@@ -657,6 +670,46 @@ def _ensure_manage_tenant(db, user_ctx: dict, tenant_id: str, allow_admin: bool 
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
+def _find_block_word_match(db, tenant_id: str, message: str) -> Optional[dict]:
+    categories = db.execute(
+        select(TenantBlockWordCategory).where(TenantBlockWordCategory.tenant_id == uuid.UUID(tenant_id))
+    ).scalars().all()
+    if not categories:
+        return None
+    normalized_message = (message or "").strip()
+    lowered_message = normalized_message.lower()
+    for category in categories:
+        words = db.execute(
+            select(TenantBlockWord).where(TenantBlockWord.category_id == category.id).order_by(TenantBlockWord.created_at.asc())
+        ).scalars().all()
+        if not words:
+            continue
+        for item in words:
+            candidate = (item.word or "").strip()
+            if not candidate:
+                continue
+            mode = str(category.match_mode)
+            is_match = False
+            if mode == BlockWordMatchMode.exact.value:
+                is_match = lowered_message == candidate.lower()
+            elif mode == BlockWordMatchMode.substring.value:
+                is_match = candidate.lower() in lowered_message
+            elif mode == BlockWordMatchMode.regex.value:
+                try:
+                    is_match = re.search(candidate, normalized_message, flags=re.IGNORECASE) is not None
+                except re.error:
+                    is_match = False
+            if is_match:
+                return {
+                    "category_id": str(category.id),
+                    "category_name": category.name,
+                    "match_mode": mode,
+                    "matched_word": candidate,
+                    "response_message": category.response_message,
+                }
+    return None
+
+
 async def _run_chat_for_tenant(
     request: ChatRequest,
     tenant_id: str,
@@ -692,6 +745,46 @@ async def _run_chat_for_tenant(
             model_name="",
         )
     )
+
+    if is_public_chat:
+        block_match = _find_block_word_match(db, tenant_id, request.message)
+        if block_match:
+            session.block_triggered = True
+            session.last_message_at = datetime.utcnow()
+            blocked_response = ChatMessage(
+                session_id=session.id,
+                tenant_id=session.tenant_id,
+                sender_type=SenderType.assistant,
+                content=block_match["response_message"],
+                model_name="block-word-policy",
+                token_usage_json={"policy_blocked": True},
+            )
+            db.add(blocked_response)
+            db.add(
+                AuditLog(
+                    actor_user_id=actor_user_id,
+                    actor_role="public",
+                    tenant_id=session.tenant_id,
+                    action="tenant_block_word_triggered",
+                    target_type="tenant_block_word_category",
+                    target_id=block_match["category_id"],
+                    details_json={
+                        "category_name": block_match["category_name"],
+                        "match_mode": block_match["match_mode"],
+                        "matched_word": block_match["matched_word"],
+                        "session_id": str(session.id),
+                    },
+                )
+            )
+            db.commit()
+            return {
+                "response": block_match["response_message"],
+                "session_id": str(session.id),
+                "message_id": str(blocked_response.id),
+                "source": "block_word",
+                "confidence": 1.0,
+                "sources": [],
+            }
 
     fuzzy_response = fuzzy_matcher.get_response(request.message)
     if fuzzy_response:
@@ -1059,6 +1152,7 @@ async def admin_chats(
             "title": s.title,
             "visitor_name": s.visitor_name,
             "visitor_email": s.visitor_email,
+            "block_triggered": bool(s.block_triggered),
             "last_message_at": s.last_message_at.isoformat(),
             "feedback_summary": feedback_by_session.get(str(s.id), {"up": 0, "down": 0}),
         }
@@ -1359,6 +1453,230 @@ async def get_tenant_security_settings(tenant_id: str, user_ctx=Depends(get_curr
         "blocked_ips": [{"id": str(item.id), "ip_address": item.ip_address, "reason": item.reason} for item in blocked_ips],
         "blocked_countries": [{"id": str(item.id), "country_code": item.country_code, "reason": item.reason} for item in blocked_countries],
     }
+
+
+@app.get("/api/admin/tenants/{tenant_id}/block-word-categories")
+async def list_tenant_block_word_categories(
+    tenant_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    categories = db.execute(
+        select(TenantBlockWordCategory)
+        .where(TenantBlockWordCategory.tenant_id == tenant.id)
+        .order_by(TenantBlockWordCategory.created_at.desc())
+    ).scalars().all()
+    response = []
+    for category in categories:
+        words = db.execute(
+            select(TenantBlockWord).where(TenantBlockWord.category_id == category.id).order_by(TenantBlockWord.created_at.asc())
+        ).scalars().all()
+        response.append(
+            {
+                "id": str(category.id),
+                "name": category.name,
+                "match_mode": str(category.match_mode),
+                "response_message": category.response_message,
+                "words": [{"id": str(w.id), "word": w.word} for w in words],
+            }
+        )
+    return response
+
+
+@app.post("/api/admin/tenants/{tenant_id}/block-word-categories")
+async def create_tenant_block_word_category(
+    tenant_id: str,
+    payload: BlockWordCategoryRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    name = payload.name.strip()
+    response_message = payload.response_message.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Category name is required")
+    if not response_message:
+        raise HTTPException(status_code=400, detail="response_message is required")
+    mode_raw = (payload.match_mode or "").strip().lower()
+    allowed_modes = {m.value for m in BlockWordMatchMode}
+    if mode_raw not in allowed_modes:
+        raise HTTPException(status_code=400, detail="match_mode must be exact, substring, or regex")
+    existing = db.execute(
+        select(TenantBlockWordCategory).where(
+            TenantBlockWordCategory.tenant_id == tenant.id,
+            TenantBlockWordCategory.name == name,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="Category already exists")
+    category = TenantBlockWordCategory(
+        tenant_id=tenant.id,
+        name=name,
+        match_mode=mode_raw,
+        response_message=response_message,
+    )
+    db.add(category)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_block_word_category_added",
+            target_type="tenant_block_word_category",
+            target_id=name,
+            details_json={"match_mode": mode_raw},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": str(category.id), "name": category.name}
+
+
+@app.patch("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}")
+async def update_tenant_block_word_category(
+    tenant_id: str,
+    category_id: str,
+    payload: BlockWordCategoryRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    category = db.get(TenantBlockWordCategory, uuid.UUID(category_id))
+    if not category or str(category.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Category not found")
+    name = payload.name.strip()
+    response_message = payload.response_message.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Category name is required")
+    if not response_message:
+        raise HTTPException(status_code=400, detail="response_message is required")
+    mode_raw = (payload.match_mode or "").strip().lower()
+    allowed_modes = {m.value for m in BlockWordMatchMode}
+    if mode_raw not in allowed_modes:
+        raise HTTPException(status_code=400, detail="match_mode must be exact, substring, or regex")
+    category.name = name
+    category.match_mode = mode_raw
+    category.response_message = response_message
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=category.tenant_id,
+            action="tenant_block_word_category_updated",
+            target_type="tenant_block_word_category",
+            target_id=str(category.id),
+            details_json={"name": category.name, "match_mode": mode_raw},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": str(category.id)}
+
+
+@app.delete("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}")
+async def delete_tenant_block_word_category(
+    tenant_id: str,
+    category_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    category = db.get(TenantBlockWordCategory, uuid.UUID(category_id))
+    if not category or str(category.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Category not found")
+    words = db.execute(select(TenantBlockWord).where(TenantBlockWord.category_id == category.id)).scalars().all()
+    for word in words:
+        db.delete(word)
+    db.delete(category)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=uuid.UUID(tenant_id),
+            action="tenant_block_word_category_removed",
+            target_type="tenant_block_word_category",
+            target_id=category_id,
+            details_json={},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": category_id}
+
+
+@app.post("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}/words")
+async def add_tenant_block_word(
+    tenant_id: str,
+    category_id: str,
+    payload: BlockWordRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    category = db.get(TenantBlockWordCategory, uuid.UUID(category_id))
+    if not category or str(category.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Category not found")
+    word_value = (payload.word or "").strip()
+    if not word_value:
+        raise HTTPException(status_code=400, detail="word is required")
+    existing = db.execute(
+        select(TenantBlockWord).where(
+            TenantBlockWord.category_id == category.id,
+            TenantBlockWord.word == word_value,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        return {"status": "ok", "id": str(existing.id), "word": existing.word}
+    block_word = TenantBlockWord(category_id=category.id, word=word_value)
+    db.add(block_word)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=uuid.UUID(tenant_id),
+            action="tenant_block_word_added",
+            target_type="tenant_block_word",
+            target_id=word_value,
+            details_json={"category_id": category_id},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": str(block_word.id), "word": block_word.word}
+
+
+@app.delete("/api/admin/tenants/{tenant_id}/block-word-categories/{category_id}/words/{word_id}")
+async def delete_tenant_block_word(
+    tenant_id: str,
+    category_id: str,
+    word_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    category = db.get(TenantBlockWordCategory, uuid.UUID(category_id))
+    if not category or str(category.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Category not found")
+    block_word = db.get(TenantBlockWord, uuid.UUID(word_id))
+    if not block_word or str(block_word.category_id) != category_id:
+        raise HTTPException(status_code=404, detail="Word not found")
+    db.delete(block_word)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=uuid.UUID(tenant_id),
+            action="tenant_block_word_removed",
+            target_type="tenant_block_word",
+            target_id=word_id,
+            details_json={"category_id": category_id},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": word_id}
 
 
 @app.patch("/api/admin/tenants/{tenant_id}/quota")
