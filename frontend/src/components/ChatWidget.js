@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
@@ -21,20 +21,52 @@ const createBotMessage = (text) => ({
   timestamp: new Date(),
 });
 
-/** Relative /api/assets/... or legacy absolute URLs (e.g. localhost) → current api base */
+/** Reject root-only "/" so we never join assets against an empty base (browser would use the embed origin). */
+const normalizeWidgetApiUrl = (value) => {
+  const s = String(value ?? "").trim();
+  if (!s || s === "/") return "";
+  return s.replace(/\/+$/, "");
+};
+
+/** Relative /api/assets/... or legacy absolute URLs (e.g. localhost) → absolute API asset URL */
 const resolvePublicAssetUrl = (raw, apiBase) => {
   if (!raw) return "";
-  const base = String(apiBase || "").replace(/\/$/, "");
-  if (!base) return raw;
-  if (raw.startsWith("/")) return `${base}${raw}`;
+  const trimmed = normalizeWidgetApiUrl(apiBase);
+  if (!trimmed) return "";
+
+  const joinPathToBase = (pathOnly, base) => {
+    try {
+      const withSlash = base.endsWith("/") ? base : `${base}/`;
+      return new URL(pathOnly, withSlash).href;
+    } catch {
+      return `${String(base).replace(/\/+$/, "")}${pathOnly}`;
+    }
+  };
+
+  if (raw.startsWith("/")) {
+    if (/^https?:\/\//i.test(trimmed)) {
+      return joinPathToBase(raw, trimmed);
+    }
+    if (trimmed.startsWith("/") && typeof window !== "undefined" && window.location?.origin) {
+      return joinPathToBase(raw, `${window.location.origin}${trimmed}`);
+    }
+    return joinPathToBase(raw, trimmed);
+  }
+
   try {
     const u = new URL(raw);
     const path = u.pathname + u.search;
-    if (path.includes("/api/assets/")) return `${base}${path}`;
+    if (!path.includes("/api/assets/")) return raw;
+    if (/^https?:\/\//i.test(trimmed)) {
+      return joinPathToBase(path, trimmed);
+    }
+    if (trimmed.startsWith("/") && typeof window !== "undefined" && window.location?.origin) {
+      return joinPathToBase(path, `${window.location.origin}${trimmed}`);
+    }
+    return joinPathToBase(path, trimmed);
   } catch {
-    /* ignore */
+    return raw;
   }
-  return raw;
 };
 
 const ChatWidget = ({ mode = "admin" }) => {
@@ -42,11 +74,12 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [headerTitle, setHeaderTitle] = useState(FALLBACK_HEADER_TITLE);
   const [brandName, setBrandName] = useState("Nethues");
   const [primaryColor, setPrimaryColor] = useState("#bf362e");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  /** Path or URL from GET /api/public/config; joined to apiUrl for <img src> */
+  const [publicAvatarRaw, setPublicAvatarRaw] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || "");
+  const [apiUrl, setApiUrl] = useState(() => normalizeWidgetApiUrl(process.env.REACT_APP_API_URL || ""));
   const [widgetKey, setWidgetKey] = useState(null);
   const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
   const [sessionId, setSessionId] = useState(localStorage.getItem("chat_session_id") || null);
@@ -67,6 +100,11 @@ const ChatWidget = ({ mode = "admin" }) => {
   const inputRef = useRef(null);
   const idleTimerRef = useRef(null);
 
+  const avatarDisplayUrl = useMemo(
+    () => resolvePublicAssetUrl(publicAvatarRaw, apiUrl),
+    [publicAvatarRaw, apiUrl],
+  );
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -83,7 +121,7 @@ const ChatWidget = ({ mode = "admin" }) => {
       const data = event?.data;
       if (!data || typeof data !== "object") return;
       if (data.action !== "open-chat") return;
-      if (data.apiUrl) setApiUrl(data.apiUrl);
+      if (data.apiUrl) setApiUrl(normalizeWidgetApiUrl(data.apiUrl));
       if (data.tenantPublicKey) setWidgetKey(data.tenantPublicKey);
       if (data.chatbotInitialText) {
         setMessages((prev) => (prev.length === 1 ? [createBotMessage(data.chatbotInitialText)] : prev));
@@ -152,7 +190,7 @@ const ChatWidget = ({ mode = "admin" }) => {
         }
         setBrandName(data?.brand_name || "Nethues");
         setPrimaryColor(data?.primary_color || "#bf362e");
-        setAvatarUrl(resolvePublicAssetUrl(data?.avatar_url || "", apiUrl));
+        setPublicAvatarRaw(data?.avatar_url || "");
         setPrivacyPolicyUrl(data?.privacy_policy_url || "");
         setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
       } catch (err) {
@@ -349,7 +387,7 @@ const ChatWidget = ({ mode = "admin" }) => {
     <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
       <WidgetHeader className="mrnwebdesigns-chatbot-widget-header" $primaryColor={primaryColor}>
         <HeaderRow>
-          {avatarUrl ? <HeaderAvatar src={avatarUrl} alt="brand avatar" /> : null}
+          {avatarDisplayUrl ? <HeaderAvatar src={avatarDisplayUrl} alt="brand avatar" /> : null}
           <WidgetTitle>{headerTitle}</WidgetTitle>
         </HeaderRow>
       </WidgetHeader>
