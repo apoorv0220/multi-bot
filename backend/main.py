@@ -30,7 +30,7 @@ from core.policies import (
     resolve_effective_tenant_id_for_admin_views,
 )
 from db import SessionLocal
-from embedder import Embedder
+from embedder import Embedder, LEGACY_VECTOR_PRIMARY_SOURCE_LABEL, LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
 from fuzzy_matcher import FuzzyMatcher
 from integrations.openai_client import OpenAIClientAdapter
 from integrations.vector_store import VectorStoreAdapter
@@ -577,7 +577,7 @@ async def search_qdrant(
     try:
         vector_store = VectorStoreAdapter(qdrant_client)
         # Primary bucket: tenant-configured Qdrant payload `source_type` (default legacy keyword)
-        mrnwebdesigns_results = vector_store.search(
+        primary_bucket_results = vector_store.search(
             collection_name=collection_name,
             query_vector=embedding,
             limit=limit,
@@ -585,24 +585,23 @@ async def search_qdrant(
             source_type=primary_st,
         )
 
-        logger.info("Found %s primary-source (%s) results", len(mrnwebdesigns_results), primary_st)
-        
-        # If we don't have enough results from MRN Web Designs, search external sources
-        if len(mrnwebdesigns_results) < limit or max([r.score for r in mrnwebdesigns_results] + [0]) < 0.7:
+        logger.info("Found %s primary-source (%s) results", len(primary_bucket_results), primary_st)
+
+        # If we don't have enough high-confidence primary-bucket hits, blend external sources
+        if len(primary_bucket_results) < limit or max([r.score for r in primary_bucket_results] + [0]) < 0.7:
             external_results = vector_store.search(
                 collection_name=collection_name,
                 query_vector=embedding,
                 source_type="external",
                 limit=limit,
             )
-            
-            # Combine and sort results
-            all_results = mrnwebdesigns_results + external_results
+
+            all_results = primary_bucket_results + external_results
             all_results.sort(key=lambda x: x.score, reverse=True)
             logger.info(f"Added {len(external_results)} external results, total: {len(all_results)}")
             return all_results[:limit]
-        
-        return mrnwebdesigns_results
+
+        return primary_bucket_results
     except Exception as e:
         logger.error(f"Error searching Qdrant: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to search knowledge base: {e}")
@@ -618,93 +617,140 @@ def truncate_text_for_context(text, max_chars=3000):
     end_portion = max_chars - begin_portion
     return text[:begin_portion] + "\n...[content truncated]...\n" + text[-end_portion:]
 
-async def preprocess_query(original_query: str) -> str:
+def _tenant_chat_brand_label(tenant_row: Optional[Tenant]) -> str:
+    if not tenant_row:
+        return "MRN Web Designs"
+    name = (tenant_row.brand_name or tenant_row.name or "").strip()
+    return name or "this organisation"
+
+
+def _build_chat_system_prompt(tenant_row: Optional[Tenant]) -> str:
+    """Tenant-aware system prompt for final answer generation (replaces single-tenant MRN-only copy)."""
+    brand = _tenant_chat_brand_label(tenant_row)
+    site = (tenant_row.widget_website_url or "").strip() if tenant_row else ""
+    site_clause = (
+        f" Official website (for grounding references only): {site}."
+        if site
+        else ""
+    )
+    return (
+        f"You are a helpful assistant for {brand}. Use only the provided context snippets to answer; "
+        f"if the context does not contain the answer, say so briefly and suggest checking the website or contacting the team."
+        f"{site_clause} "
+        "Keep responses concise and under 250 characters when a short reply suffices."
+    )
+
+
+def _tenant_uses_legacy_fuzzy_matcher(tenant_row: Optional[Tenant]) -> bool:
+    """MRN-style canned fuzzy replies only when the tenant still uses the legacy primary vector tag (or unset)."""
+    if not tenant_row:
+        return True
+    configured = (tenant_row.widget_source_type or "").strip()
+    return not configured or configured == LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+
+
+async def preprocess_query(
+    original_query: str,
+    *,
+    tenant_brand_name: str = "MRN Web Designs",
+    tenant_website_url: Optional[str] = None,
+) -> str:
     """
     Use OpenAI to normalize and enhance queries for better search results.
-    Converts questions like "your office address" to "MRN Web Designs office address".
+    Replaces pronouns with the tenant brand label (defaults to legacy MRN when unset).
     """
-    try:
-        response = openai_adapter.create_chat_completion(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": """You are a query preprocessor for MRN Web Designs chatbot. Your job is to normalize and enhance user queries to make them more searchable in a knowledge base.
-
+    site_hint = ""
+    if tenant_website_url:
+        site_hint = f"\nThe organisation's public website is {tenant_website_url} (use only when relevant to the query).\n"
+    system_rules = f"""You are a query preprocessor for a chatbot about {tenant_brand_name}. Your job is to normalize and enhance user queries to make them more searchable in a knowledge base.
+{site_hint}
 Rules:
-1. Replace pronouns like "your", "you", "yours" with "MRN Web Designs"
+1. Replace pronouns like "your", "you", "yours" with "{tenant_brand_name}"
 2. Add relevant keywords that would help find information
 3. Expand abbreviations and make queries more specific
 4. Keep the original intent and meaning
 5. Output only the enhanced query, nothing else
 
-Examples:
-- "your office address" → "MRN Web Designs office address location contact information"
-- "what services do you offer" → "MRN Web Designs services web design development SEO digital marketing"
-- "your pricing" → "MRN Web Designs pricing cost website development packages"
-- "do you work with small businesses" → "MRN Web Designs small business services web design"
-- "your experience" → "MRN Web Designs experience portfolio company background"
-- "how can you help me" → "MRN Web Designs services help assistance web design digital marketing"
-- "your phone number" → "MRN Web Designs phone number contact telephone call"
-- "what is your contact number" → "MRN Web Designs contact phone number telephone"
-- "how to reach you" → "MRN Web Designs contact phone address reach"
+Examples (replace entity name consistently with {tenant_brand_name}):
+- "your office address" → "{tenant_brand_name} office address location contact information"
+- "what services do you offer" → "{tenant_brand_name} services offerings capabilities"
+- "your pricing" → "{tenant_brand_name} pricing cost packages"
+- "your phone number" → "{tenant_brand_name} phone number contact telephone"
 """
-                },
-                {
-                    "role": "user", 
-                    "content": f"Original query: {original_query}"
-                }
+    try:
+        response = openai_adapter.create_chat_completion(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_rules},
+                {"role": "user", "content": f"Original query: {original_query}"},
             ],
             max_tokens=100,
-            temperature=0.1  # Low temperature for consistent results
+            temperature=0.1,
         )
-        
+
         enhanced_query = response.choices[0].message.content.strip()
         logger.info(f"Query enhanced: '{original_query}' → '{enhanced_query}'")
         return enhanced_query
-        
+
     except Exception as e:
         logger.warning(f"Query preprocessing failed: {e}. Using original query.")
         return original_query
 
-async def generate_answer(query: str, context_texts: List[str]) -> tuple[str, Dict[str, Any]]:
+_DEFAULT_GENERATE_ANSWER_SYSTEM_PROMPT = (
+    "You are a helpful assistant specialized in web design and digital marketing. Your role is to format information "
+    "found in the context to provide accurate, helpful, and professional information about website design, development, "
+    "maintenance, SEO, paid search, and social media marketing. Present this information as if it's directly from "
+    "MRN Web Designs, a custom web design and digital marketing agency. Focus on helping businesses stand out from the "
+    "competition by creating digital experiences that boost visibility and drive engagement. Always emphasize custom "
+    "solutions over templates or cookie-cutter approaches. IMPORTANT: Keep your responses concise and under 250 "
+    "characters to ensure clarity and readability."
+)
+
+
+async def generate_answer(
+    query: str,
+    context_texts: List[str],
+    *,
+    system_prompt: Optional[str] = None,
+) -> tuple[str, Dict[str, Any]]:
     try:
         # Set a maximum total context length (in chars) to prevent errors
         max_total_context = 14000  # Safe limit for gpt-3.5-turbo (16k tokens)
-        
+
         # Truncate each context text
         truncated_texts = []
         total_chars = 0
         max_chars_per_source = max_total_context // max(len(context_texts), 1)
-        
+
         for text in context_texts:
             # Limit each source text proportionally
             truncated = truncate_text_for_context(text, max_chars_per_source)
             truncated_texts.append(truncated)
             total_chars += len(truncated)
-        
+
         # If still too large, reduce even more
         if total_chars > max_total_context:
             # Calculate reduction factor
             reduction_factor = max_total_context / total_chars
-            
+
             truncated_texts = []
             for text in context_texts:
                 # Adjust max chars based on reduction factor
                 adjusted_max = int(max_chars_per_source * reduction_factor)
                 truncated = truncate_text_for_context(text, max(adjusted_max, 500))
                 truncated_texts.append(truncated)
-        
+
         # Join the truncated texts
         context = "\n\n---\n\n".join(truncated_texts)
         logger.info(f"Total context length (chars): {len(context)}")
-        
+
+        sys_msg = system_prompt or _DEFAULT_GENERATE_ANSWER_SYSTEM_PROMPT
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant specialized in web design and digital marketing. Your role is to format information found in the context to provide accurate, helpful, and professional information about website design, development, maintenance, SEO, paid search, and social media marketing. Present this information as if it's directly from MRN Web Designs, a custom web design and digital marketing agency. Focus on helping businesses stand out from the competition by creating digital experiences that boost visibility and drive engagement. Always emphasize custom solutions over templates or cookie-cutter approaches. IMPORTANT: Keep your responses concise and under 250 characters to ensure clarity and readability."},
-                {"role": "user", "content": f"Question: {query}\n\nContext: {context}"}
-            ]
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": f"Question: {query}\n\nContext: {context}"},
+            ],
         )
         
         usage = response.usage or {}
@@ -805,6 +851,7 @@ async def _run_chat_for_tenant(
     ensure_collection_for_tenant(tenant_id)
     tenant_row = db.get(Tenant, uuid.UUID(tenant_id))
     vector_primary_source_type = tenant_row.widget_source_type if tenant_row else None
+    url_fallback = ((tenant_row.widget_website_url or "").strip() or None) if tenant_row else None
 
     if request.session_id:
         session = db.get(ChatSession, uuid.UUID(request.session_id))
@@ -872,7 +919,9 @@ async def _run_chat_for_tenant(
                 "sources": [],
             }
 
-    fuzzy_response = fuzzy_matcher.get_response(request.message)
+    fuzzy_response = None
+    if _tenant_uses_legacy_fuzzy_matcher(tenant_row):
+        fuzzy_response = fuzzy_matcher.get_response(request.message)
     if fuzzy_response:
         answer = fuzzy_response["response"]
         sources = fuzzy_response.get("sources", [])
@@ -882,7 +931,11 @@ async def _run_chat_for_tenant(
     else:
         if qdrant_client is None:
             raise HTTPException(status_code=503, detail="Qdrant unavailable")
-        enhanced_query = await preprocess_query(request.message)
+        enhanced_query = await preprocess_query(
+            request.message,
+            tenant_brand_name=_tenant_chat_brand_label(tenant_row),
+            tenant_website_url=((tenant_row.widget_website_url or "").strip() or None) if tenant_row else None,
+        )
         embedding, embedding_usage = await generate_embedding(enhanced_query)
         _record_usage_event(
             db,
@@ -906,7 +959,7 @@ async def _run_chat_for_tenant(
         sources: list[SearchResult] = []
         for result in filtered_results:
             original_url = result.payload["url"]
-            validated_url = validate_and_fix_url(original_url) or get_base_url(original_url)
+            validated_url = validate_and_fix_url(original_url, fallback_base=url_fallback) or get_base_url(original_url)
             if not validated_url:
                 continue
             context_texts.append(f"Source: {result.payload['source']}\nURL: {validated_url}\n{result.payload['content']}")
@@ -923,7 +976,11 @@ async def _run_chat_for_tenant(
             confidence = 0.0
             completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "gpt-3.5-turbo"}
         else:
-            answer, completion_usage = await generate_answer(request.message, context_texts)
+            answer, completion_usage = await generate_answer(
+                request.message,
+                context_texts,
+                system_prompt=_build_chat_system_prompt(tenant_row),
+            )
             confidence = filtered_results[0].score
         source_type = "vector_search"
 
@@ -2588,12 +2645,22 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
                     tenant.source_table_prefix,
                     tenant.source_url_table,
                 )
+            payload_st = LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+            payload_label = LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
+            url_fb = None
+            if tenant:
+                payload_st = (tenant.widget_source_type or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+                payload_label = (tenant.brand_name or tenant.name or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
+                url_fb = (tenant.widget_website_url or "").strip() or None
             embedder = Embedder(
                 client=qdrant_client,
                 collection_name=_tenant_collection(target_tenant_id),
                 source_config=source_cfg,
                 progress_callback=on_progress,
                 usage_callback=on_embedding_usage,
+                vector_payload_source_type=payload_st,
+                vector_payload_source_label=payload_label,
+                url_fallback_base=url_fb,
             )
             await embedder.reindex_all_content()
             local_job.status = "completed"

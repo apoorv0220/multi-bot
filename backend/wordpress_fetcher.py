@@ -15,8 +15,9 @@ logger = logging.getLogger("wordpress_fetcher")
 load_dotenv()
 
 class WordPressFetcher:
-    def __init__(self, source_config=None):
+    def __init__(self, source_config=None, fallback_site_url: str | None = None):
         source_config = source_config or {}
+        self.fallback_site_url = (fallback_site_url or "").strip() or None
         self.host = source_config.get("host") or os.getenv("WORDPRESS_DB_HOST")
         self.port = int(source_config.get("port") or os.getenv("WORDPRESS_DB_PORT", 3306))
         self.user = source_config.get("user") or os.getenv("WORDPRESS_DB_USER")
@@ -133,7 +134,7 @@ class WordPressFetcher:
                     
                     # Validate and fix the URL
                     original_url = result['url']
-                    fixed_url = validate_and_fix_url(original_url)
+                    fixed_url = validate_and_fix_url(original_url, fallback_base=self.fallback_site_url)
                     
                     if fixed_url != original_url:
                         logger.warning(f"Fixed external URL: {original_url} -> {fixed_url}")

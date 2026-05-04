@@ -23,6 +23,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("embedder")
 
+# Qdrant payload defaults (legacy single-tenant); overridden per tenant via Embedder constructor.
+LEGACY_VECTOR_PRIMARY_SOURCE_TYPE = "mrnwebdesigns_ie"
+LEGACY_VECTOR_PRIMARY_SOURCE_LABEL = "MRN Web Designs"
+
 # Import local modules with relative imports
 try:
     from .wordpress_fetcher import WordPressFetcher
@@ -70,7 +74,17 @@ class ProcessingProgress:
         }
 
 class Embedder:
-    def __init__(self, client=None, collection_name: Optional[str] = None, source_config: Optional[Dict[str, Any]] = None, progress_callback=None, usage_callback=None):
+    def __init__(
+        self,
+        client=None,
+        collection_name: Optional[str] = None,
+        source_config: Optional[Dict[str, Any]] = None,
+        progress_callback=None,
+        usage_callback=None,
+        vector_payload_source_type: Optional[str] = None,
+        vector_payload_source_label: Optional[str] = None,
+        url_fallback_base: Optional[str] = None,
+    ):
         # Use the provided client or the global client
         self.qdrant_client = client or qdrant_client
         
@@ -86,6 +100,11 @@ class Embedder:
         self.source_config = source_config or {}
         self.progress_callback = progress_callback
         self.usage_callback = usage_callback
+        st = (vector_payload_source_type or "").strip()
+        self.vector_payload_source_type = st or LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+        lb = (vector_payload_source_label or "").strip()
+        self.vector_payload_source_label = lb or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
+        self.url_fallback_base = (url_fallback_base or "").strip() or None
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -312,8 +331,8 @@ class Embedder:
                             "url": post['url'],
                             "type": post['type'],
                             "date": str(post['date']),
-                            "source": "MRN Web Designs",
-                            "source_type": "mrnwebdesigns_ie"  # Used for filtering
+                            "source": self.vector_payload_source_label,
+                            "source_type": self.vector_payload_source_type,
                         }
                         
                         # Create point with UUID format
@@ -360,7 +379,7 @@ class Embedder:
         logger.info("Starting chunked WordPress content embedding...")
         
         # Get WordPress content
-        wp_fetcher = WordPressFetcher(source_config=self.source_config)
+        wp_fetcher = WordPressFetcher(source_config=self.source_config, fallback_site_url=self.url_fallback_base)
         posts = wp_fetcher.get_all_posts()
         
         if not posts:
@@ -388,7 +407,7 @@ class Embedder:
                             must=[
                                 models.FieldCondition(
                                     key="source_type",
-                                    match=models.MatchValue(value="mrnwebdesigns_ie")
+                                    match=models.MatchValue(value=self.vector_payload_source_type),
                                 )
                             ]
                         )
@@ -483,7 +502,7 @@ class Embedder:
     async def embed_external_urls(self):
         """Embed content from external URLs and store in Qdrant"""
         # Get external URLs from WordPress
-        wp_fetcher = WordPressFetcher(source_config=self.source_config)
+        wp_fetcher = WordPressFetcher(source_config=self.source_config, fallback_site_url=self.url_fallback_base)
         external_urls = wp_fetcher.get_external_urls()
         
         if not external_urls:

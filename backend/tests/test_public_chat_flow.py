@@ -5,7 +5,7 @@ from services import chat_service, public_service
 
 
 def test_public_visitor_profile_contract(monkeypatch):
-    async def fake_profile(*, db, x_widget_key, x_visitor_id, origin):
+    async def fake_profile(*, db, x_widget_key, x_visitor_id, origin, request_obj=None):
         assert x_widget_key == "k1"
         assert x_visitor_id == "v1"
         return {"profile_exists": True}
@@ -18,7 +18,7 @@ def test_public_visitor_profile_contract(monkeypatch):
 
 
 def test_public_chat_contract(monkeypatch):
-    async def fake_chat(*, request, db, x_widget_key, x_visitor_id, origin):
+    async def fake_chat(*, request, db, x_widget_key, x_visitor_id, origin, request_obj=None):
         assert request.message == "hello"
         return {
             "response": "Hi",
