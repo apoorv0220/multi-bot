@@ -47,11 +47,17 @@ async def get_public_visitor_profile(
 
 @router.get("/api/public/config")
 async def get_public_config(
+    request_obj: Request,
     db=Depends(legacy_main.db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
 ):
-    return await public_service.get_widget_config(db=db, x_widget_key=x_widget_key, origin=origin)
+    return await public_service.get_widget_config(
+        db=db,
+        x_widget_key=x_widget_key,
+        origin=origin,
+        request_obj=request_obj,
+    )
 
 
 @router.post("/api/public/visitor-profile")

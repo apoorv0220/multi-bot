@@ -4,9 +4,9 @@ import { BsSend } from 'react-icons/bs';
 import Message from './Message';
 import { client } from '../api';
 
-const FALLBACK_GREETING =
-  "Hello! I'm your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?";
-const FALLBACK_HEADER_TITLE = "MRN Web Designs Assistant";
+/** Shown until GET /api/public/config returns tenant branding (avoid wrong-tenant flash). */
+const FALLBACK_GREETING = "Hello! How can I help you today?";
+const FALLBACK_HEADER_TITLE = "Chat assistant";
 
 const resolveInitialGreeting = () => FALLBACK_GREETING;
 const createVisitorId = () => {
@@ -52,6 +52,8 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [widgetWebsiteUrl, setWidgetWebsiteUrl] = useState("");
   const [userMessageColor, setUserMessageColor] = useState("#bf362e");
   const [botMessageColor, setBotMessageColor] = useState("#d5bbb9");
+  const [userMessageTextColor, setUserMessageTextColor] = useState("#ffffff");
+  const [botMessageTextColor, setBotMessageTextColor] = useState("#1a1a1a");
   /** Path or URL from GET /api/public/config; joined to apiUrl for <img src> */
   const [publicAvatarRaw, setPublicAvatarRaw] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
@@ -171,6 +173,8 @@ const ChatWidget = ({ mode = "admin" }) => {
         setWidgetWebsiteUrl(data?.website_url || "");
         setUserMessageColor(data?.user_message_color || "#bf362e");
         setBotMessageColor(data?.bot_message_color || "#d5bbb9");
+        setUserMessageTextColor(data?.user_message_text_color || "#ffffff");
+        setBotMessageTextColor(data?.bot_message_text_color || "#1a1a1a");
         setPublicAvatarRaw(data?.avatar_url || "");
         setPrivacyPolicyUrl(data?.privacy_policy_url || "");
         setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
@@ -393,6 +397,8 @@ const ChatWidget = ({ mode = "admin" }) => {
             mode={mode}
             apiUrl={apiUrl}
             widgetKey={widgetKey}
+            userBubbleTextColor={userMessageTextColor}
+            botBubbleTextColor={botMessageTextColor}
           />
         ))}
         {isLoading && (

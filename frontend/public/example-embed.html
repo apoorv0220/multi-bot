@@ -58,6 +58,7 @@
 
   <div class="note">
     <strong>Note:</strong> When deploying to production, update the URLs to your actual hosted domain.
+    Each site must set <code>tenantPublicKey</code> to the embed key issued for <em>that</em> tenant (literal string in the snippet you paste); the backend maps it via <code>WIDGET_EMBED_KEYS_JSON</code>.
   </div>
   
   <h2>Features</h2>
@@ -73,11 +74,11 @@
   <script>
     const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
     const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
-    // Optional configuration
     window.CHATBOT_WIDGET_CONFIG = {
       baseUrl: resolvedWidgetBaseUrl,
       apiUrl: resolvedApiBaseUrl,
-      tenantPublicKey: 'demo_pub_default_7721e85d'
+      // Demo key only — production sites paste their own tenant embed key here (not from runtime-config).
+      tenantPublicKey: "demo_pub_default_7721e85d",
     };
     
     // Load the widget script

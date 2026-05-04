@@ -1,5 +1,14 @@
+"""Create or update a superadmin user (run from repo: see README in backend/scripts/)."""
+from __future__ import annotations
+
 import argparse
+import sys
 import uuid
+from pathlib import Path
+
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
 from sqlalchemy import select
 

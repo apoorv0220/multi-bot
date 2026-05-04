@@ -90,6 +90,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [widgetSourceType, setWidgetSourceType] = useState("");
   const [widgetUserMessageColor, setWidgetUserMessageColor] = useState("#bf362e");
   const [widgetBotMessageColor, setWidgetBotMessageColor] = useState("#d5bbb9");
+  const [widgetUserMessageTextColor, setWidgetUserMessageTextColor] = useState("#ffffff");
+  const [widgetBotMessageTextColor, setWidgetBotMessageTextColor] = useState("#1a1a1a");
   const [widgetHeaderTitle, setWidgetHeaderTitle] = useState("");
   const [widgetWelcomeMessage, setWidgetWelcomeMessage] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
@@ -197,10 +199,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       if (!sourceTenantId && data?.length > 0) {
         const firstTenant = tenantIds[0] || tenantId || data[0].id;
         const next = firstTenant || "";
-        setSourceTenantId(next);
-        if (next) {
-          localStorage.setItem(DASHBOARD_SELECTED_TENANT_KEY, next);
-        }
+        persistSourceTenantId(next);
       }
       if (!adminTenantId && data?.length > 0) {
         const firstTenant = tenantIds[0] || tenantId || data[0].id;
@@ -209,7 +208,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed loading tenants");
     }
-  }, [adminTenantId, sourceTenantId, tenantId, tenantIds]);
+  }, [adminTenantId, sourceTenantId, tenantId, tenantIds, persistSourceTenantId]);
 
   const loadOverviewSection = useCallback(async () => {
     if (!effectiveTenantId) return;
@@ -317,6 +316,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setWidgetSourceType(t.widget_source_type || "");
     setWidgetUserMessageColor(t.widget_user_message_color || "#bf362e");
     setWidgetBotMessageColor(t.widget_bot_message_color || "#d5bbb9");
+    setWidgetUserMessageTextColor(t.widget_user_message_text_color || "#ffffff");
+    setWidgetBotMessageTextColor(t.widget_bot_message_text_color || "#1a1a1a");
     setWidgetHeaderTitle(t.widget_header_title || "");
     setWidgetWelcomeMessage(t.widget_welcome_message || "");
     setPrivacyPolicyUrl(t.privacy_policy_url || "");
@@ -520,6 +521,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         widget_source_type: widgetSourceType || null,
         widget_user_message_color: widgetUserMessageColor || null,
         widget_bot_message_color: widgetBotMessageColor || null,
+        widget_user_message_text_color: widgetUserMessageTextColor || null,
+        widget_bot_message_text_color: widgetBotMessageTextColor || null,
         widget_header_title: widgetHeaderTitle || null,
         widget_welcome_message: widgetWelcomeMessage || null,
         privacy_policy_url: privacyPolicyUrl || null,
@@ -743,7 +746,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
               <Select
                 label="Tenant"
                 value={sourceTenantId}
-                onChange={(e) => setSourceTenantId(e.target.value)}
+                onChange={(e) => persistSourceTenantId(e.target.value)}
               >
                 {tenants.map((t) => (
                   <MenuItem key={t.id} value={t.id}>
@@ -1184,6 +1187,22 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 value={widgetBotMessageColor}
                 onChange={(e) => setWidgetBotMessageColor(e.target.value)}
                 placeholder="#d5bbb9"
+                fullWidth
+              />
+              <TextField
+                label="User message text color"
+                value={widgetUserMessageTextColor}
+                onChange={(e) => setWidgetUserMessageTextColor(e.target.value)}
+                placeholder="#ffffff"
+                helperText="Hex color for text on the user bubble (contrast with bubble background)."
+                fullWidth
+              />
+              <TextField
+                label="Bot message text color"
+                value={widgetBotMessageTextColor}
+                onChange={(e) => setWidgetBotMessageTextColor(e.target.value)}
+                placeholder="#1a1a1a"
+                helperText="Hex color for text on the bot bubble (contrast with bubble background)."
                 fullWidth
               />
               <TextField label="Widget Header Title" value={widgetHeaderTitle} onChange={(e) => setWidgetHeaderTitle(e.target.value)} fullWidth />

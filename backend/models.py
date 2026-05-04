@@ -63,6 +63,8 @@ class Tenant(Base):
     widget_source_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     widget_user_message_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     widget_bot_message_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    widget_user_message_text_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    widget_bot_message_text_color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     widget_header_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     widget_welcome_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     privacy_policy_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)

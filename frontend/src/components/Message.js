@@ -3,7 +3,20 @@ import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
 import { client } from '../api';
 
-const Message = ({ type, text, timestamp, sources = [], isError, source, messageId, mode = "admin", apiUrl = "", widgetKey = "" }) => {
+const Message = ({
+  type,
+  text,
+  timestamp,
+  sources = [],
+  isError,
+  source,
+  messageId,
+  mode = "admin",
+  apiUrl = "",
+  widgetKey = "",
+  userBubbleTextColor = "#ffffff",
+  botBubbleTextColor = "#1a1a1a",
+}) => {
   // Format timestamp
   const formatTime = (date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -42,7 +55,13 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, message
 
   return (
     <MessageContainer isError={isError} type={type}>
-      <MessageContent isError={isError} type={type} className="mrnwebdesigns-chatbot-widget-message-content">
+      <MessageContent
+        isError={isError}
+        type={type}
+        className="mrnwebdesigns-chatbot-widget-message-content"
+        $userText={userBubbleTextColor}
+        $botText={botBubbleTextColor}
+      >
         <ReactMarkdown>{text}</ReactMarkdown>
         {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
           <>
@@ -73,7 +92,10 @@ const MessageContent = styled.div`
     if (props.isError) return 'var(--error-color)';
     return props.type !== 'user' ? 'var(--secondary-color)' : 'var(--primary-color)';
   }};
-  color: ${props => props.type !== 'user' ? 'var(--text-color)' : 'white'};
+  color: ${(props) => {
+    if (props.isError) return '#fff';
+    return props.type === 'user' ? props.$userText : props.$botText;
+  }};
   padding: 12px 16px;
   border-radius: 18px;
   border-bottom-left-radius: ${props => props.type !== 'user' ? '4px' : '18px'};
@@ -87,7 +109,11 @@ const MessageContent = styled.div`
   }
   
   a {
-    color: ${props => props.type !== 'user' ? 'var(--primary-color)' : 'white'};
+    color: ${(props) => {
+      if (props.isError) return '#fff';
+      if (props.type === 'user') return props.$userText;
+      return 'var(--primary-color)';
+    }};
     text-decoration: underline;
   }
   

@@ -15,6 +15,10 @@
   <script src="/runtime-config.js"></script>
   <h1>Chatbot Embed Example - Migraine Tenant</h1>
   <p>This page demonstrates the public website embed for the <strong>Migraine</strong> tenant.</p>
+  <p>
+    The <code>tenantPublicKey</code> below is the per-tenant credential your customers embed as a <strong>literal string</strong> in their own HTML (we do not inject it from our runtime-config on their site).
+    Ensure <code>WIDGET_EMBED_KEYS_JSON</code> maps this key to the correct tenant UUID on the API.
+  </p>
 
   <h2>How to Embed</h2>
   <p>Add this snippet before your closing <code>&lt;/body&gt;</code> tag:</p>
@@ -50,7 +54,7 @@ window.CHATBOT_WIDGET_CONFIG = {
     window.CHATBOT_WIDGET_CONFIG = {
       baseUrl: resolvedWidgetBaseUrl,
       apiUrl: resolvedApiBaseUrl,
-      tenantPublicKey: "demo_pub_migraine_4c97be2e"
+      tenantPublicKey: "demo_pub_migraine_4c97be2e",
     };
     (function () {
       const script = document.createElement("script");

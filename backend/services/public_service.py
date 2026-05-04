@@ -6,7 +6,13 @@ async def get_visitor_profile(*, db, x_widget_key, x_visitor_id, origin, request
     tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
     if not legacy_main._tenant_origin_allowed(tenant, origin):
         raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
-    legacy_main._enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    legacy_main._enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     visitor_id = legacy_main._normalize_visitor_id(x_visitor_id)
     visitor = legacy_main._get_visitor_profile(db, tenant_id, visitor_id)
     return {"profile_exists": bool(visitor)}
@@ -17,7 +23,13 @@ async def upsert_visitor_profile(*, payload, db, x_widget_key, origin, request_o
     tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
     if not legacy_main._tenant_origin_allowed(tenant, origin):
         raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
-    legacy_main._enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    legacy_main._enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     visitor_id = legacy_main._normalize_visitor_id(payload.visitor_id)
     name = payload.name.strip()
     if not name:
@@ -53,7 +65,13 @@ async def add_public_feedback(*, message_id, payload, db, x_widget_key, origin, 
     tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
     if not legacy_main._tenant_origin_allowed(tenant, origin):
         raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
-    legacy_main._enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    legacy_main._enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     message = db.get(legacy_main.ChatMessage, legacy_main.uuid.UUID(message_id))
     if not message:
         raise legacy_main.HTTPException(status_code=404, detail="Message not found")
@@ -84,8 +102,13 @@ async def add_public_feedback(*, message_id, payload, db, x_widget_key, origin, 
     return {"status": "ok"}
 
 
-async def get_widget_config(*, db, x_widget_key, origin):
-    return await legacy_main.get_public_widget_config(db=db, x_widget_key=x_widget_key, origin=origin)
+async def get_widget_config(*, db, x_widget_key, origin, request_obj):
+    return await legacy_main.get_public_widget_config(
+        request_obj=request_obj,
+        db=db,
+        x_widget_key=x_widget_key,
+        origin=origin,
+    )
 
 
 async def get_session_rating_status(*, session_id, db, x_widget_key, x_visitor_id, origin, request_obj=None):

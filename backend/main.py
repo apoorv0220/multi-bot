@@ -87,6 +87,24 @@ async def startup_event():
         qdrant_client = _initialize_qdrant_client_with_retries()
     except Exception:
         qdrant_client = None
+    geo_path = os.getenv("GEOIP_DB_PATH", "").strip()
+    if not geo_path:
+        logger.warning(
+            "GEOIP_DB_PATH is not set; country-based blocking cannot resolve client country "
+            "(exact IP blocks still apply)."
+        )
+    elif not os.path.exists(geo_path):
+        logger.warning(
+            "GEOIP_DB_PATH points to a missing file (%s); country-based blocking disabled.",
+            geo_path,
+        )
+    else:
+        logger.info("Country geolocation enabled (GEOIP_DB_PATH=%s)", geo_path)
+        if "dbip" in os.path.basename(geo_path).lower():
+            logger.info(
+                "DB-IP dataset detected: CC-BY 4.0 may require attribution where results are shown "
+                "(see https://db-ip.com/db/ip-to-country-lite)."
+            )
 
 
 class AuthRequest(BaseModel):
@@ -183,6 +201,8 @@ class TenantBrandingConfigRequest(BaseModel):
     widget_source_type: Optional[str] = None
     widget_user_message_color: Optional[str] = None
     widget_bot_message_color: Optional[str] = None
+    widget_user_message_text_color: Optional[str] = None
+    widget_bot_message_text_color: Optional[str] = None
     widget_header_title: Optional[str] = None
     widget_welcome_message: Optional[str] = None
     privacy_policy_url: Optional[str] = None
@@ -336,54 +356,65 @@ def _enforce_public_security_and_quota(
     db,
     tenant_id: str,
     request_obj: Optional[Request],
+    apply_ip_country_blocks: bool = True,
+    apply_message_quota: bool = True,
 ):
+    """Enforce tenant blocks and/or monthly visitor message quota for public widget traffic.
+
+    Bootstrap/readiness endpoints (config, visitor profile, feedback, session rating) should pass
+    ``apply_ip_country_blocks=False`` and ``apply_message_quota=False`` so the widget can still
+    load branding and complete non-chat flows when quota is exhausted or IP/country is blocked;
+    ``POST /api/public/chat`` keeps full enforcement.
+    """
     tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    client_ip = _extract_client_ip(request_obj)
-    if client_ip:
-        blocked_ip = db.execute(
-            select(TenantBlockedIP).where(
-                TenantBlockedIP.tenant_id == tenant.id,
-                TenantBlockedIP.ip_address == client_ip,
-            )
-        ).scalar_one_or_none()
-        if blocked_ip:
-            raise HTTPException(status_code=403, detail="Access blocked for this IP")
+    if apply_ip_country_blocks:
+        client_ip = _extract_client_ip(request_obj)
+        if client_ip:
+            blocked_ip = db.execute(
+                select(TenantBlockedIP).where(
+                    TenantBlockedIP.tenant_id == tenant.id,
+                    TenantBlockedIP.ip_address == client_ip,
+                )
+            ).scalar_one_or_none()
+            if blocked_ip:
+                raise HTTPException(status_code=403, detail="Access blocked for this IP")
 
-    country_code = _resolve_country_code_from_ip(client_ip)
-    if country_code:
-        blocked_country = db.execute(
-            select(TenantBlockedCountry).where(
-                TenantBlockedCountry.tenant_id == tenant.id,
-                TenantBlockedCountry.country_code == country_code,
-            )
-        ).scalar_one_or_none()
-        if blocked_country:
-            raise HTTPException(status_code=403, detail=f"Access blocked for country: {country_code}")
+        country_code = _resolve_country_code_from_ip(client_ip)
+        if country_code:
+            blocked_country = db.execute(
+                select(TenantBlockedCountry).where(
+                    TenantBlockedCountry.tenant_id == tenant.id,
+                    TenantBlockedCountry.country_code == country_code,
+                )
+            ).scalar_one_or_none()
+            if blocked_country:
+                raise HTTPException(status_code=403, detail=f"Access blocked for country: {country_code}")
 
-    start_utc, end_utc = _utc_month_bounds()
-    monthly_messages = db.execute(
-        select(func.count(ChatMessage.id))
-        .join(ChatSession, ChatSession.id == ChatMessage.session_id)
-        .where(
-            ChatMessage.tenant_id == tenant.id,
-            ChatMessage.sender_type == SenderType.user,
-            ChatSession.visitor_id.is_not(None),
-            ChatMessage.created_at >= start_utc,
-            ChatMessage.created_at < end_utc,
-        )
-    ).scalar_one()
-    if monthly_messages >= (tenant.monthly_message_limit or 15000):
-        raise HTTPException(
-            status_code=429,
-            detail="tenant_message_quota_exceeded",
-            headers={
-                "X-Quota-Exceeded": "true",
-                "X-Quota-Message": tenant.quota_reached_message,
-            },
-        )
+    if apply_message_quota:
+        start_utc, end_utc = _utc_month_bounds()
+        monthly_messages = db.execute(
+            select(func.count(ChatMessage.id))
+            .join(ChatSession, ChatSession.id == ChatMessage.session_id)
+            .where(
+                ChatMessage.tenant_id == tenant.id,
+                ChatMessage.sender_type == SenderType.user,
+                ChatSession.visitor_id.is_not(None),
+                ChatMessage.created_at >= start_utc,
+                ChatMessage.created_at < end_utc,
+            )
+        ).scalar_one()
+        if monthly_messages >= (tenant.monthly_message_limit or 15000):
+            raise HTTPException(
+                status_code=429,
+                detail="tenant_message_quota_exceeded",
+                headers={
+                    "X-Quota-Exceeded": "true",
+                    "X-Quota-Message": tenant.quota_reached_message,
+                },
+            )
 
 
 def _resolve_embed_tenant_id(embed_key: Optional[str]) -> str:
@@ -1015,7 +1046,13 @@ async def get_public_visitor_profile(
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
-    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    _enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     visitor_id = _normalize_visitor_id(x_visitor_id)
     visitor = _get_visitor_profile(db, tenant_id, visitor_id)
     return {"profile_exists": bool(visitor)}
@@ -1023,6 +1060,7 @@ async def get_public_visitor_profile(
 
 @app.get("/api/public/config")
 async def get_public_widget_config(
+    request_obj: Request,
     db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
@@ -1033,6 +1071,13 @@ async def get_public_widget_config(
         raise HTTPException(status_code=404, detail="Tenant not found")
     if not _tenant_origin_allowed(tenant, origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
+    _enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     return {
         "tenant_id": tenant_id,
         "brand_name": tenant.brand_name,
@@ -1041,6 +1086,8 @@ async def get_public_widget_config(
         "source_type": tenant.widget_source_type,
         "user_message_color": tenant.widget_user_message_color,
         "bot_message_color": tenant.widget_bot_message_color,
+        "user_message_text_color": tenant.widget_user_message_text_color,
+        "bot_message_text_color": tenant.widget_bot_message_text_color,
         "header_title": tenant.widget_header_title,
         "welcome_message": tenant.widget_welcome_message,
         "avatar_url": _normalize_avatar_url_for_widget(tenant.avatar_url),
@@ -1060,7 +1107,13 @@ async def upsert_public_visitor_profile(
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
-    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    _enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     visitor_id = _normalize_visitor_id(payload.visitor_id)
     name = payload.name.strip()
     if not name:
@@ -1139,7 +1192,13 @@ async def add_public_feedback(
     if os.getenv("WIDGET_REQUIRE_ORIGIN", "false").lower() == "true" and not _origin_allowed(origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
-    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    _enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     message = db.get(ChatMessage, uuid.UUID(message_id))
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
@@ -1185,7 +1244,13 @@ async def get_public_session_rating_status(
     tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not _tenant_origin_allowed(tenant, origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
-    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    _enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     _normalize_visitor_id(x_visitor_id)
     session = db.get(ChatSession, uuid.UUID(session_id))
     if not session or str(session.tenant_id) != tenant_id:
@@ -1209,7 +1274,13 @@ async def submit_public_session_rating(
     tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not _tenant_origin_allowed(tenant, origin):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
-    _enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
+    _enforce_public_security_and_quota(
+        db=db,
+        tenant_id=tenant_id,
+        request_obj=request_obj,
+        apply_ip_country_blocks=False,
+        apply_message_quota=False,
+    )
     visitor_id = _normalize_visitor_id(x_visitor_id)
     if payload.rating < 1 or payload.rating > 5:
         raise HTTPException(status_code=400, detail="rating must be between 1 and 5")
@@ -1501,6 +1572,8 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "widget_source_type": t.widget_source_type,
             "widget_user_message_color": t.widget_user_message_color,
             "widget_bot_message_color": t.widget_bot_message_color,
+            "widget_user_message_text_color": t.widget_user_message_text_color,
+            "widget_bot_message_text_color": t.widget_bot_message_text_color,
             "widget_header_title": t.widget_header_title,
             "widget_welcome_message": t.widget_welcome_message,
             "privacy_policy_url": t.privacy_policy_url,
@@ -1581,6 +1654,16 @@ async def update_tenant_branding(
         if bc and not re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", bc):
             raise HTTPException(status_code=400, detail="widget_bot_message_color must be a valid hex color")
         tenant.widget_bot_message_color = bc or None
+    if payload.widget_user_message_text_color is not None:
+        utc = payload.widget_user_message_text_color.strip() if payload.widget_user_message_text_color else ""
+        if utc and not re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", utc):
+            raise HTTPException(status_code=400, detail="widget_user_message_text_color must be a valid hex color")
+        tenant.widget_user_message_text_color = utc or None
+    if payload.widget_bot_message_text_color is not None:
+        btc = payload.widget_bot_message_text_color.strip() if payload.widget_bot_message_text_color else ""
+        if btc and not re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", btc):
+            raise HTTPException(status_code=400, detail="widget_bot_message_text_color must be a valid hex color")
+        tenant.widget_bot_message_text_color = btc or None
     if payload.widget_header_title is not None:
         tenant.widget_header_title = payload.widget_header_title.strip() or None
     if payload.widget_welcome_message is not None:

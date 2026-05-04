@@ -41,6 +41,8 @@ services:
       TENANT_ASSETS_DIR: /data/tenant-assets
     volumes:
       - tenant_assets:/data/tenant-assets
+      # Country resolution: run `python3 backend/scripts/download_dbip_country_lite.py` then set GEOIP_DB_PATH in .env
+      - ./data/geoip:/data/geoip:ro
     depends_on:
       postgres:
         condition: service_healthy
