@@ -179,6 +179,10 @@ class BlockedCountryRequest(BaseModel):
 class TenantBrandingConfigRequest(BaseModel):
     brand_name: Optional[str] = None
     widget_primary_color: Optional[str] = None
+    widget_website_url: Optional[str] = None
+    widget_source_type: Optional[str] = None
+    widget_user_message_color: Optional[str] = None
+    widget_bot_message_color: Optional[str] = None
     widget_header_title: Optional[str] = None
     widget_welcome_message: Optional[str] = None
     privacy_policy_url: Optional[str] = None
@@ -528,23 +532,29 @@ async def generate_embedding(text: str) -> tuple[List[float], Dict[str, Any]]:
         logger.error(f"Error generating embedding: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate embedding")
 
-async def search_qdrant(tenant_id: str, embedding: List[float], limit: int = 5) -> List[Any]:
+async def search_qdrant(
+    tenant_id: str,
+    embedding: List[float],
+    limit: int = 5,
+    primary_source_type: Optional[str] = None,
+) -> List[Any]:
     if qdrant_client is None:
         raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
     collection_name = _tenant_collection(tenant_id)
+    primary_st = (primary_source_type or "").strip() or "mrnwebdesigns_ie"
 
     try:
         vector_store = VectorStoreAdapter(qdrant_client)
-        # First try to search in MRN Web Designs content (prioritized)
+        # Primary bucket: tenant-configured Qdrant payload `source_type` (default legacy keyword)
         mrnwebdesigns_results = vector_store.search(
             collection_name=collection_name,
             query_vector=embedding,
             limit=limit,
             score_threshold=0.6,
-            source_type="mrnwebdesigns_ie",
+            source_type=primary_st,
         )
-        
-        logger.info(f"Found {len(mrnwebdesigns_results)} mrnwebdesigns.com results")
+
+        logger.info("Found %s primary-source (%s) results", len(mrnwebdesigns_results), primary_st)
         
         # If we don't have enough results from MRN Web Designs, search external sources
         if len(mrnwebdesigns_results) < limit or max([r.score for r in mrnwebdesigns_results] + [0]) < 0.7:
@@ -762,6 +772,8 @@ async def _run_chat_for_tenant(
     public_visitor: Optional[ChatVisitor] = None,
 ) -> Dict[str, Any]:
     ensure_collection_for_tenant(tenant_id)
+    tenant_row = db.get(Tenant, uuid.UUID(tenant_id))
+    vector_primary_source_type = tenant_row.widget_source_type if tenant_row else None
 
     if request.session_id:
         session = db.get(ChatSession, uuid.UUID(request.session_id))
@@ -852,7 +864,12 @@ async def _run_chat_for_tenant(
             session_id=session.id,
             meta_json={"source": "chat_query"},
         )
-        search_results = await search_qdrant(tenant_id, embedding, request.max_results)
+        search_results = await search_qdrant(
+            tenant_id,
+            embedding,
+            request.max_results,
+            primary_source_type=vector_primary_source_type,
+        )
         filtered_results = [result for result in search_results if result.score >= 0.3]
         context_texts: list[str] = []
         sources: list[SearchResult] = []
@@ -1020,6 +1037,10 @@ async def get_public_widget_config(
         "tenant_id": tenant_id,
         "brand_name": tenant.brand_name,
         "primary_color": tenant.widget_primary_color,
+        "website_url": tenant.widget_website_url,
+        "source_type": tenant.widget_source_type,
+        "user_message_color": tenant.widget_user_message_color,
+        "bot_message_color": tenant.widget_bot_message_color,
         "header_title": tenant.widget_header_title,
         "welcome_message": tenant.widget_welcome_message,
         "avatar_url": _normalize_avatar_url_for_widget(tenant.avatar_url),
@@ -1262,6 +1283,14 @@ async def admin_chats(
     end_idx = start_idx + page_size
     sessions_page = sessions[start_idx:end_idx]
     session_ids = [s.id for s in sessions_page]
+    message_count_by_session: Dict[str, int] = {}
+    if session_ids:
+        count_rows = db.execute(
+            select(ChatMessage.session_id, func.count(ChatMessage.id))
+            .where(ChatMessage.session_id.in_(session_ids))
+            .group_by(ChatMessage.session_id)
+        ).all()
+        message_count_by_session = {str(sid): int(n) for sid, n in count_rows}
     feedback_by_session = {}
     if session_ids:
         message_rows = db.execute(
@@ -1292,6 +1321,7 @@ async def admin_chats(
             "block_triggered": bool(s.block_triggered),
             "last_message_at": s.last_message_at.isoformat(),
             "feedback_summary": feedback_by_session.get(str(s.id), {"up": 0, "down": 0}),
+            "message_count": message_count_by_session.get(str(s.id), 0),
         }
         for s in sessions_page
     ]
@@ -1467,6 +1497,10 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "has_source_db_url": bool(t.source_db_url),
             "brand_name": t.brand_name,
             "widget_primary_color": t.widget_primary_color,
+            "widget_website_url": t.widget_website_url,
+            "widget_source_type": t.widget_source_type,
+            "widget_user_message_color": t.widget_user_message_color,
+            "widget_bot_message_color": t.widget_bot_message_color,
             "widget_header_title": t.widget_header_title,
             "widget_welcome_message": t.widget_welcome_message,
             "privacy_policy_url": t.privacy_policy_url,
@@ -1524,6 +1558,29 @@ async def update_tenant_branding(
         if color_value and not re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", color_value):
             raise HTTPException(status_code=400, detail="widget_primary_color must be a valid hex color")
         tenant.widget_primary_color = color_value or None
+    if payload.widget_website_url is not None:
+        wu = payload.widget_website_url.strip() if payload.widget_website_url else ""
+        if wu and not (wu.startswith("http://") or wu.startswith("https://")):
+            raise HTTPException(status_code=400, detail="widget_website_url must be a valid URL")
+        tenant.widget_website_url = wu or None
+    if payload.widget_source_type is not None:
+        st = payload.widget_source_type.strip() if payload.widget_source_type else ""
+        if st and not re.fullmatch(r"^[a-zA-Z0-9_.-]{1,64}$", st):
+            raise HTTPException(
+                status_code=400,
+                detail="widget_source_type must be 1-64 characters: letters, digits, underscore, hyphen, or dot",
+            )
+        tenant.widget_source_type = st or None
+    if payload.widget_user_message_color is not None:
+        uc = payload.widget_user_message_color.strip() if payload.widget_user_message_color else ""
+        if uc and not re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", uc):
+            raise HTTPException(status_code=400, detail="widget_user_message_color must be a valid hex color")
+        tenant.widget_user_message_color = uc or None
+    if payload.widget_bot_message_color is not None:
+        bc = payload.widget_bot_message_color.strip() if payload.widget_bot_message_color else ""
+        if bc and not re.fullmatch(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", bc):
+            raise HTTPException(status_code=400, detail="widget_bot_message_color must be a valid hex color")
+        tenant.widget_bot_message_color = bc or None
     if payload.widget_header_title is not None:
         tenant.widget_header_title = payload.widget_header_title.strip() or None
     if payload.widget_welcome_message is not None:

@@ -49,6 +49,9 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [headerTitle, setHeaderTitle] = useState(FALLBACK_HEADER_TITLE);
   const [brandName, setBrandName] = useState("Nethues");
   const [primaryColor, setPrimaryColor] = useState("#bf362e");
+  const [widgetWebsiteUrl, setWidgetWebsiteUrl] = useState("");
+  const [userMessageColor, setUserMessageColor] = useState("#bf362e");
+  const [botMessageColor, setBotMessageColor] = useState("#d5bbb9");
   /** Path or URL from GET /api/public/config; joined to apiUrl for <img src> */
   const [publicAvatarRaw, setPublicAvatarRaw] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
@@ -165,6 +168,9 @@ const ChatWidget = ({ mode = "admin" }) => {
         }
         setBrandName(data?.brand_name || "Nethues");
         setPrimaryColor(data?.primary_color || "#bf362e");
+        setWidgetWebsiteUrl(data?.website_url || "");
+        setUserMessageColor(data?.user_message_color || "#bf362e");
+        setBotMessageColor(data?.bot_message_color || "#d5bbb9");
         setPublicAvatarRaw(data?.avatar_url || "");
         setPrivacyPolicyUrl(data?.privacy_policy_url || "");
         setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
@@ -359,7 +365,11 @@ const ChatWidget = ({ mode = "admin" }) => {
   };
 
   return (
-    <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
+    <WidgetContainer
+      className="mrnwebdesigns-chatbot-widget-container"
+      $userBubbleColor={userMessageColor}
+      $botBubbleColor={botMessageColor}
+    >
       <WidgetHeader className="mrnwebdesigns-chatbot-widget-header" $primaryColor={primaryColor}>
         <HeaderRow>
           {avatarDisplayUrl ? <HeaderAvatar src={avatarDisplayUrl} alt="brand avatar" /> : null}
@@ -460,10 +470,20 @@ const ChatWidget = ({ mode = "admin" }) => {
       {mode === "public" && ratingSubmitted && selectedRating > 0 && (
         <RatingSubmittedText>Thanks for rating: {selectedRating}/5</RatingSubmittedText>
       )}
-      {privacyPolicyUrl && (
-        <PrivacyPolicyLink href={privacyPolicyUrl} target="_blank" rel="noreferrer">
-          Privacy Policy
-        </PrivacyPolicyLink>
+      {(privacyPolicyUrl || widgetWebsiteUrl) && (
+        <FooterLinks>
+          {widgetWebsiteUrl ? (
+            <PrivacyPolicyLink href={widgetWebsiteUrl} target="_blank" rel="noreferrer">
+              Website
+            </PrivacyPolicyLink>
+          ) : null}
+          {privacyPolicyUrl && widgetWebsiteUrl ? <FooterSep aria-hidden>|</FooterSep> : null}
+          {privacyPolicyUrl ? (
+            <PrivacyPolicyLink href={privacyPolicyUrl} target="_blank" rel="noreferrer">
+              Privacy Policy
+            </PrivacyPolicyLink>
+          ) : null}
+        </FooterLinks>
       )}
       {publicConfigError && <ConfigError>{publicConfigError}</ConfigError>}
     </WidgetContainer>
@@ -472,6 +492,8 @@ const ChatWidget = ({ mode = "admin" }) => {
 
 // Styled components
 const WidgetContainer = styled.div`
+  --primary-color: ${(p) => p.$userBubbleColor || "#bf362e"};
+  --secondary-color: ${(p) => p.$botBubbleColor || "#d5bbb9"};
   display: flex;
   flex-direction: column;
   width: 380px;
@@ -595,10 +617,22 @@ const ConfigError = styled.div`
   padding: 8px 12px 12px;
 `;
 
+const FooterLinks = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 15px 8px;
+  font-size: 0.75rem;
+`;
+
+const FooterSep = styled.span`
+  color: #999;
+  user-select: none;
+`;
+
 const PrivacyPolicyLink = styled.a`
   color: #555;
-  font-size: 0.75rem;
-  padding: 0 15px 8px;
   text-decoration: underline;
 `;
 

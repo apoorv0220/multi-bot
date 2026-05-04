@@ -27,6 +27,8 @@ import {
   Typography,
 } from "@mui/material";
 
+const DASHBOARD_SELECTED_TENANT_KEY = "admin_dashboard_selected_tenant_id";
+
 const adminApiBase = () => String(client.defaults.baseURL || "").replace(/\/+$/, "");
 
 /** Same rule as widget: API base + `/api/assets/...` (or legacy URL containing that path). */
@@ -75,13 +77,19 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [newTenantName, setNewTenantName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [chatFilter, setChatFilter] = useState("");
-  const [sourceTenantId, setSourceTenantId] = useState("");
+  const [sourceTenantId, setSourceTenantId] = useState(() =>
+    typeof window !== "undefined" ? localStorage.getItem(DASHBOARD_SELECTED_TENANT_KEY) || "" : "",
+  );
   const [sourceDbUrl, setSourceDbUrl] = useState("");
   const [sourceDbType, setSourceDbType] = useState("mysql");
   const [sourceTablePrefix, setSourceTablePrefix] = useState("wp_");
   const [sourceUrlTable, setSourceUrlTable] = useState("wp_custom_urls");
   const [brandName, setBrandName] = useState("");
   const [widgetPrimaryColor, setWidgetPrimaryColor] = useState("#bf362e");
+  const [widgetWebsiteUrl, setWidgetWebsiteUrl] = useState("");
+  const [widgetSourceType, setWidgetSourceType] = useState("");
+  const [widgetUserMessageColor, setWidgetUserMessageColor] = useState("#bf362e");
+  const [widgetBotMessageColor, setWidgetBotMessageColor] = useState("#d5bbb9");
   const [widgetHeaderTitle, setWidgetHeaderTitle] = useState("");
   const [widgetWelcomeMessage, setWidgetWelcomeMessage] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
@@ -139,6 +147,15 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     navigate(`/admin/dashboard/settings/${nextSubsection}`);
   };
 
+  const persistSourceTenantId = useCallback((value) => {
+    setSourceTenantId(value);
+    if (value) {
+      localStorage.setItem(DASHBOARD_SELECTED_TENANT_KEY, value);
+    } else {
+      localStorage.removeItem(DASHBOARD_SELECTED_TENANT_KEY);
+    }
+  }, []);
+
   const refreshJobsOnly = useCallback(async () => {
     try {
       const { data } = await client.get("/api/reindex/jobs", { params: { tenant_id: effectiveTenantId } });
@@ -179,7 +196,11 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       setTenants(data || []);
       if (!sourceTenantId && data?.length > 0) {
         const firstTenant = tenantIds[0] || tenantId || data[0].id;
-        setSourceTenantId(firstTenant || "");
+        const next = firstTenant || "";
+        setSourceTenantId(next);
+        if (next) {
+          localStorage.setItem(DASHBOARD_SELECTED_TENANT_KEY, next);
+        }
       }
       if (!adminTenantId && data?.length > 0) {
         const firstTenant = tenantIds[0] || tenantId || data[0].id;
@@ -270,6 +291,14 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   }, [section, refreshJobsOnly]);
 
   useEffect(() => {
+    if (!tenants.length || !sourceTenantId) return;
+    if (tenants.some((t) => t.id === sourceTenantId)) return;
+    const fallback =
+      tenantIds.find((id) => tenants.some((t) => t.id === id)) || tenants[0]?.id || tenantId || "";
+    persistSourceTenantId(fallback);
+  }, [tenants, sourceTenantId, tenantIds, tenantId, persistSourceTenantId]);
+
+  useEffect(() => {
     if (role !== "superadmin") return;
     setSelected(null);
     setMessages([]);
@@ -284,6 +313,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setSourceUrlTable(t.source_url_table || "wp_custom_urls");
     setBrandName(t.brand_name || "");
     setWidgetPrimaryColor(t.widget_primary_color || "#bf362e");
+    setWidgetWebsiteUrl(t.widget_website_url || "");
+    setWidgetSourceType(t.widget_source_type || "");
+    setWidgetUserMessageColor(t.widget_user_message_color || "#bf362e");
+    setWidgetBotMessageColor(t.widget_bot_message_color || "#d5bbb9");
     setWidgetHeaderTitle(t.widget_header_title || "");
     setWidgetWelcomeMessage(t.widget_welcome_message || "");
     setPrivacyPolicyUrl(t.privacy_policy_url || "");
@@ -483,6 +516,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       const brandingPayload = {
         brand_name: brandName || null,
         widget_primary_color: widgetPrimaryColor || null,
+        widget_website_url: widgetWebsiteUrl || null,
+        widget_source_type: widgetSourceType || null,
+        widget_user_message_color: widgetUserMessageColor || null,
+        widget_bot_message_color: widgetBotMessageColor || null,
         widget_header_title: widgetHeaderTitle || null,
         widget_welcome_message: widgetWelcomeMessage || null,
         privacy_policy_url: privacyPolicyUrl || null,
@@ -793,11 +830,17 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
               <List dense sx={{ maxHeight: 520, overflowY: "auto" }}>
                 {sessions.map((s) => (
                   <ListItemButton key={s.id} selected={selected === s.id} onClick={() => loadSession(s.id)}>
-                    <ListItemText
-                      primary={s.title || s.id}
-                      secondary={`${s.visitor_name || "Unknown"}${s.visitor_email ? ` (${s.visitor_email})` : ""} | ${s.id} | ${s.last_message_at} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
-                      secondaryTypographyProps={{ sx: { wordBreak: "break-word" } }}
-                    />
+                    <Stack direction="row" alignItems="flex-start" spacing={1} sx={{ width: "100%", minWidth: 0 }}>
+                      <ListItemText
+                        sx={{ flex: 1, minWidth: 0 }}
+                        primary={s.title || s.id}
+                        secondary={`${s.visitor_name || "Unknown"}${s.visitor_email ? ` (${s.visitor_email})` : ""} | ${s.id} | ${s.last_message_at} | 👍 ${s?.feedback_summary?.up || 0} 👎 ${s?.feedback_summary?.down || 0}`}
+                        secondaryTypographyProps={{ sx: { wordBreak: "break-word" } }}
+                      />
+                      <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0, pt: 0.25 }}>
+                        {Number(s.message_count ?? 0)} msgs
+                      </Typography>
+                    </Stack>
                   </ListItemButton>
                 ))}
               </List>
@@ -861,7 +904,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                       <Chip size="small" label={j.scope} />
                       <Chip size="small" color={j.status === "completed" ? "success" : j.status === "failed" ? "error" : "default"} label={j.status} />
                     </Stack>
-                    {!!j.meta?.progress && (
+                    {!!j.meta?.progress && j.status !== "completed" && j.status !== "failed" && (
                       <Box sx={{ mb: 1 }}>
                         <LinearProgress
                           variant="determinate"
@@ -928,7 +971,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
           <Grid item xs={12} md={4}>
             <Card>
               <CardContent>
-                <Typography variant="h6" mb={1}>Visitors</Typography>
+                <Stack direction="row" alignItems="center" justifyContent="space-between" mb={1} flexWrap="wrap" gap={1}>
+                  <Typography variant="h6">Visitors</Typography>
+                  <Chip size="small" variant="outlined" label={`${visitorsTotal} total`} />
+                </Stack>
                 <List dense>
                   {visitors.map((v) => (
                     <ListItemButton
@@ -1111,6 +1157,35 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 placeholder="#bf362e"
                 fullWidth
               />
+              <TextField
+                label="Widget website URL (https://…)"
+                value={widgetWebsiteUrl}
+                onChange={(e) => setWidgetWebsiteUrl(e.target.value)}
+                placeholder="https://example.com"
+                fullWidth
+              />
+              <TextField
+                label="Vector primary source_type (Qdrant payload)"
+                value={widgetSourceType}
+                onChange={(e) => setWidgetSourceType(e.target.value)}
+                placeholder="e.g. mrnwebdesigns_ie — empty uses default"
+                helperText="Must match indexed payload source_type for primary search; secondary bucket remains external."
+                fullWidth
+              />
+              <TextField
+                label="User message bubble color"
+                value={widgetUserMessageColor}
+                onChange={(e) => setWidgetUserMessageColor(e.target.value)}
+                placeholder="#bf362e"
+                fullWidth
+              />
+              <TextField
+                label="Bot message bubble color"
+                value={widgetBotMessageColor}
+                onChange={(e) => setWidgetBotMessageColor(e.target.value)}
+                placeholder="#d5bbb9"
+                fullWidth
+              />
               <TextField label="Widget Header Title" value={widgetHeaderTitle} onChange={(e) => setWidgetHeaderTitle(e.target.value)} fullWidth />
               <TextField
                 label="Welcome Message"
@@ -1262,7 +1337,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                   <Select
                     label="Tenant"
                     value={sourceTenantId}
-                    onChange={(e) => setSourceTenantId(e.target.value)}
+                    onChange={(e) => persistSourceTenantId(e.target.value)}
                   >
                     {tenants.map((t) => (
                       <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>

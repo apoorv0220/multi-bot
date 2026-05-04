@@ -13,7 +13,7 @@ function AppContent({ auth, onLogin, onLogout }) {
 
   const handleSessionExpired = useCallback(() => {
     onLogout();
-    navigate('/admin/chat', { replace: true });
+    navigate('/admin/dashboard/overview', { replace: true });
   }, [navigate, onLogout]);
 
   useEffect(() => {
@@ -35,7 +35,6 @@ function AppContent({ auth, onLogin, onLogout }) {
             <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>Chatbot Control</Typography>
             {auth && (
               <Stack direction="row" spacing={2} alignItems="center">
-                <Link to="/admin/chat">Chat</Link>
                 <Link to="/admin/dashboard/overview">Dashboard</Link>
                 <Button onClick={onLogout} variant="outlined">Logout</Button>
               </Stack>
@@ -46,8 +45,8 @@ function AppContent({ auth, onLogin, onLogout }) {
       <Container maxWidth="xl" disableGutters>
         <Box sx={{ minHeight: isAdminRoute ? "calc(100vh - 64px)" : "100vh" }}>
           <Routes>
-            <Route path="/" element={<Navigate to="/admin/chat" replace />} />
-            <Route path="/admin/chat" element={auth ? <ChatWidget mode="admin" /> : <LoginPage onLogin={onLogin} />} />
+            <Route path="/" element={<Navigate to="/admin/dashboard/overview" replace />} />
+            <Route path="/admin/chat" element={<Navigate to="/admin/dashboard/overview" replace />} />
             <Route path="/admin/dashboard/*" element={auth ? <AdminDashboard role={auth.role} tenantId={auth.tenant_id} tenantIds={auth.tenant_ids || []} /> : <LoginPage onLogin={onLogin} />} />
             <Route path="/admin/dashboard" element={<Navigate to="/admin/dashboard/overview" replace />} />
             <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
@@ -100,6 +99,7 @@ function App() {
     localStorage.removeItem("role");
     localStorage.removeItem("tenant_id");
     localStorage.removeItem("tenant_ids");
+    localStorage.removeItem("admin_dashboard_selected_tenant_id");
   };
 
   return (
