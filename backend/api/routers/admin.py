@@ -109,6 +109,11 @@ async def upload_tenant_avatar(
     return await admin_service.upload_tenant_avatar(tenant_id=tenant_id, file=file, user_ctx=user_ctx, db=db)
 
 
+@router.get("/api/admin/reference/countries")
+async def list_reference_countries(user_ctx=Depends(legacy_main.get_current_user)):
+    return await admin_service.list_reference_countries(user_ctx=user_ctx)
+
+
 @router.get("/api/admin/tenants/{tenant_id}/security")
 async def get_tenant_security_settings(
     tenant_id: str,

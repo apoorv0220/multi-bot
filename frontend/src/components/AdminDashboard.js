@@ -107,6 +107,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [newBlockedIpReason, setNewBlockedIpReason] = useState("");
   const [newBlockedCountry, setNewBlockedCountry] = useState("");
   const [newBlockedCountryReason, setNewBlockedCountryReason] = useState("");
+  const [countryReference, setCountryReference] = useState([]);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetUserId, setResetUserId] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -117,6 +118,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [newWordByCategory, setNewWordByCategory] = useState({});
   const [success, setSuccess] = useState("");
   const sessionRequestRef = useRef(0);
+  const countriesLoadedRef = useRef(false);
   const location = useLocation();
   const navigate = useNavigate();
   const canSelectTenant = role === "superadmin" || tenantIds.length > 1 || tenants.length > 1;
@@ -136,6 +138,14 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     if (!selectedTenant?.avatar_url || clearBrandingAvatar) return "";
     return adminBrandingAvatarSrc(selectedTenant.avatar_url);
   }, [selectedTenant, clearBrandingAvatar]);
+
+  const countryLabelByCode = useMemo(() => {
+    const m = {};
+    (countryReference || []).forEach((c) => {
+      if (c?.code) m[c.code] = c.name;
+    });
+    return m;
+  }, [countryReference]);
 
   const navigateSection = (nextSection) => {
     navigate(`/admin/dashboard/${nextSection}`);
@@ -341,6 +351,20 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   useEffect(() => {
     loadTenants();
   }, [loadTenants]);
+
+  useEffect(() => {
+    if (section !== "settings" || settingsSubsection !== "security") return;
+    if (countriesLoadedRef.current) return;
+    countriesLoadedRef.current = true;
+    (async () => {
+      try {
+        const { data } = await client.get("/api/admin/reference/countries");
+        setCountryReference(data.countries || []);
+      } catch (err) {
+        setError(err?.response?.data?.detail || "Failed loading country list");
+      }
+    })();
+  }, [section, settingsSubsection]);
 
   useEffect(() => {
     const validSections = ["overview", "chats", "jobs", "users", "settings"];
@@ -597,6 +621,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   };
 
   const addBlockedCountry = async () => {
+    if (!newBlockedCountry) {
+      setError("Select a country to block");
+      return;
+    }
     try {
       await client.post(`/api/admin/tenants/${effectiveTenantId}/blocked-countries`, {
         country_code: newBlockedCountry,
@@ -1127,16 +1155,41 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 ))}
               </Stack>
 
-              <Typography variant="subtitle1">Blocked Countries (ISO alpha-2)</Typography>
-              <Stack direction="row" spacing={1}>
-                <TextField label="Country code" value={newBlockedCountry} onChange={(e) => setNewBlockedCountry(e.target.value.toUpperCase())} />
-                <TextField label="Reason" value={newBlockedCountryReason} onChange={(e) => setNewBlockedCountryReason(e.target.value)} />
-                <Button variant="outlined" onClick={addBlockedCountry}>Add Country</Button>
+              <Typography variant="subtitle1">Blocked Countries (GeoIP ISO alpha-2)</Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <FormControl sx={{ minWidth: 280 }}>
+                  <InputLabel id="blocked-country-select-label">Country</InputLabel>
+                  <Select
+                    labelId="blocked-country-select-label"
+                    label="Country"
+                    value={newBlockedCountry}
+                    onChange={(e) => setNewBlockedCountry(e.target.value)}
+                  >
+                    <MenuItem value="">
+                      <em>Select…</em>
+                    </MenuItem>
+                    {countryReference.map((c) => (
+                      <MenuItem key={c.code} value={c.code}>
+                        {c.name} ({c.code})
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <TextField label="Reason" value={newBlockedCountryReason} onChange={(e) => setNewBlockedCountryReason(e.target.value)} sx={{ minWidth: 200 }} />
+                <Button variant="outlined" onClick={addBlockedCountry} disabled={!effectiveTenantId}>
+                  Add Country
+                </Button>
               </Stack>
               <Stack spacing={1}>
                 {blockedCountries.map((item) => (
                   <Stack key={item.id} direction="row" spacing={1} alignItems="center">
-                    <Chip label={item.country_code} />
+                    <Chip
+                      label={
+                        countryLabelByCode[item.country_code]
+                          ? `${countryLabelByCode[item.country_code]} (${item.country_code})`
+                          : item.country_code
+                      }
+                    />
                     {item.reason && <Chip variant="outlined" label={item.reason} />}
                     <Button size="small" color="error" onClick={() => removeBlockedCountry(item.id)}>Remove</Button>
                   </Stack>

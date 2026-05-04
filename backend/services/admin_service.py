@@ -48,6 +48,10 @@ async def get_tenant_security_settings(*, tenant_id, user_ctx, db):
     return await legacy_main.get_tenant_security_settings(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
 
+async def list_reference_countries(*, user_ctx):
+    return await legacy_main.admin_reference_countries(_user_ctx=user_ctx)
+
+
 async def update_tenant_quota_settings(*, tenant_id, payload, user_ctx, db):
     return await legacy_main.update_tenant_quota_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 

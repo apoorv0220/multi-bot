@@ -1547,6 +1547,24 @@ async def admin_visitor_chats(
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
+@app.get("/api/admin/reference/countries")
+async def admin_reference_countries(_user_ctx=Depends(get_current_user)):
+    """ISO 3166-1 alpha-2 list for Security country block UI; matches Country MMDB `iso_code` (e.g. DB-IP Lite)."""
+    import pycountry
+
+    items = []
+    for c in pycountry.countries:
+        code = getattr(c, "alpha_2", None)
+        if code:
+            items.append({"code": code, "name": c.name})
+    items.sort(key=lambda x: (x["name"].lower(), x["code"]))
+    return {
+        "countries": items,
+        "standard": "ISO 3166-1 alpha-2",
+        "geoip_note": "Same codes as GeoIP Country databases (e.g. dbip-country-lite.mmdb country iso_code).",
+    }
+
+
 @app.get("/api/admin/tenants")
 async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_session)):
     if user_ctx["role"] == UserRole.superadmin.value:
