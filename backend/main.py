@@ -576,12 +576,13 @@ async def search_qdrant(
 
     try:
         vector_store = VectorStoreAdapter(qdrant_client)
-        # Primary bucket: tenant-configured Qdrant payload `source_type` (default legacy keyword)
+        # Primary bucket: tenant-configured Qdrant payload `source_type` (default legacy keyword).
+        # Do not set Qdrant score_threshold here: cosine scores for good hits are often ~0.5–0.6
+        # (see docs/migraine-reference/main.py search_qdrant). Chat still filters by score >= 0.3 below.
         primary_bucket_results = vector_store.search(
             collection_name=collection_name,
             query_vector=embedding,
             limit=limit,
-            score_threshold=0.6,
             source_type=primary_st,
         )
 
