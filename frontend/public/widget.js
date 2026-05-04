@@ -1,22 +1,22 @@
 (function() {
   const runtimeConfig = window.RUNTIME_CONFIG || {};
+  // Prefer neutral name; legacy key kept for backward compatibility with older embeds.
+  const cfg = window.CHATBOT_WIDGET_CONFIG || window.MRNWEBDESIGNS_CHATBOT_CONFIG || {};
   // Configuration - set this to your actual deployed URL in production
   const widgetUrl =
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.baseUrl ||
+    cfg.baseUrl ||
     runtimeConfig.WIDGET_BASE_URL ||
     `${window.location.protocol}//${window.location.host}`;
   const apiUrl =
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.apiUrl ||
+    cfg.apiUrl ||
     runtimeConfig.API_BASE_URL ||
     `${window.location.protocol}//${window.location.host}`;
   // Optional embed override for the launcher bubble only. Chat panel colors come from
   // tenant branding (GET /api/public/config → primary_color) when we fetch below.
-  const embedPrimaryColorOverride = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.primaryColor || null;
-  const tenantPublicKey = window.MRNWEBDESIGNS_CHATBOT_CONFIG?.tenantPublicKey || null;
-  const chatbotInitialText =
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.chatbotInitialText || null;
-  const chatbotHeaderTitle =
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG?.chatbotHeaderTitle || null;
+  const embedPrimaryColorOverride = cfg.primaryColor || null;
+  const tenantPublicKey = cfg.tenantPublicKey || null;
+  const chatbotInitialText = cfg.chatbotInitialText || null;
+  const chatbotHeaderTitle = cfg.chatbotHeaderTitle || null;
 
   function postOpenChatConfig(iframe) {
     if (!iframe || !iframe.contentWindow) return;

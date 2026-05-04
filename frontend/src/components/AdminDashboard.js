@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { client } from "../api";
 import {
@@ -26,6 +26,23 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
+
+const adminApiBase = () => String(client.defaults.baseURL || "").replace(/\/+$/, "");
+
+/** Same rule as widget: API base + `/api/assets/...` (or legacy URL containing that path). */
+const adminBrandingAvatarSrc = (raw) => {
+  if (!raw) return "";
+  const base = adminApiBase();
+  if (!base) return raw;
+  let path = String(raw).trim();
+  if (!path.startsWith("/")) {
+    const marker = "/api/assets/";
+    const i = path.indexOf(marker);
+    path = i >= 0 ? path.slice(i) : path;
+  }
+  if (!path.startsWith("/")) return path;
+  return `${base}${path}`;
+};
 
 const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [sessions, setSessions] = useState([]);
@@ -70,6 +87,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [corsAllowedOrigins, setCorsAllowedOrigins] = useState("");
   const [avatarUpload, setAvatarUpload] = useState(null);
+  const [clearBrandingAvatar, setClearBrandingAvatar] = useState(false);
   const [monthlyMessageLimit, setMonthlyMessageLimit] = useState(15000);
   const [quotaReachedMessage, setQuotaReachedMessage] = useState("Monthly message limit reached. Please try again next month.");
   const [idleRatingWaitSeconds, setIdleRatingWaitSeconds] = useState(120);
@@ -99,6 +117,15 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const section = routeParts[0] || "overview";
   const usersSubsection = section === "users" ? (routeParts[1] || "admins") : "admins";
   const settingsSubsection = section === "settings" ? (routeParts[1] || "security") : "security";
+
+  const selectedTenant = useMemo(
+    () => tenants.find((tenant) => tenant.id === sourceTenantId),
+    [tenants, sourceTenantId],
+  );
+  const brandingAvatarPreviewSrc = useMemo(() => {
+    if (!selectedTenant?.avatar_url || clearBrandingAvatar) return "";
+    return adminBrandingAvatarSrc(selectedTenant.avatar_url);
+  }, [selectedTenant, clearBrandingAvatar]);
 
   const navigateSection = (nextSection) => {
     navigate(`/admin/dashboard/${nextSection}`);
@@ -130,6 +157,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       setMonthlyMessageLimit(Number(data.monthly_message_limit || 15000));
       setQuotaReachedMessage(data.quota_reached_message || "Monthly message limit reached. Please try again next month.");
       setIdleRatingWaitSeconds(Number(data.idle_rating_wait_seconds || 120));
+      setCorsAllowedOrigins(data.cors_allowed_origins || "");
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed loading security settings");
     }
@@ -260,6 +288,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setWidgetWelcomeMessage(t.widget_welcome_message || "");
     setPrivacyPolicyUrl(t.privacy_policy_url || "");
     setCorsAllowedOrigins(t.cors_allowed_origins || "");
+    setClearBrandingAvatar(false);
+    setAvatarUpload(null);
   }, [sourceTenantId, tenants]);
 
   useEffect(() => {
@@ -450,14 +480,17 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
 
   const saveBrandingConfig = async () => {
     try {
-      await client.patch(`/api/admin/tenants/${sourceTenantId}/branding`, {
+      const brandingPayload = {
         brand_name: brandName || null,
         widget_primary_color: widgetPrimaryColor || null,
         widget_header_title: widgetHeaderTitle || null,
         widget_welcome_message: widgetWelcomeMessage || null,
         privacy_policy_url: privacyPolicyUrl || null,
-        cors_allowed_origins: corsAllowedOrigins || null,
-      });
+      };
+      if (clearBrandingAvatar && !avatarUpload) {
+        brandingPayload.avatar_url = "";
+      }
+      await client.patch(`/api/admin/tenants/${sourceTenantId}/branding`, brandingPayload);
       if (avatarUpload) {
         const fd = new FormData();
         fd.append("file", avatarUpload);
@@ -465,6 +498,9 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
           headers: { "Content-Type": "multipart/form-data" },
         });
         setAvatarUpload(null);
+        setClearBrandingAvatar(false);
+      } else if (clearBrandingAvatar) {
+        setClearBrandingAvatar(false);
       }
       setSuccess("Branding and widget configuration updated");
       await loadTenants();
@@ -473,34 +509,27 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   };
 
-  const saveQuotaSettings = async () => {
+  const saveSecuritySettings = async () => {
+    if (!effectiveTenantId) return;
     try {
-      const payload = {
+      const quotaPayload = {
         quota_reached_message: quotaReachedMessage,
       };
       if (role === "superadmin") {
-        payload.monthly_message_limit = Number(monthlyMessageLimit || 15000);
+        quotaPayload.monthly_message_limit = Number(monthlyMessageLimit || 15000);
       }
-      await client.patch(`/api/admin/tenants/${effectiveTenantId}/quota`, payload);
-      await client.patch(`/api/admin/tenants/${effectiveTenantId}/branding`, {
-        cors_allowed_origins: corsAllowedOrigins || null,
-      });
-      setSuccess("Quota settings updated");
-      await loadSecuritySettings();
-    } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to update quota settings");
-    }
-  };
-
-  const saveIdleRatingSettings = async () => {
-    try {
+      await client.patch(`/api/admin/tenants/${effectiveTenantId}/quota`, quotaPayload);
       await client.patch(`/api/admin/tenants/${effectiveTenantId}/idle-rating`, {
         idle_rating_wait_seconds: Number(idleRatingWaitSeconds || 120),
       });
-      setSuccess("Idle rating wait time updated");
+      await client.patch(`/api/admin/tenants/${effectiveTenantId}/branding`, {
+        cors_allowed_origins: corsAllowedOrigins || null,
+      });
+      setSuccess("Security settings updated");
       await loadSecuritySettings();
+      await loadTenants();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Failed to update idle rating settings");
+      setError(err?.response?.data?.detail || "Failed to update security settings");
     }
   };
 
@@ -608,7 +637,6 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     URL.revokeObjectURL(url);
   };
 
-  const selectedTenant = tenants.find((t) => t.id === sourceTenantId);
   const aggregateFeedback = sessions.reduce(
     (acc, s) => {
       acc.up += Number(s?.feedback_summary?.up || 0);
@@ -1003,16 +1031,14 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
           <CardContent>
             <Typography variant="h6" mb={1}>Tenant Security and Quota Controls</Typography>
             <Stack spacing={2}>
-              <Stack direction="row" spacing={1}>
-                <TextField
-                  label="Monthly Visitor Message Limit"
-                  type="number"
-                  value={monthlyMessageLimit}
-                  onChange={(e) => setMonthlyMessageLimit(e.target.value)}
-                  disabled={role !== "superadmin"}
-                />
-                <Button variant="contained" onClick={saveQuotaSettings}>Save Quota</Button>
-              </Stack>
+              <TextField
+                label="Monthly Visitor Message Limit"
+                type="number"
+                value={monthlyMessageLimit}
+                onChange={(e) => setMonthlyMessageLimit(e.target.value)}
+                disabled={role !== "superadmin"}
+                sx={{ maxWidth: 360 }}
+              />
               <TextField
                 label="Quota Reached Message"
                 value={quotaReachedMessage}
@@ -1025,15 +1051,16 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 onChange={(e) => setCorsAllowedOrigins(e.target.value)}
                 fullWidth
               />
-              <Stack direction="row" spacing={1}>
-                <TextField
-                  label="Idle Rating Wait (seconds)"
-                  type="number"
-                  value={idleRatingWaitSeconds}
-                  onChange={(e) => setIdleRatingWaitSeconds(e.target.value)}
-                />
-                <Button variant="contained" onClick={saveIdleRatingSettings}>Save Idle Rating</Button>
-              </Stack>
+              <TextField
+                label="Idle Rating Wait (seconds)"
+                type="number"
+                value={idleRatingWaitSeconds}
+                onChange={(e) => setIdleRatingWaitSeconds(e.target.value)}
+                sx={{ maxWidth: 360 }}
+              />
+              <Button variant="contained" onClick={saveSecuritySettings} disabled={!effectiveTenantId}>
+                Save security settings
+              </Button>
 
               <Typography variant="subtitle1">Blocked IPs</Typography>
               <Stack direction="row" spacing={1}>
@@ -1099,10 +1126,55 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 onChange={(e) => setPrivacyPolicyUrl(e.target.value)}
                 fullWidth
               />
-              <Button variant="outlined" component="label">
-                Upload Avatar (max 10MB)
-                <input hidden type="file" accept="image/*" onChange={(e) => setAvatarUpload(e.target.files?.[0] || null)} />
-              </Button>
+              <Stack direction="row" spacing={2} alignItems="flex-start">
+                {brandingAvatarPreviewSrc ? (
+                  <Box component="img" src={brandingAvatarPreviewSrc} alt="Current widget avatar" sx={{ width: 96, height: 96, borderRadius: 1, objectFit: "cover", border: "1px solid", borderColor: "divider" }} />
+                ) : (
+                  <Box
+                    sx={{
+                      width: 96,
+                      height: 96,
+                      borderRadius: 1,
+                      border: "1px dashed",
+                      borderColor: "divider",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "text.secondary",
+                      typography: "caption",
+                      textAlign: "center",
+                      px: 1,
+                    }}
+                  >
+                    {clearBrandingAvatar ? "Avatar removed after save" : "No avatar"}
+                  </Box>
+                )}
+                <Stack spacing={1}>
+                  <Button variant="outlined" component="label">
+                    {avatarUpload ? `Selected: ${avatarUpload.name}` : "Upload avatar (max 10MB)"}
+                    <input
+                      hidden
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        setAvatarUpload(e.target.files?.[0] || null);
+                        if (e.target.files?.[0]) setClearBrandingAvatar(false);
+                      }}
+                    />
+                  </Button>
+                  {selectedTenant?.avatar_url ? (
+                    <Button
+                      variant="text"
+                      color="error"
+                      size="small"
+                      disabled={!!avatarUpload}
+                      onClick={() => setClearBrandingAvatar((v) => !v)}
+                    >
+                      {clearBrandingAvatar ? "Undo remove" : "Remove avatar"}
+                    </Button>
+                  ) : null}
+                </Stack>
+              </Stack>
               <Button variant="contained" onClick={saveBrandingConfig} disabled={!sourceTenantId}>Save Branding</Button>
             </Stack>
           </CardContent>

@@ -21,52 +21,27 @@ const createBotMessage = (text) => ({
   timestamp: new Date(),
 });
 
-/** Reject root-only "/" so we never join assets against an empty base (browser would use the embed origin). */
+/** Reject root-only "/" so joining `/api/assets/...` never yields a host-less URL (resolves to the embed origin). */
 const normalizeWidgetApiUrl = (value) => {
   const s = String(value ?? "").trim();
   if (!s || s === "/") return "";
   return s.replace(/\/+$/, "");
 };
 
-/** Relative /api/assets/... or legacy absolute URLs (e.g. localhost) → absolute API asset URL */
+/** `apiUrl` + path from public config; legacy rows may still store a full URL — strip to `/api/assets/...` first. */
 const resolvePublicAssetUrl = (raw, apiBase) => {
   if (!raw) return "";
-  const trimmed = normalizeWidgetApiUrl(apiBase);
-  if (!trimmed) return "";
-
-  const joinPathToBase = (pathOnly, base) => {
-    try {
-      const withSlash = base.endsWith("/") ? base : `${base}/`;
-      return new URL(pathOnly, withSlash).href;
-    } catch {
-      return `${String(base).replace(/\/+$/, "")}${pathOnly}`;
-    }
-  };
-
-  if (raw.startsWith("/")) {
-    if (/^https?:\/\//i.test(trimmed)) {
-      return joinPathToBase(raw, trimmed);
-    }
-    if (trimmed.startsWith("/") && typeof window !== "undefined" && window.location?.origin) {
-      return joinPathToBase(raw, `${window.location.origin}${trimmed}`);
-    }
-    return joinPathToBase(raw, trimmed);
+  const base = normalizeWidgetApiUrl(apiBase);
+  if (!base) return "";
+  const root = base.replace(/\/+$/, "");
+  let path = raw.trim();
+  if (!path.startsWith("/")) {
+    const marker = "/api/assets/";
+    const i = path.indexOf(marker);
+    path = i >= 0 ? path.slice(i) : path;
   }
-
-  try {
-    const u = new URL(raw);
-    const path = u.pathname + u.search;
-    if (!path.includes("/api/assets/")) return raw;
-    if (/^https?:\/\//i.test(trimmed)) {
-      return joinPathToBase(path, trimmed);
-    }
-    if (trimmed.startsWith("/") && typeof window !== "undefined" && window.location?.origin) {
-      return joinPathToBase(path, `${window.location.origin}${trimmed}`);
-    }
-    return joinPathToBase(path, trimmed);
-  } catch {
-    return raw;
-  }
+  if (!path.startsWith("/")) return path;
+  return `${root}${path}`;
 };
 
 const ChatWidget = ({ mode = "admin" }) => {

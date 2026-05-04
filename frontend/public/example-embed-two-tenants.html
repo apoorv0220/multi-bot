@@ -60,7 +60,7 @@
     <p><strong>Tenant ID:</strong> <code>4c97be2e-0adf-4101-b215-9e612f7b35b7</code></p>
     <p><strong>Demo Public Key:</strong> <code>demo_pub_migraine_4c97be2e</code></p>
     <pre>&lt;script&gt;
-window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+window.CHATBOT_WIDGET_CONFIG = {
   baseUrl: "https://your-frontend-domain",
   apiUrl: "https://your-backend-domain",
   tenantPublicKey: "demo_pub_migraine_4c97be2e"
@@ -75,7 +75,7 @@ window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
     <p><strong>Tenant ID:</strong> <code>7721e85d-9290-4464-b02d-f87f12bc48c0</code></p>
     <p><strong>Demo Public Key:</strong> <code>demo_pub_default_7721e85d</code></p>
     <pre>&lt;script&gt;
-window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+window.CHATBOT_WIDGET_CONFIG = {
   baseUrl: "https://your-frontend-domain",
   apiUrl: "https://your-backend-domain",
   tenantPublicKey: "demo_pub_default_7721e85d"
@@ -114,9 +114,9 @@ window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
 
     function loadTenant(tenantKey) {
       removeExistingWidget();
-      window.MRNWEBDESIGNS_CHATBOT_CONFIG = TENANT_CONFIGS[tenantKey];
+      window.CHATBOT_WIDGET_CONFIG = TENANT_CONFIGS[tenantKey];
       const script = document.createElement("script");
-      script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + "/widget.js";
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
       script.async = true;
       script.dataset.widgetLoader = "true";
       document.body.appendChild(script);

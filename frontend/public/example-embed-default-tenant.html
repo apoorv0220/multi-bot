@@ -20,14 +20,14 @@
   <p>Add this snippet before your closing <code>&lt;/body&gt;</code> tag:</p>
 
   <pre>&lt;script&gt;
-window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+window.CHATBOT_WIDGET_CONFIG = {
   baseUrl: "https://your-frontend-domain",
   apiUrl: "https://your-backend-domain",
   tenantPublicKey: "demo_pub_default_7721e85d"
 };
 (function () {
   const script = document.createElement("script");
-  script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + "/widget.js";
+  script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
   script.async = true;
   document.body.appendChild(script);
 })();
@@ -47,14 +47,14 @@ window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
   <script>
     const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
     const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+    window.CHATBOT_WIDGET_CONFIG = {
       baseUrl: resolvedWidgetBaseUrl,
       apiUrl: resolvedApiBaseUrl,
       tenantPublicKey: "demo_pub_default_7721e85d"
     };
     (function () {
       const script = document.createElement("script");
-      script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + "/widget.js";
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
       script.async = true;
       document.body.appendChild(script);
     })();

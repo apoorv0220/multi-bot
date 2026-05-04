@@ -77,7 +77,7 @@
   <!-- Example of how to embed the chatbot -->
   <script>
     // Optional configuration
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+    window.CHATBOT_WIDGET_CONFIG = {
       baseUrl: `${window.location.protocol}//${window.location.host}`,
       apiUrl: `${window.location.protocol}//${window.location.host}`,
       primaryColor: '#bf362e',
@@ -87,7 +87,7 @@
     // Load the widget script
     (function() {
       const script = document.createElement('script');
-      script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + '/widget.js';
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
       script.async = true;
       document.body.appendChild(script);
     })();

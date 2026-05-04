@@ -6,6 +6,31 @@ export const client = axios.create({
   baseURL: apiUrl || undefined,
 });
 
+let authFailureHandler = () => {};
+
+/** Called after clearing the token on 401 (e.g. navigate to login). */
+export function setAuthFailureHandler(fn) {
+  authFailureHandler = typeof fn === "function" ? fn : () => {};
+}
+
+client.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    const authHeader =
+      err.config?.headers?.Authorization ||
+      (err.config?.headers?.common && err.config.headers.common.Authorization);
+    if (err?.response?.status === 401 && authHeader) {
+      setAuthToken(null);
+      try {
+        authFailureHandler();
+      } catch {
+        /* ignore */
+      }
+    }
+    return Promise.reject(err);
+  },
+);
+
 export function setAuthToken(token) {
   if (token) {
     client.defaults.headers.common.Authorization = `Bearer ${token}`;

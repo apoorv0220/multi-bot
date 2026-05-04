@@ -58,6 +58,7 @@ from models import (
     UserTenant,
 )
 from url_utils import validate_and_fix_url, get_base_url
+from tenant_assets import ensure_tenant_assets_dir, next_avatar_filename, remove_local_avatar_files_for_tenant, tenant_assets_dir
 
 load_dotenv()
 
@@ -1533,7 +1534,10 @@ async def update_tenant_branding(
             raise HTTPException(status_code=400, detail="privacy_policy_url must be a valid URL")
         tenant.privacy_policy_url = privacy_url or None
     if payload.avatar_url is not None:
-        tenant.avatar_url = payload.avatar_url.strip() or None
+        new_val = payload.avatar_url.strip() or None
+        if new_val is None:
+            remove_local_avatar_files_for_tenant(tenant_id)
+        tenant.avatar_url = new_val
     if payload.cors_allowed_origins is not None:
         tenant.cors_allowed_origins = payload.cors_allowed_origins.strip() or None
 
@@ -1568,10 +1572,10 @@ async def upload_tenant_avatar(
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Avatar exceeds 10MB limit")
-    uploads_dir = os.getenv("TENANT_ASSETS_DIR", "/tmp/tenant-assets")
-    os.makedirs(uploads_dir, exist_ok=True)
+    uploads_dir = ensure_tenant_assets_dir()
+    remove_local_avatar_files_for_tenant(tenant_id)
     ext = os.path.splitext(file.filename or "")[1].lower() or ".png"
-    output_name = f"tenant-{tenant_id}-avatar{ext}"
+    output_name = next_avatar_filename(tenant_id, ext)
     output_path = os.path.join(uploads_dir, output_name)
     with open(output_path, "wb") as f:
         f.write(content)
@@ -1595,7 +1599,7 @@ async def upload_tenant_avatar(
 async def get_uploaded_asset(filename: str):
     from fastapi.responses import FileResponse
 
-    uploads_dir = os.getenv("TENANT_ASSETS_DIR", "/tmp/tenant-assets")
+    uploads_dir = tenant_assets_dir()
     safe_name = os.path.basename(filename)
     path = os.path.join(uploads_dir, safe_name)
     if not os.path.exists(path):
@@ -1620,6 +1624,7 @@ async def get_tenant_security_settings(tenant_id: str, user_ctx=Depends(get_curr
         "monthly_message_limit": tenant.monthly_message_limit,
         "quota_reached_message": tenant.quota_reached_message,
         "idle_rating_wait_seconds": tenant.idle_rating_wait_seconds,
+        "cors_allowed_origins": tenant.cors_allowed_origins or "",
         "blocked_ips": [{"id": str(item.id), "ip_address": item.ip_address, "reason": item.reason} for item in blocked_ips],
         "blocked_countries": [{"id": str(item.id), "country_code": item.country_code, "reason": item.reason} for item in blocked_countries],
     }

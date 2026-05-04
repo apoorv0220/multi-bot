@@ -1,14 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppBar, Box, Button, Container, CssBaseline, Stack, Toolbar, Typography } from '@mui/material';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import ChatWidget from './components/ChatWidget';
 import LoginPage from './components/LoginPage';
 import AdminDashboard from './components/AdminDashboard';
-import { loadToken, setAuthToken } from './api';
+import { loadToken, setAuthToken, setAuthFailureHandler } from './api';
 
 function AppContent({ auth, onLogin, onLogout }) {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleSessionExpired = useCallback(() => {
+    onLogout();
+    navigate('/admin/chat', { replace: true });
+  }, [navigate, onLogout]);
+
+  useEffect(() => {
+    setAuthFailureHandler(handleSessionExpired);
+    return () => setAuthFailureHandler(() => {});
+  }, [handleSessionExpired]);
   const isAdminRoute = location.pathname.startsWith("/admin");
   const isEmbedRoute = location.pathname === "/embed";
 

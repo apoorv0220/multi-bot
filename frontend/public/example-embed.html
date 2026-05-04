@@ -40,17 +40,17 @@
   <p>To embed the chatbot on your website, add the following code before the closing <code>&lt;/body&gt;</code> tag:</p>
   
   <pre>&lt;script&gt;
-  // Optional configuration
-  window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+  // Optional configuration (legacy: window.MRNWEBDESIGNS_CHATBOT_CONFIG still works)
+  window.CHATBOT_WIDGET_CONFIG = {
     baseUrl: 'https://your-frontend-domain',    // URL where the chatbot widget is hosted
     apiUrl: 'https://your-backend-domain',      // URL of the backend API
-    tenantPublicKey: 'replace-with-widget-key'  // Per-tenant public embed key
+    tenantPublicKey: 'replace-with-widget-key'  // Per-tenant public embed key (from admin / DB)
   };
   
   // Load the widget script
   (function() {
     const script = document.createElement('script');
-    script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + '/widget.js';
+    script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
     script.async = true;
     document.body.appendChild(script);
   })();
@@ -74,7 +74,7 @@
     const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
     const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
     // Optional configuration
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
+    window.CHATBOT_WIDGET_CONFIG = {
       baseUrl: resolvedWidgetBaseUrl,
       apiUrl: resolvedApiBaseUrl,
       tenantPublicKey: 'demo_pub_default_7721e85d'
@@ -83,7 +83,7 @@
     // Load the widget script
     (function() {
       const script = document.createElement('script');
-      script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + '/widget.js';
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
       script.async = true;
       document.body.appendChild(script);
     })();
