@@ -273,6 +273,57 @@ async def delete_block_word(
     )
 
 
+@router.get("/api/admin/tenants/{tenant_id}/quick-replies")
+async def list_quick_replies(
+    tenant_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.list_quick_replies(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+@router.post("/api/admin/tenants/{tenant_id}/quick-replies")
+async def create_quick_reply(
+    tenant_id: str,
+    payload: legacy_main.QuickReplyCreateRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.create_quick_reply(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.patch("/api/admin/tenants/{tenant_id}/quick-replies/{quick_reply_id}")
+async def update_quick_reply(
+    tenant_id: str,
+    quick_reply_id: str,
+    payload: legacy_main.QuickReplyUpdateRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.update_quick_reply(
+        tenant_id=tenant_id,
+        quick_reply_id=quick_reply_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
+@router.delete("/api/admin/tenants/{tenant_id}/quick-replies/{quick_reply_id}")
+async def delete_quick_reply(
+    tenant_id: str,
+    quick_reply_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.delete_quick_reply(
+        tenant_id=tenant_id,
+        quick_reply_id=quick_reply_id,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
 @router.post("/api/admin/users")
 async def create_admin_user(payload: legacy_main.AdminCreateRequest, user_ctx=Depends(legacy_main.get_current_user), db=Depends(legacy_main.db_session)):
     return await admin_service.create_admin_user(payload=payload, user_ctx=user_ctx, db=db)

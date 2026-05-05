@@ -241,6 +241,27 @@ class TenantBlockWord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class TenantQuickReply(Base):
+    """Per-tenant fuzzy quick replies (admin UI); merged with neutral code defaults for missing triggers."""
+
+    __tablename__ = "tenant_quick_replies"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "trigger_phrase", name="uq_tenant_quick_reply_trigger"),
+        Index("ix_tenant_quick_replies_tenant", "tenant_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    tenant_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    category: Mapped[str] = mapped_column(String(64), nullable=False, default="general")
+    trigger_phrase: Mapped[str] = mapped_column(String(255), nullable=False)
+    response_template: Mapped[str] = mapped_column(Text, nullable=False)
+    similarity_threshold: Mapped[int | None] = mapped_column(nullable=True)
+    priority: Mapped[int] = mapped_column(default=0, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class SessionExperienceRating(Base):
     __tablename__ = "session_experience_ratings"
     __table_args__ = (

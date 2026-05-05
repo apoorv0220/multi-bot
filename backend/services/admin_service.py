@@ -123,6 +123,35 @@ async def delete_block_word(*, tenant_id, category_id, word_id, user_ctx, db):
     )
 
 
+async def list_quick_replies(*, tenant_id, user_ctx, db):
+    return await legacy_main.list_tenant_quick_replies_for_admin(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+async def create_quick_reply(*, tenant_id, payload, user_ctx, db):
+    return await legacy_main.create_tenant_quick_reply_for_admin(
+        tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db
+    )
+
+
+async def update_quick_reply(*, tenant_id, quick_reply_id, payload, user_ctx, db):
+    return await legacy_main.update_tenant_quick_reply_for_admin(
+        tenant_id=tenant_id,
+        quick_reply_id=quick_reply_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
+async def delete_quick_reply(*, tenant_id, quick_reply_id, user_ctx, db):
+    return await legacy_main.delete_tenant_quick_reply_for_admin(
+        tenant_id=tenant_id,
+        quick_reply_id=quick_reply_id,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
 async def create_admin_user(*, payload, user_ctx, db):
     return await legacy_main.create_admin_user(payload=payload, user_ctx=user_ctx, db=db)
 

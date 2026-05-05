@@ -31,7 +31,7 @@ from core.policies import (
 )
 from db import SessionLocal
 from embedder import Embedder, LEGACY_VECTOR_PRIMARY_SOURCE_LABEL, LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
-from fuzzy_matcher import FuzzyMatcher
+from fuzzy_matcher import get_tenant_quick_reply, normalize_trigger_phrase, seed_quick_replies_for_tenant
 from integrations.openai_client import OpenAIClientAdapter
 from integrations.vector_store import VectorStoreAdapter
 from models import (
@@ -49,6 +49,7 @@ from models import (
     Tenant,
     TenantBlockWord,
     TenantBlockWordCategory,
+    TenantQuickReply,
     TenantBlockedCountry,
     TenantBlockedIP,
     UsageEvent,
@@ -76,7 +77,6 @@ app.add_middleware(
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 qdrant_client = None
-fuzzy_matcher = FuzzyMatcher()
 openai_adapter = OpenAIClientAdapter()
 
 
@@ -218,6 +218,24 @@ class BlockWordCategoryRequest(BaseModel):
 
 class BlockWordRequest(BaseModel):
     word: str
+
+
+class QuickReplyCreateRequest(BaseModel):
+    category: str = "general"
+    trigger_phrase: str
+    response_template: str
+    similarity_threshold: Optional[int] = None
+    priority: int = 0
+    enabled: bool = True
+
+
+class QuickReplyUpdateRequest(BaseModel):
+    category: Optional[str] = None
+    trigger_phrase: Optional[str] = None
+    response_template: Optional[str] = None
+    similarity_threshold: Optional[int] = None
+    priority: Optional[int] = None
+    enabled: Optional[bool] = None
 
 
 class TenantIdleRatingConfigRequest(BaseModel):
@@ -642,14 +660,6 @@ def _build_chat_system_prompt(tenant_row: Optional[Tenant]) -> str:
     )
 
 
-def _tenant_uses_legacy_fuzzy_matcher(tenant_row: Optional[Tenant]) -> bool:
-    """MRN-style canned fuzzy replies only when the tenant still uses the legacy primary vector tag (or unset)."""
-    if not tenant_row:
-        return True
-    configured = (tenant_row.widget_source_type or "").strip()
-    return not configured or configured == LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
-
-
 async def preprocess_query(
     original_query: str,
     *,
@@ -920,9 +930,7 @@ async def _run_chat_for_tenant(
                 "sources": [],
             }
 
-    fuzzy_response = None
-    if _tenant_uses_legacy_fuzzy_matcher(tenant_row):
-        fuzzy_response = fuzzy_matcher.get_response(request.message)
+    fuzzy_response = get_tenant_quick_reply(db, tenant_id, request.message, tenant_row)
     if fuzzy_response:
         answer = fuzzy_response["response"]
         sources = fuzzy_response.get("sources", [])
@@ -1039,6 +1047,7 @@ async def register(payload: AuthRequest, db=Depends(db_session)):
     db.add(user)
     db.flush()
     db.add(UserTenant(user_id=user.id, tenant_id=tenant.id, membership_role="owner"))
+    seed_quick_replies_for_tenant(db, tenant.id)
     db.commit()
     ensure_collection_for_tenant(str(tenant.id))
     token = create_access_token(str(user.id), user.role.value, str(tenant.id))
@@ -2099,6 +2108,161 @@ async def delete_tenant_block_word(
     return {"status": "ok", "id": word_id}
 
 
+def _quick_reply_api_dict(row: TenantQuickReply, tenant: Optional[Tenant]) -> dict:
+    from fuzzy_matcher import substitute_quick_reply_template
+
+    return {
+        "id": str(row.id),
+        "category": row.category,
+        "trigger_phrase": row.trigger_phrase,
+        "response_template": row.response_template,
+        "similarity_threshold": row.similarity_threshold,
+        "priority": row.priority,
+        "enabled": row.enabled,
+        "rendered_preview": substitute_quick_reply_template(tenant, row.response_template) if tenant else row.response_template,
+    }
+
+
+async def list_tenant_quick_replies_for_admin(tenant_id: str, user_ctx: dict, db):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    rows = db.execute(
+        select(TenantQuickReply)
+        .where(TenantQuickReply.tenant_id == uuid.UUID(tenant_id))
+        .order_by(TenantQuickReply.category.asc(), TenantQuickReply.priority.desc(), TenantQuickReply.trigger_phrase.asc())
+    ).scalars().all()
+    return [_quick_reply_api_dict(r, tenant) for r in rows]
+
+
+async def create_tenant_quick_reply_for_admin(
+    tenant_id: str,
+    payload: QuickReplyCreateRequest,
+    user_ctx: dict,
+    db,
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    trig = normalize_trigger_phrase(payload.trigger_phrase)
+    if not trig:
+        raise HTTPException(status_code=400, detail="trigger_phrase is required")
+    if payload.similarity_threshold is not None and not (50 <= payload.similarity_threshold <= 100):
+        raise HTTPException(status_code=400, detail="similarity_threshold must be between 50 and 100")
+    exists = db.execute(
+        select(TenantQuickReply).where(
+            TenantQuickReply.tenant_id == tenant.id,
+            TenantQuickReply.trigger_phrase == trig,
+        )
+    ).scalars().first()
+    if exists:
+        raise HTTPException(status_code=400, detail="A quick reply with this trigger already exists")
+    row = TenantQuickReply(
+        tenant_id=tenant.id,
+        category=(payload.category or "general").strip()[:64] or "general",
+        trigger_phrase=trig,
+        response_template=payload.response_template,
+        similarity_threshold=payload.similarity_threshold,
+        priority=payload.priority,
+        enabled=payload.enabled,
+    )
+    db.add(row)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_quick_reply_created",
+            target_type="tenant_quick_reply",
+            target_id=str(row.id),
+            details_json={"trigger_phrase": trig},
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return _quick_reply_api_dict(row, tenant)
+
+
+async def update_tenant_quick_reply_for_admin(
+    tenant_id: str,
+    quick_reply_id: str,
+    payload: QuickReplyUpdateRequest,
+    user_ctx: dict,
+    db,
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    row = db.get(TenantQuickReply, uuid.UUID(quick_reply_id))
+    if not row or str(row.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Quick reply not found")
+    if payload.category is not None:
+        row.category = (payload.category or "general").strip()[:64] or "general"
+    if payload.trigger_phrase is not None:
+        trig = normalize_trigger_phrase(payload.trigger_phrase)
+        if not trig:
+            raise HTTPException(status_code=400, detail="trigger_phrase is required")
+        conflict = db.execute(
+            select(TenantQuickReply).where(
+                TenantQuickReply.tenant_id == row.tenant_id,
+                TenantQuickReply.trigger_phrase == trig,
+                TenantQuickReply.id != row.id,
+            )
+        ).scalars().first()
+        if conflict:
+            raise HTTPException(status_code=400, detail="Another quick reply already uses this trigger")
+        row.trigger_phrase = trig
+    if payload.response_template is not None:
+        row.response_template = payload.response_template
+    if payload.similarity_threshold is not None:
+        if payload.similarity_threshold < 50 or payload.similarity_threshold > 100:
+            raise HTTPException(status_code=400, detail="similarity_threshold must be between 50 and 100")
+        row.similarity_threshold = payload.similarity_threshold
+    if payload.priority is not None:
+        row.priority = payload.priority
+    if payload.enabled is not None:
+        row.enabled = payload.enabled
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=row.tenant_id,
+            action="tenant_quick_reply_updated",
+            target_type="tenant_quick_reply",
+            target_id=str(row.id),
+            details_json={},
+        )
+    )
+    db.commit()
+    db.refresh(row)
+    return _quick_reply_api_dict(row, tenant)
+
+
+async def delete_tenant_quick_reply_for_admin(
+    tenant_id: str,
+    quick_reply_id: str,
+    user_ctx: dict,
+    db,
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    row = db.get(TenantQuickReply, uuid.UUID(quick_reply_id))
+    if not row or str(row.tenant_id) != tenant_id:
+        raise HTTPException(status_code=404, detail="Quick reply not found")
+    db.delete(row)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=uuid.UUID(tenant_id),
+            action="tenant_quick_reply_deleted",
+            target_type="tenant_quick_reply",
+            target_id=quick_reply_id,
+            details_json={},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "id": quick_reply_id}
+
+
 @app.patch("/api/admin/tenants/{tenant_id}/quota")
 async def update_tenant_quota_settings(
     tenant_id: str,
@@ -2315,6 +2479,7 @@ async def create_admin_user(payload: AdminCreateRequest, user_ctx=Depends(get_cu
         tenant = Tenant(name=tenant_name, slug=slug, status="active")
         db.add(tenant)
         db.flush()
+        seed_quick_replies_for_tenant(db, tenant.id)
         if user_ctx["role"] == UserRole.admin.value:
             db.add(UserTenant(user_id=user_ctx["user"].id, tenant_id=tenant.id, membership_role="owner"))
         db.add(

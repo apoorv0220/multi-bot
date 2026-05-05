@@ -5,17 +5,6 @@ from types import SimpleNamespace
 from embedder import Embedder, LEGACY_VECTOR_PRIMARY_SOURCE_LABEL, LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
 
 
-def test_legacy_fuzzy_matcher_gating():
-    from main import _tenant_uses_legacy_fuzzy_matcher
-
-    assert _tenant_uses_legacy_fuzzy_matcher(None) is True
-    assert _tenant_uses_legacy_fuzzy_matcher(SimpleNamespace(widget_source_type=None)) is True
-    assert _tenant_uses_legacy_fuzzy_matcher(SimpleNamespace(widget_source_type="")) is True
-    assert _tenant_uses_legacy_fuzzy_matcher(SimpleNamespace(widget_source_type="  ")) is True
-    assert _tenant_uses_legacy_fuzzy_matcher(SimpleNamespace(widget_source_type=LEGACY_VECTOR_PRIMARY_SOURCE_TYPE)) is True
-    assert _tenant_uses_legacy_fuzzy_matcher(SimpleNamespace(widget_source_type="migraine_ie")) is False
-
-
 def test_tenant_chat_brand_label_fallback():
     from main import _tenant_chat_brand_label
 

@@ -23,6 +23,9 @@ import {
   Pagination,
   Select,
   Stack,
+  Switch,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -116,6 +119,14 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [newCategoryMode, setNewCategoryMode] = useState("exact");
   const [newCategoryResponse, setNewCategoryResponse] = useState("");
   const [newWordByCategory, setNewWordByCategory] = useState({});
+  const [moderationPanel, setModerationPanel] = useState(0);
+  const [quickReplies, setQuickReplies] = useState([]);
+  const [newQrCategory, setNewQrCategory] = useState("general");
+  const [newQrTrigger, setNewQrTrigger] = useState("");
+  const [newQrTemplate, setNewQrTemplate] = useState("");
+  const [newQrPriority, setNewQrPriority] = useState("0");
+  const [newQrThreshold, setNewQrThreshold] = useState("");
+  const [quickReplyDrafts, setQuickReplyDrafts] = useState({});
   const [success, setSuccess] = useState("");
   const sessionRequestRef = useRef(0);
   const countriesLoadedRef = useRef(false);
@@ -199,6 +210,16 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       setBlockWordCategories(data || []);
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed loading block-word settings");
+    }
+  }, [effectiveTenantId]);
+
+  const loadQuickReplies = useCallback(async () => {
+    if (!effectiveTenantId) return;
+    try {
+      const { data } = await client.get(`/api/admin/tenants/${effectiveTenantId}/quick-replies`);
+      setQuickReplies(data || []);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed loading quick replies");
     }
   }, [effectiveTenantId]);
 
@@ -408,6 +429,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         loadSecuritySettings();
       } else if (settingsSubsection === "moderation") {
         loadBlockWordSettings();
+        loadQuickReplies();
       }
     }
   }, [
@@ -426,6 +448,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     loadVisitorsSection,
     loadSecuritySettings,
     loadBlockWordSettings,
+    loadQuickReplies,
   ]);
 
   const loadSession = async (id) => {
@@ -693,6 +716,90 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   };
 
+  const createQuickReply = async () => {
+    if (!newQrTrigger.trim() || !newQrTemplate.trim()) return;
+    try {
+      const body = {
+        category: newQrCategory.trim() || "general",
+        trigger_phrase: newQrTrigger.trim(),
+        response_template: newQrTemplate.trim(),
+        priority: Number(newQrPriority || 0),
+        enabled: true,
+      };
+      const th = newQrThreshold.trim();
+      if (th !== "") body.similarity_threshold = Number(th);
+      await client.post(`/api/admin/tenants/${effectiveTenantId}/quick-replies`, body);
+      setNewQrTrigger("");
+      setNewQrTemplate("");
+      setNewQrPriority("0");
+      setNewQrThreshold("");
+      setSuccess("Quick reply added");
+      await loadQuickReplies();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to add quick reply");
+    }
+  };
+
+  const deleteQuickReply = async (id) => {
+    try {
+      await client.delete(`/api/admin/tenants/${effectiveTenantId}/quick-replies/${id}`);
+      await loadQuickReplies();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to delete quick reply");
+    }
+  };
+
+  const setQuickReplyEnabled = async (row, enabled) => {
+    try {
+      await client.patch(`/api/admin/tenants/${effectiveTenantId}/quick-replies/${row.id}`, { enabled });
+      await loadQuickReplies();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to update quick reply");
+    }
+  };
+
+  const updateQuickReplyDraft = (id, patch) => {
+    setQuickReplyDrafts((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
+  };
+
+  const resetQuickReplyDraft = (row) => {
+    setQuickReplyDrafts((prev) => ({ ...prev, [row.id]: { ...row } }));
+  };
+
+  const saveQuickReplyDraft = async (row) => {
+    const draft = quickReplyDrafts[row.id] || row;
+    try {
+      const body = {
+        category: (draft.category || "general").trim() || "general",
+        trigger_phrase: (draft.trigger_phrase || "").trim(),
+        response_template: draft.response_template || "",
+        priority: Number(draft.priority || 0),
+        enabled: !!draft.enabled,
+      };
+      const th = String(draft.similarity_threshold ?? "").trim();
+      if (th !== "") body.similarity_threshold = Number(th);
+      await client.patch(`/api/admin/tenants/${effectiveTenantId}/quick-replies/${row.id}`, body);
+      setSuccess("Quick reply updated");
+      await loadQuickReplies();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to save quick reply");
+    }
+  };
+
+  const isQuickReplyDirty = (row) => {
+    const draft = quickReplyDrafts[row.id];
+    if (!draft) return false;
+    const toNorm = (v) => String(v ?? "").trim();
+    return (
+      toNorm(draft.category) !== toNorm(row.category) ||
+      toNorm(draft.trigger_phrase) !== toNorm(row.trigger_phrase) ||
+      toNorm(draft.response_template) !== toNorm(row.response_template) ||
+      toNorm(draft.priority) !== toNorm(row.priority) ||
+      toNorm(draft.similarity_threshold) !== toNorm(row.similarity_threshold ?? "") ||
+      Boolean(draft.enabled) !== Boolean(row.enabled)
+    );
+  };
+
   const exportTranscript = () => {
     if (!selected || !messages.length) return;
     const lines = messages.map((m) => `[${m.created_at}] ${m.sender_type.toUpperCase()}: ${m.content}`);
@@ -755,7 +862,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                   <Stack pl={1}>
                     <Button size="small" variant={settingsSubsection === "security" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("security")}>Security</Button>
                     <Button size="small" variant={settingsSubsection === "branding" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("branding")}>Branding</Button>
-                    <Button size="small" variant={settingsSubsection === "moderation" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("moderation")}>Moderation</Button>
+                    <Button size="small" variant={settingsSubsection === "moderation" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("moderation")}>Automated Replies</Button>
                     <Button size="small" variant={settingsSubsection === "db-settings" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("db-settings")}>DB Settings</Button>
                   </Stack>
                 )}
@@ -1331,7 +1438,15 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       {section === "settings" && settingsSubsection === "moderation" && (
         <Card>
           <CardContent>
-            <Typography variant="h6" mb={1}>Block-word Categories</Typography>
+            <Typography variant="h6" mb={1}>Automated replies</Typography>
+            <Typography variant="body2" color="text.secondary" mb={2}>
+              Block words enforce moderation when a trigger matches. Quick replies are fuzzy-matched friendly canned answers (before search).
+            </Typography>
+            <Tabs value={moderationPanel} onChange={(_, v) => setModerationPanel(v)} sx={{ mb: 2 }}>
+              <Tab label="Block word policies" />
+              <Tab label="Quick replies (fuzzy)" />
+            </Tabs>
+            {moderationPanel === 0 && (
             <Stack spacing={2}>
               <Stack direction="row" spacing={1}>
                 <TextField
@@ -1391,6 +1506,102 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 ))}
               </Stack>
             </Stack>
+            )}
+            {moderationPanel === 1 && (
+            <Stack spacing={2}>
+              <Alert severity="info">
+                Response text supports placeholders: a dollar sign plus curly braces around brand_name, assistant_name (from widget header title), or website_url. Deleting a seeded row restores the built-in neutral default for that trigger. Add rows for pricing, contact, emergency wording, etc.
+              </Alert>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                <TextField label="Category (e.g. greeting)" value={newQrCategory} onChange={(e) => setNewQrCategory(e.target.value)} sx={{ minWidth: 180 }} />
+                <TextField label="Trigger phrase" value={newQrTrigger} onChange={(e) => setNewQrTrigger(e.target.value)} sx={{ minWidth: 200 }} placeholder="hello" />
+                <TextField label="Priority" value={newQrPriority} onChange={(e) => setNewQrPriority(e.target.value)} sx={{ width: 100 }} />
+                <TextField label="Fuzzy threshold (50–100, empty=default)" value={newQrThreshold} onChange={(e) => setNewQrThreshold(e.target.value)} sx={{ minWidth: 220 }} />
+              </Stack>
+              <TextField
+                label="Response template"
+                value={newQrTemplate}
+                onChange={(e) => setNewQrTemplate(e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+              />
+              <Button variant="contained" onClick={createQuickReply} disabled={!effectiveTenantId || !newQrTrigger.trim() || !newQrTemplate.trim()}>
+                Add quick reply
+              </Button>
+              <Stack spacing={1}>
+                {quickReplies.map((row) => (
+                  <Card key={row.id} variant="outlined">
+                    <CardContent>
+                      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap mb={1}>
+                        <Chip label={row.category} size="small" />
+                        <Stack direction="row" alignItems="center" spacing={0.5}>
+                          <Typography variant="caption">Enabled</Typography>
+                          <Switch checked={row.enabled} onChange={(e) => setQuickReplyEnabled(row, e.target.checked)} size="small" />
+                        </Stack>
+                        <Button size="small" color="error" onClick={() => deleteQuickReply(row.id)}>Delete</Button>
+                      </Stack>
+                      <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" mb={1}>
+                        <TextField
+                          size="small"
+                          label="Category"
+                          value={(quickReplyDrafts[row.id]?.category ?? row.category) || ""}
+                          onChange={(e) => updateQuickReplyDraft(row.id, { category: e.target.value })}
+                          sx={{ minWidth: 160 }}
+                        />
+                        <TextField
+                          size="small"
+                          label="Trigger"
+                          value={(quickReplyDrafts[row.id]?.trigger_phrase ?? row.trigger_phrase) || ""}
+                          onChange={(e) => updateQuickReplyDraft(row.id, { trigger_phrase: e.target.value })}
+                          sx={{ minWidth: 200 }}
+                        />
+                        <TextField
+                          size="small"
+                          label="Priority"
+                          value={String(quickReplyDrafts[row.id]?.priority ?? row.priority ?? 0)}
+                          onChange={(e) => updateQuickReplyDraft(row.id, { priority: e.target.value })}
+                          sx={{ width: 100 }}
+                        />
+                        <TextField
+                          size="small"
+                          label="Threshold"
+                          value={String(quickReplyDrafts[row.id]?.similarity_threshold ?? (row.similarity_threshold ?? ""))}
+                          onChange={(e) => updateQuickReplyDraft(row.id, { similarity_threshold: e.target.value })}
+                          sx={{ width: 120 }}
+                        />
+                      </Stack>
+                      <TextField
+                        size="small"
+                        label="Response template"
+                        value={(quickReplyDrafts[row.id]?.response_template ?? row.response_template) || ""}
+                        onChange={(e) => updateQuickReplyDraft(row.id, { response_template: e.target.value })}
+                        fullWidth
+                        multiline
+                        minRows={2}
+                      />
+                      <Stack direction="row" spacing={1} mt={1}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          onClick={() => saveQuickReplyDraft(row)}
+                          disabled={!isQuickReplyDirty(row)}
+                        >
+                          Save
+                        </Button>
+                        <Button size="small" variant="text" onClick={() => resetQuickReplyDraft(row)}>
+                          Reset
+                        </Button>
+                      </Stack>
+                      <Typography variant="caption" color="primary" sx={{ mt: 1, display: "block" }}>
+                        Preview: {row.rendered_preview}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+            </Stack>
+            )}
           </CardContent>
         </Card>
       )}
