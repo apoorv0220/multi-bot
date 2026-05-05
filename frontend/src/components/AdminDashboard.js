@@ -834,14 +834,14 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   };
 
   const saveQuickReplyDraft = async (row) => {
-    const draft = quickReplyDrafts[row.id] || row;
+    const draft = { ...row, ...(quickReplyDrafts[row.id] || {}) };
     try {
       const body = {
         category: (draft.category || "general").trim() || "general",
         trigger_phrase: (draft.trigger_phrase || "").trim(),
         response_template: draft.response_template || "",
         priority: Number(draft.priority || 0),
-        enabled: !!draft.enabled,
+        enabled: Boolean(draft.enabled),
       };
       const th = String(draft.similarity_threshold ?? "").trim();
       if (th !== "") body.similarity_threshold = Number(th);

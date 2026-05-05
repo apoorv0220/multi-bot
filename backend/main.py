@@ -443,6 +443,7 @@ def _enforce_public_security_and_quota(
                 headers={
                     "X-Quota-Exceeded": "true",
                     "X-Quota-Message": tenant.quota_reached_message,
+                    "Access-Control-Expose-Headers": "X-Quota-Exceeded, X-Quota-Message",
                 },
             )
 
