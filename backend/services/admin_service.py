@@ -32,6 +32,10 @@ async def list_tenants(*, user_ctx, db):
     return await legacy_main.admin_tenants(user_ctx=user_ctx, db=db)
 
 
+async def create_tenant(*, payload, user_ctx, db):
+    return await legacy_main.create_admin_tenant(payload=payload, user_ctx=user_ctx, db=db)
+
+
 async def update_tenant_source_config(*, tenant_id, payload, user_ctx, db):
     return await legacy_main.update_tenant_source_config(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -162,3 +166,19 @@ async def update_user_status(*, user_id, payload, user_ctx, db):
 
 async def reset_user_password(*, user_id, payload, user_ctx, db):
     return await legacy_main.reset_user_password(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def list_user_tenants(*, user_id, user_ctx, db):
+    return await legacy_main.admin_user_tenants(user_id=user_id, user_ctx=user_ctx, db=db)
+
+
+async def add_user_tenant(*, user_id, payload, user_ctx, db):
+    return await legacy_main.add_admin_user_tenant(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+async def remove_user_tenant(*, user_id, tenant_id, user_ctx, db):
+    return await legacy_main.remove_admin_user_tenant(user_id=user_id, tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+async def set_user_tenants(*, user_id, payload, user_ctx, db):
+    return await legacy_main.set_admin_user_tenants(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)

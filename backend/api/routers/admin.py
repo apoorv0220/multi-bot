@@ -79,6 +79,15 @@ async def admin_tenants(user_ctx=Depends(legacy_main.get_current_user), db=Depen
     return await admin_service.list_tenants(user_ctx=user_ctx, db=db)
 
 
+@router.post("/api/admin/tenants")
+async def create_tenant(
+    payload: legacy_main.TenantCreateRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.create_tenant(payload=payload, user_ctx=user_ctx, db=db)
+
+
 @router.patch("/api/admin/tenants/{tenant_id}/source-config")
 async def update_tenant_source_config(
     tenant_id: str,
@@ -347,6 +356,45 @@ async def reset_user_password(
     db=Depends(legacy_main.db_session),
 ):
     return await admin_service.reset_user_password(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.get("/api/admin/users/{user_id}/tenants")
+async def list_user_tenants(
+    user_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.list_user_tenants(user_id=user_id, user_ctx=user_ctx, db=db)
+
+
+@router.post("/api/admin/users/{user_id}/tenants")
+async def add_user_tenant(
+    user_id: str,
+    payload: legacy_main.UserTenantAssignRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.add_user_tenant(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
+
+
+@router.delete("/api/admin/users/{user_id}/tenants/{tenant_id}")
+async def remove_user_tenant(
+    user_id: str,
+    tenant_id: str,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.remove_user_tenant(user_id=user_id, tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
+@router.put("/api/admin/users/{user_id}/tenants")
+async def set_user_tenants(
+    user_id: str,
+    payload: legacy_main.UserTenantSetRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await admin_service.set_user_tenants(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
 
 
 @router.get("/api/admin/usage/summary")

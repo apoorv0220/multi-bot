@@ -7,11 +7,14 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
+  FormGroup,
   FormControl,
   Grid,
   LinearProgress,
@@ -23,6 +26,8 @@ import {
   Pagination,
   Select,
   Stack,
+  Radio,
+  RadioGroup,
   Switch,
   Tab,
   Tabs,
@@ -100,6 +105,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [corsAllowedOrigins, setCorsAllowedOrigins] = useState("");
   const [avatarUpload, setAvatarUpload] = useState(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState("");
   const [clearBrandingAvatar, setClearBrandingAvatar] = useState(false);
   const [monthlyMessageLimit, setMonthlyMessageLimit] = useState(15000);
   const [quotaReachedMessage, setQuotaReachedMessage] = useState("Monthly message limit reached. Please try again next month.");
@@ -114,6 +120,12 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [resetOpen, setResetOpen] = useState(false);
   const [resetUserId, setResetUserId] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [manageTenantsOpen, setManageTenantsOpen] = useState(false);
+  const [manageTenantUser, setManageTenantUser] = useState(null);
+  const [manageTenantIds, setManageTenantIds] = useState([]);
+  const [manageTenantSaving, setManageTenantSaving] = useState(false);
+  const [createTenantOpen, setCreateTenantOpen] = useState(false);
+  const [newStandaloneTenantName, setNewStandaloneTenantName] = useState("");
   const [blockWordCategories, setBlockWordCategories] = useState([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryMode, setNewCategoryMode] = useState("exact");
@@ -146,9 +158,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     [tenants, sourceTenantId],
   );
   const brandingAvatarPreviewSrc = useMemo(() => {
+    if (avatarPreviewUrl) return avatarPreviewUrl;
     if (!selectedTenant?.avatar_url || clearBrandingAvatar) return "";
     return adminBrandingAvatarSrc(selectedTenant.avatar_url);
-  }, [selectedTenant, clearBrandingAvatar]);
+  }, [selectedTenant, clearBrandingAvatar, avatarPreviewUrl]);
 
   const countryLabelByCode = useMemo(() => {
     const m = {};
@@ -355,7 +368,18 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setCorsAllowedOrigins(t.cors_allowed_origins || "");
     setClearBrandingAvatar(false);
     setAvatarUpload(null);
+    setAvatarPreviewUrl("");
   }, [sourceTenantId, tenants]);
+
+  useEffect(() => {
+    if (!avatarUpload) {
+      setAvatarPreviewUrl("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(avatarUpload);
+    setAvatarPreviewUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [avatarUpload]);
 
   useEffect(() => {
     setChatsPage(1);
@@ -541,6 +565,49 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       setResetOpen(false);
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to reset password");
+    }
+  };
+
+  const openManageUserTenants = async (user) => {
+    try {
+      const { data } = await client.get(`/api/admin/users/${user.id}/tenants`);
+      const ids = (data?.items || []).map((i) => i.tenant_id);
+      setManageTenantUser(user);
+      setManageTenantIds(ids);
+      setManageTenantsOpen(true);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to load user tenant associations");
+    }
+  };
+
+  const saveManageUserTenants = async () => {
+    if (!manageTenantUser) return;
+    setManageTenantSaving(true);
+    try {
+      await client.put(`/api/admin/users/${manageTenantUser.id}/tenants`, { tenant_ids: manageTenantIds });
+      setSuccess("User tenant associations updated");
+      setManageTenantsOpen(false);
+      setManageTenantUser(null);
+      setManageTenantIds([]);
+      await loadAdminsSection(adminsPage);
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to update user tenant associations");
+    } finally {
+      setManageTenantSaving(false);
+    }
+  };
+
+  const createStandaloneTenant = async () => {
+    const name = newStandaloneTenantName.trim();
+    if (!name) return;
+    try {
+      await client.post("/api/admin/tenants", { name });
+      setSuccess("Tenant created");
+      setCreateTenantOpen(false);
+      setNewStandaloneTenantName("");
+      await loadTenants();
+    } catch (err) {
+      setError(err?.response?.data?.detail || "Failed to create tenant");
     }
   };
 
@@ -894,6 +961,11 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
           )}
           <Button variant="outlined" onClick={reindex}>Trigger Reindex</Button>
           {(role === "superadmin" || role === "admin") && (
+            <Button variant="outlined" onClick={() => setCreateTenantOpen(true)}>
+              Create Tenant
+            </Button>
+          )}
+          {(role === "superadmin" || role === "admin") && (
             <Button variant="contained" onClick={() => setCreateOpen(true)}>
               {role === "superadmin" ? "Add Admin/Manager" : "Add Manager"}
             </Button>
@@ -1087,6 +1159,11 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                         {u.is_active ? "Deactivate" : "Activate"}
                       </Button>
                       <Button size="small" onClick={() => openReset(u.id)}>Reset Password</Button>
+                      {(role === "superadmin" || (role === "admin" && u.role === "manager")) && (
+                        <Button size="small" onClick={() => openManageUserTenants(u)}>
+                          Manage Tenants
+                        </Button>
+                      )}
                     </>
                   )}
                 </Stack>
@@ -1416,6 +1493,15 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                       }}
                     />
                   </Button>
+                  {avatarUpload ? (
+                    <Button
+                      variant="text"
+                      size="small"
+                      onClick={() => setAvatarUpload(null)}
+                    >
+                      Discard selected file
+                    </Button>
+                  ) : null}
                   {selectedTenant?.avatar_url ? (
                     <Button
                       variant="text"
@@ -1721,6 +1807,90 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
               (adminTenantMode === "new" ? !newTenantName.trim() : !adminTenantId)
             }
           >
+            Create
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={manageTenantsOpen} onClose={() => setManageTenantsOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Manage User Tenants</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              {manageTenantUser ? `User: ${manageTenantUser.email} (${manageTenantUser.role})` : ""}
+            </Typography>
+            <FormControl fullWidth>
+              {manageTenantUser?.role === "manager" ? (
+                <RadioGroup
+                  value={manageTenantIds[0] || ""}
+                  onChange={(e) => setManageTenantIds(e.target.value ? [e.target.value] : [])}
+                >
+                  {tenants.map((t) => (
+                    <FormControlLabel
+                      key={t.id}
+                      value={t.id}
+                      control={<Radio size="small" />}
+                      label={`${t.name}${role === "superadmin" ? ` (${t.id})` : ""}`}
+                    />
+                  ))}
+                </RadioGroup>
+              ) : (
+                <FormGroup>
+                  {tenants.map((t) => (
+                    <FormControlLabel
+                      key={t.id}
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={manageTenantIds.includes(t.id)}
+                          onChange={(e) => {
+                            setManageTenantIds((prev) =>
+                              e.target.checked ? [...new Set([...prev, t.id])] : prev.filter((id) => id !== t.id)
+                            );
+                          }}
+                        />
+                      }
+                      label={`${t.name}${role === "superadmin" ? ` (${t.id})` : ""}`}
+                    />
+                  ))}
+                </FormGroup>
+              )}
+            </FormControl>
+            <Typography variant="caption" color="text.secondary">
+              Managers can only have one tenant. Admins can have multiple.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setManageTenantsOpen(false)} disabled={manageTenantSaving}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={saveManageUserTenants}
+            disabled={
+              !manageTenantUser ||
+              manageTenantSaving ||
+              (manageTenantUser?.role === "manager" ? manageTenantIds.length !== 1 : false)
+            }
+          >
+            Save Associations
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={createTenantOpen} onClose={() => setCreateTenantOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Create Tenant</DialogTitle>
+        <DialogContent>
+          <TextField
+            sx={{ mt: 1 }}
+            label="Tenant name"
+            value={newStandaloneTenantName}
+            onChange={(e) => setNewStandaloneTenantName(e.target.value)}
+            fullWidth
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCreateTenantOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={createStandaloneTenant} disabled={!newStandaloneTenantName.trim()}>
             Create
           </Button>
         </DialogActions>

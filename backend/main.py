@@ -172,6 +172,18 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class UserTenantAssignRequest(BaseModel):
+    tenant_id: str
+
+
+class UserTenantSetRequest(BaseModel):
+    tenant_ids: list[str]
+
+
+class TenantCreateRequest(BaseModel):
+    name: str
+
+
 class TenantSourceConfigRequest(BaseModel):
     source_db_url: Optional[str] = None
     source_db_type: Optional[str] = None
@@ -1505,6 +1517,205 @@ async def admin_users(
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
+@app.get("/api/admin/users/{user_id}/tenants")
+async def admin_user_tenants(user_id: str, user_ctx=Depends(get_current_user), db=Depends(db_session)):
+    target_user = db.get(User, uuid.UUID(user_id))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    require_role(user_ctx, [UserRole.superadmin.value, UserRole.admin.value])
+    if user_ctx["role"] != UserRole.superadmin.value:
+        actor_tenants = set(get_accessible_tenant_ids(db, user_ctx))
+        if not actor_tenants:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        memberships = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+        if not any(str(m.tenant_id) in actor_tenants for m in memberships):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    memberships = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+    tenant_map = {str(t.id): t for t in db.execute(select(Tenant).where(Tenant.id.in_([m.tenant_id for m in memberships]))).scalars().all()} if memberships else {}
+    items = []
+    for m in memberships:
+        t = tenant_map.get(str(m.tenant_id))
+        items.append(
+            {
+                "tenant_id": str(m.tenant_id),
+                "tenant_name": t.name if t else None,
+                "membership_role": m.membership_role,
+            }
+        )
+    return {"user_id": user_id, "items": items}
+
+
+@app.post("/api/admin/users/{user_id}/tenants")
+async def add_admin_user_tenant(
+    user_id: str,
+    payload: UserTenantAssignRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    target_user = db.get(User, uuid.UUID(user_id))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    tenant = db.get(Tenant, uuid.UUID(payload.tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    require_role(user_ctx, [UserRole.superadmin.value, UserRole.admin.value])
+    if user_ctx["role"] != UserRole.superadmin.value:
+        if target_user.role != UserRole.manager:
+            raise HTTPException(status_code=403, detail="Admins can only reassign managers")
+        actor_tenants = set(get_accessible_tenant_ids(db, user_ctx))
+        if str(tenant.id) not in actor_tenants:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    existing = db.execute(
+        select(UserTenant).where(UserTenant.user_id == target_user.id, UserTenant.tenant_id == tenant.id)
+    ).scalars().first()
+    if existing:
+        return {"status": "ok", "tenant_id": str(tenant.id), "already_exists": True}
+
+    if target_user.role == UserRole.manager:
+        current = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+        if current:
+            raise HTTPException(status_code=400, detail="Managers can only be assigned to one tenant")
+
+    db.add(UserTenant(user_id=target_user.id, tenant_id=tenant.id, membership_role="admin"))
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="user_tenant_added",
+            target_type="user_tenant",
+            target_id=f"{user_id}:{tenant.id}",
+            details_json={"user_id": user_id, "tenant_id": str(tenant.id)},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "tenant_id": str(tenant.id)}
+
+
+@app.delete("/api/admin/users/{user_id}/tenants/{tenant_id}")
+async def remove_admin_user_tenant(
+    user_id: str,
+    tenant_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    target_user = db.get(User, uuid.UUID(user_id))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    require_role(user_ctx, [UserRole.superadmin.value, UserRole.admin.value])
+    if user_ctx["role"] != UserRole.superadmin.value:
+        if target_user.role != UserRole.manager:
+            raise HTTPException(status_code=403, detail="Admins can only reassign managers")
+        actor_tenants = set(get_accessible_tenant_ids(db, user_ctx))
+        if tenant_id not in actor_tenants:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    link = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id, UserTenant.tenant_id == tenant.id)).scalars().first()
+    if not link:
+        raise HTTPException(status_code=404, detail="User-tenant association not found")
+
+    remaining = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+    if target_user.role in (UserRole.admin, UserRole.manager) and len(remaining) <= 1:
+        raise HTTPException(status_code=400, detail="User must remain associated with at least one tenant")
+
+    db.delete(link)
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="user_tenant_removed",
+            target_type="user_tenant",
+            target_id=f"{user_id}:{tenant_id}",
+            details_json={"user_id": user_id, "tenant_id": tenant_id},
+        )
+    )
+    db.commit()
+    return {"status": "ok", "tenant_id": tenant_id}
+
+
+@app.put("/api/admin/users/{user_id}/tenants")
+async def set_admin_user_tenants(
+    user_id: str,
+    payload: UserTenantSetRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    target_user = db.get(User, uuid.UUID(user_id))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    require_role(user_ctx, [UserRole.superadmin.value, UserRole.admin.value])
+
+    next_ids = list(dict.fromkeys([str(tid) for tid in (payload.tenant_ids or []) if str(tid).strip()]))
+    if target_user.role == UserRole.manager and len(next_ids) != 1:
+        raise HTTPException(status_code=400, detail="Managers must be assigned to exactly one tenant")
+    if target_user.role == UserRole.admin and len(next_ids) < 1:
+        raise HTTPException(status_code=400, detail="Admin must remain associated with at least one tenant")
+    if target_user.role == UserRole.superadmin:
+        raise HTTPException(status_code=400, detail="Superadmin associations are managed by role")
+
+    next_uuids = []
+    for tid in next_ids:
+        tenant = db.get(Tenant, uuid.UUID(tid))
+        if not tenant:
+            raise HTTPException(status_code=404, detail=f"Tenant not found: {tid}")
+        next_uuids.append(tenant.id)
+
+    if user_ctx["role"] != UserRole.superadmin.value:
+        actor_tenants = set(get_accessible_tenant_ids(db, user_ctx))
+        if not actor_tenants:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        current_links = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+        if not any(str(m.tenant_id) in actor_tenants for m in current_links):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        if target_user.role != UserRole.manager:
+            raise HTTPException(status_code=403, detail="Admins can only reassign managers")
+        if not all(str(tid) in actor_tenants for tid in next_ids):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    current_links = db.execute(select(UserTenant).where(UserTenant.user_id == target_user.id)).scalars().all()
+    current_set = {str(m.tenant_id) for m in current_links}
+    next_set = set(next_ids)
+
+    for m in current_links:
+        if str(m.tenant_id) not in next_set:
+            db.delete(m)
+            db.add(
+                AuditLog(
+                    actor_user_id=user_ctx["user"].id,
+                    actor_role=user_ctx["role"],
+                    tenant_id=m.tenant_id,
+                    action="user_tenant_removed",
+                    target_type="user_tenant",
+                    target_id=f"{user_id}:{m.tenant_id}",
+                    details_json={"user_id": user_id, "tenant_id": str(m.tenant_id)},
+                )
+            )
+
+    for tid in next_set:
+        if tid not in current_set:
+            db.add(UserTenant(user_id=target_user.id, tenant_id=uuid.UUID(tid), membership_role="admin"))
+            db.add(
+                AuditLog(
+                    actor_user_id=user_ctx["user"].id,
+                    actor_role=user_ctx["role"],
+                    tenant_id=uuid.UUID(tid),
+                    action="user_tenant_added",
+                    target_type="user_tenant",
+                    target_id=f"{user_id}:{tid}",
+                    details_json={"user_id": user_id, "tenant_id": tid},
+                )
+            )
+
+    db.commit()
+    return {"status": "ok", "user_id": user_id, "tenant_ids": next_ids}
+
+
 @app.get("/api/admin/visitors")
 async def admin_visitors(
     user_ctx=Depends(get_current_user),
@@ -1668,6 +1879,42 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
         }
         for t in tenants
     ]
+
+
+@app.post("/api/admin/tenants")
+async def create_admin_tenant(payload: TenantCreateRequest, user_ctx=Depends(get_current_user), db=Depends(db_session)):
+    require_role(user_ctx, [UserRole.superadmin.value, UserRole.admin.value])
+    tenant_name = (payload.name or "").strip()
+    if not tenant_name:
+        raise HTTPException(status_code=400, detail="name is required")
+    existing_tenant = db.execute(select(Tenant).where(Tenant.name == tenant_name)).scalar_one_or_none()
+    if existing_tenant:
+        raise HTTPException(status_code=400, detail="Tenant name already in use")
+    base_slug = _slugify(tenant_name)
+    slug = base_slug
+    suffix = 1
+    while db.execute(select(Tenant).where(Tenant.slug == slug)).scalar_one_or_none():
+        suffix += 1
+        slug = f"{base_slug}-{suffix}"
+    tenant = Tenant(name=tenant_name, slug=slug, status="active")
+    db.add(tenant)
+    db.flush()
+    seed_quick_replies_for_tenant(db, tenant.id)
+    if user_ctx["role"] == UserRole.admin.value:
+        db.add(UserTenant(user_id=user_ctx["user"].id, tenant_id=tenant.id, membership_role="owner"))
+    db.add(
+        AuditLog(
+            actor_user_id=user_ctx["user"].id,
+            actor_role=user_ctx["role"],
+            tenant_id=tenant.id,
+            action="tenant_created",
+            target_type="tenant",
+            target_id=str(tenant.id),
+            details_json={"name": tenant.name, "slug": tenant.slug},
+        )
+    )
+    db.commit()
+    return {"id": str(tenant.id), "name": tenant.name, "slug": tenant.slug, "status": tenant.status}
 
 
 @app.patch("/api/admin/tenants/{tenant_id}/source-config")
