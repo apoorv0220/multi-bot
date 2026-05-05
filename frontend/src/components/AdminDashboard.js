@@ -89,9 +89,13 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     typeof window !== "undefined" ? localStorage.getItem(DASHBOARD_SELECTED_TENANT_KEY) || "" : "",
   );
   const [sourceDbUrl, setSourceDbUrl] = useState("");
-  const [sourceDbType, setSourceDbType] = useState("mysql");
+  const [sourceDbType, setSourceDbType] = useState("wordpress");
   const [sourceTablePrefix, setSourceTablePrefix] = useState("wp_");
   const [sourceUrlTable, setSourceUrlTable] = useState("wp_custom_urls");
+  const [sourceMode, setSourceMode] = useState("wordpress");
+  const [sourceStaticUrlsJson, setSourceStaticUrlsJson] = useState("");
+  const [sourceDomainAliases, setSourceDomainAliases] = useState("");
+  const [sourceCanonicalBaseUrl, setSourceCanonicalBaseUrl] = useState("");
   const [brandName, setBrandName] = useState("");
   const [widgetPrimaryColor, setWidgetPrimaryColor] = useState("#bf362e");
   const [widgetWebsiteUrl, setWidgetWebsiteUrl] = useState("");
@@ -351,9 +355,13 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     const t = tenants.find((tenant) => tenant.id === sourceTenantId);
     if (!t) return;
     setSourceDbUrl(t.source_db_url || "");
-    setSourceDbType(t.source_db_type || "mysql");
+    setSourceDbType(t.source_db_type || "wordpress");
     setSourceTablePrefix(t.source_table_prefix || "wp_");
     setSourceUrlTable(t.source_url_table || "wp_custom_urls");
+    setSourceMode(t.source_mode || "wordpress");
+    setSourceStaticUrlsJson(t.source_static_urls_json || "");
+    setSourceDomainAliases(t.source_domain_aliases || "");
+    setSourceCanonicalBaseUrl(t.source_canonical_base_url || "");
     setBrandName(t.brand_name || "");
     setWidgetPrimaryColor(t.widget_primary_color || "#bf362e");
     setWidgetWebsiteUrl(t.widget_website_url || "");
@@ -618,6 +626,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         source_db_type: sourceDbType || null,
         source_table_prefix: sourceTablePrefix || null,
         source_url_table: sourceUrlTable || null,
+        source_mode: sourceMode || null,
+        source_static_urls_json: sourceStaticUrlsJson || null,
+        source_domain_aliases: sourceDomainAliases || null,
+        source_canonical_base_url: sourceCanonicalBaseUrl || null,
       });
       setSuccess("Tenant source settings updated");
       await loadTenants();
@@ -1727,6 +1739,18 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 onChange={(e) => setSourceDbType(e.target.value)}
                 fullWidth
               />
+              <FormControl fullWidth>
+                <InputLabel>Source Mode</InputLabel>
+                <Select
+                  label="Source Mode"
+                  value={sourceMode}
+                  onChange={(e) => setSourceMode(e.target.value)}
+                >
+                  <MenuItem value="wordpress">WordPress only</MenuItem>
+                  <MenuItem value="static">Static URLs only</MenuItem>
+                  <MenuItem value="mixed">WordPress + Static URLs</MenuItem>
+                </Select>
+              </FormControl>
               <TextField
                 label="Table Prefix"
                 value={sourceTablePrefix}
@@ -1738,6 +1762,31 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 value={sourceUrlTable}
                 onChange={(e) => setSourceUrlTable(e.target.value)}
                 fullWidth
+              />
+              <TextField
+                label="Canonical Base URL"
+                value={sourceCanonicalBaseUrl}
+                onChange={(e) => setSourceCanonicalBaseUrl(e.target.value)}
+                helperText="Used to normalize equivalent hosts (e.g. prod/staging)"
+                fullWidth
+              />
+              <TextField
+                label="Domain Aliases"
+                value={sourceDomainAliases}
+                onChange={(e) => setSourceDomainAliases(e.target.value)}
+                helperText="Comma or newline separated URLs to treat as aliases"
+                fullWidth
+                multiline
+                minRows={2}
+              />
+              <TextField
+                label="Static Source URLs (JSON array or newline list)"
+                value={sourceStaticUrlsJson}
+                onChange={(e) => setSourceStaticUrlsJson(e.target.value)}
+                helperText='Examples: ["https://www.chilliapple.co.uk/"] or one URL per line'
+                fullWidth
+                multiline
+                minRows={6}
               />
               <Stack direction="row" spacing={1} alignItems="center">
                 <Button variant="contained" onClick={saveSourceConfig} disabled={!sourceTenantId}>Save Source Settings</Button>

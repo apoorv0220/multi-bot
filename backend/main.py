@@ -189,6 +189,10 @@ class TenantSourceConfigRequest(BaseModel):
     source_db_type: Optional[str] = None
     source_table_prefix: Optional[str] = None
     source_url_table: Optional[str] = None
+    source_mode: Optional[str] = None
+    source_static_urls_json: Optional[str] = None
+    source_domain_aliases: Optional[str] = None
+    source_canonical_base_url: Optional[str] = None
 
 
 class TenantQuotaConfigRequest(BaseModel):
@@ -545,6 +549,82 @@ def _parse_source_dsn(dsn: Optional[str], table_prefix: Optional[str], url_table
     if parsed.password:
         cfg["password"] = unquote(parsed.password)
     return cfg
+
+
+def _is_http_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    except Exception:
+        return False
+
+
+def _canonicalize_source_url(url: str, domain_aliases: Optional[List[str]] = None, canonical_base: Optional[str] = None) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return ""
+    query_pairs = []
+    for pair in (parsed.query or "").split("&"):
+        if not pair:
+            continue
+        key = pair.split("=", 1)[0].strip().lower()
+        if key.startswith("utm_") or key in {"gclid", "fbclid", "msclkid"}:
+            continue
+        query_pairs.append(pair)
+    query = "&".join(query_pairs)
+    path = parsed.path or "/"
+    if path != "/" and path.endswith("/"):
+        path = path.rstrip("/")
+    hostname = parsed.netloc.lower()
+    alias_set = {a.lower() for a in (domain_aliases or []) if a}
+    canonical_host = ""
+    if canonical_base:
+        cb = urlparse(canonical_base)
+        canonical_host = (cb.netloc or "").lower()
+    if canonical_host and (hostname in alias_set or hostname == canonical_host):
+        hostname = canonical_host
+    normalized = f"https://{hostname}{path}"
+    if query:
+        normalized = f"{normalized}?{query}"
+    return normalized
+
+
+def _normalize_source_static_urls_json(
+    raw_value: Optional[str],
+    domain_aliases: Optional[List[str]] = None,
+    canonical_base: Optional[str] = None,
+) -> Optional[str]:
+    if raw_value is None:
+        return None
+    text = raw_value.strip()
+    if not text:
+        return None
+    urls: List[str] = []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            urls = [str(v).strip() for v in parsed]
+    except Exception:
+        urls = [line.strip() for line in text.splitlines() if line.strip()]
+    if not urls:
+        return None
+    deny_fragments = ("/wp-admin", "/wp-login.php", "/xmlrpc.php")
+    normalized = []
+    seen = set()
+    for url in urls:
+        cu = _canonicalize_source_url(url, domain_aliases=domain_aliases, canonical_base=canonical_base)
+        if not cu:
+            continue
+        if any(fragment in cu for fragment in deny_fragments):
+            continue
+        if cu in seen:
+            continue
+        seen.add(cu)
+        normalized.append(cu)
+    return json.dumps(normalized)
 
 
 def _initialize_qdrant_client_with_retries(max_retries: int = 10, retry_delay: float = 2.0):
@@ -1861,6 +1941,10 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "source_db_type": t.source_db_type,
             "source_table_prefix": t.source_table_prefix,
             "source_url_table": t.source_url_table,
+            "source_mode": t.source_mode,
+            "source_static_urls_json": t.source_static_urls_json,
+            "source_domain_aliases": t.source_domain_aliases,
+            "source_canonical_base_url": t.source_canonical_base_url,
             "has_source_db_url": bool(t.source_db_url),
             "brand_name": t.brand_name,
             "widget_primary_color": t.widget_primary_color,
@@ -1925,10 +2009,42 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
     if user_ctx["role"] != UserRole.superadmin.value and str(tenant.id) not in get_accessible_tenant_ids(db, user_ctx):
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    source_mode = (payload.source_mode or "").strip().lower() if payload.source_mode is not None else None
+    if source_mode is not None and source_mode not in {"wordpress", "static", "mixed", ""}:
+        raise HTTPException(status_code=400, detail="source_mode must be one of: wordpress, static, mixed")
+    source_mode = source_mode or None
+
+    canonical_base = None
+    if payload.source_canonical_base_url is not None:
+        canonical_base = (payload.source_canonical_base_url or "").strip() or None
+        if canonical_base and not _is_http_url(canonical_base):
+            raise HTTPException(status_code=400, detail="source_canonical_base_url must be a valid http(s) URL")
+
+    domain_aliases_csv = None
+    alias_values: List[str] = []
+    if payload.source_domain_aliases is not None:
+        raw_aliases = payload.source_domain_aliases.strip()
+        if raw_aliases:
+            alias_values = [a.strip() for a in re.split(r"[,\n]+", raw_aliases) if a.strip()]
+            invalid_aliases = [a for a in alias_values if not _is_http_url(a)]
+            if invalid_aliases:
+                raise HTTPException(status_code=400, detail="source_domain_aliases must be comma/newline separated http(s) URLs")
+            domain_aliases_csv = ",".join(alias_values)
+
+    source_static_urls_json = _normalize_source_static_urls_json(
+        payload.source_static_urls_json,
+        domain_aliases=alias_values,
+        canonical_base=canonical_base,
+    )
+
     tenant.source_db_url = payload.source_db_url
     tenant.source_db_type = payload.source_db_type
     tenant.source_table_prefix = payload.source_table_prefix
     tenant.source_url_table = payload.source_url_table
+    tenant.source_mode = source_mode
+    tenant.source_static_urls_json = source_static_urls_json
+    tenant.source_domain_aliases = domain_aliases_csv
+    tenant.source_canonical_base_url = canonical_base
     tenant.updated_at = datetime.now(timezone.utc)
     db.add(
         AuditLog(
@@ -1938,7 +2054,11 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
             action="tenant_source_config_updated",
             target_type="tenant",
             target_id=str(tenant.id),
-            details_json={"source_db_type": payload.source_db_type},
+            details_json={
+                "source_db_type": payload.source_db_type,
+                "source_mode": source_mode,
+                "static_url_count": len(json.loads(source_static_urls_json or "[]")),
+            },
         )
     )
     db.commit()
@@ -3058,6 +3178,10 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
                     tenant.source_table_prefix,
                     tenant.source_url_table,
                 )
+                source_cfg["source_mode"] = (tenant.source_mode or "").strip() or "wordpress"
+                source_cfg["source_static_urls_json"] = tenant.source_static_urls_json
+                source_cfg["source_domain_aliases"] = tenant.source_domain_aliases
+                source_cfg["source_canonical_base_url"] = tenant.source_canonical_base_url
             payload_st = LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
             payload_label = LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
             url_fb = None

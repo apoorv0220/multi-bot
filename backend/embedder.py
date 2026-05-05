@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Configure proper logging
 logging.basicConfig(
@@ -105,6 +106,11 @@ class Embedder:
         lb = (vector_payload_source_label or "").strip()
         self.vector_payload_source_label = lb or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
         self.url_fallback_base = (url_fallback_base or "").strip() or None
+        self.source_mode = (self.source_config.get("source_mode") or "wordpress").strip().lower()
+        self.source_static_urls_json = self.source_config.get("source_static_urls_json")
+        raw_aliases = (self.source_config.get("source_domain_aliases") or "").strip()
+        self.source_domain_aliases = [a.strip() for a in raw_aliases.split(",") if a.strip()]
+        self.source_canonical_base_url = (self.source_config.get("source_canonical_base_url") or "").strip() or None
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -333,6 +339,7 @@ class Embedder:
                             "date": str(post['date']),
                             "source": self.vector_payload_source_label,
                             "source_type": self.vector_payload_source_type,
+                            "content_bucket": "wordpress",
                         }
                         
                         # Create point with UUID format
@@ -406,8 +413,8 @@ class Embedder:
                         filter=models.Filter(
                             must=[
                                 models.FieldCondition(
-                                    key="source_type",
-                                    match=models.MatchValue(value=self.vector_payload_source_type),
+                                    key="content_bucket",
+                                    match=models.MatchValue(value="wordpress"),
                                 )
                             ]
                         )
@@ -532,7 +539,7 @@ class Embedder:
                 point = PointStruct(
                     id=point_id,
                     vector=embedding,
-                    payload=content
+                    payload={**content, "content_bucket": "external_url"}
                 )
                 
                 points.append(point)
@@ -564,17 +571,125 @@ class Embedder:
                 logger.info(f"Uploaded {min(i+batch_size, len(points))}/{len(points)} external URLs")
         
         logger.info(f"Successfully embedded {len(points)} external URLs")
+
+    def _canonicalize_url_for_static_source(self, url: str) -> str:
+        raw = (url or "").strip()
+        if not raw:
+            return ""
+        parsed = urlparse(raw)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return ""
+        path = parsed.path or "/"
+        if path != "/" and path.endswith("/"):
+            path = path.rstrip("/")
+        query_pairs = []
+        for pair in (parsed.query or "").split("&"):
+            if not pair:
+                continue
+            key = pair.split("=", 1)[0].strip().lower()
+            if key.startswith("utm_") or key in {"gclid", "fbclid", "msclkid"}:
+                continue
+            query_pairs.append(pair)
+        query = "&".join(query_pairs)
+        canonical_host = ""
+        if self.source_canonical_base_url:
+            canonical_host = (urlparse(self.source_canonical_base_url).netloc or "").lower()
+        host = parsed.netloc.lower()
+        alias_set = {urlparse(a).netloc.lower() for a in self.source_domain_aliases if a}
+        if canonical_host and (host == canonical_host or host in alias_set):
+            host = canonical_host
+        normalized = f"https://{host}{path}"
+        if query:
+            normalized = f"{normalized}?{query}"
+        return normalized
+
+    def _get_static_urls(self) -> List[Dict[str, str]]:
+        raw = self.source_static_urls_json
+        if not raw:
+            return []
+        entries: List[str] = []
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                entries = [str(item).strip() for item in parsed if str(item).strip()]
+        except Exception:
+            entries = [line.strip() for line in str(raw).splitlines() if line.strip()]
+        seen = set()
+        out = []
+        for url in entries:
+            cu = self._canonicalize_url_for_static_source(url)
+            if not cu or cu in seen:
+                continue
+            seen.add(cu)
+            out.append(
+                {
+                    "url": cu,
+                    "title": f"{self.vector_payload_source_label} website content",
+                    "description": f"Static website content from {cu}",
+                }
+            )
+        return out
+
+    async def embed_static_urls(self) -> Dict[str, Any]:
+        static_urls = self._get_static_urls()
+        if not static_urls:
+            logger.info("No static URLs configured")
+            return {"status": "completed", "total_urls": 0, "successful_embeddings": 0}
+
+        logger.info(f"Scraping and embedding {len(static_urls)} static URLs...")
+        scraped_contents = await scrape_urls(static_urls)
+        points = []
+
+        for content in scraped_contents:
+            content["url"] = self._canonicalize_url_for_static_source(content.get("url", ""))
+            if not content["url"]:
+                continue
+            content["source"] = self.vector_payload_source_label
+            content["source_type"] = self.vector_payload_source_type
+            content["content_bucket"] = "static_url"
+            text = f"{content.get('title', '')}\n\n{content.get('content', '')}"
+            embedding = await self.generate_embedding_with_retry(text)
+            if not embedding:
+                continue
+            point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"static_{content['url']}"))
+            points.append(PointStruct(id=point_id, vector=embedding, payload=content))
+
+        self.qdrant_client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="content_bucket",
+                            match=models.MatchValue(value="static_url"),
+                        )
+                    ]
+                )
+            ),
+        )
+
+        for i in range(0, len(points), 100):
+            self.qdrant_client.upsert(
+                collection_name=self.collection_name,
+                points=points[i:i + 100],
+            )
+        logger.info(f"Successfully embedded {len(points)} static URLs")
+        return {"status": "completed", "total_urls": len(static_urls), "successful_embeddings": len(points)}
     
     async def reindex_all_content(self):
         """Reindex all content with chunked processing to prevent timeouts"""
         logger.info("Starting chunked full content reindexing...")
         
         try:
-            # Embed WordPress content with chunking
-            wp_result = await self.embed_wordpress_content_chunked()
-            
-            # Embed external URLs (this is usually smaller, so keep as is for now)
-            await self.embed_external_urls()
+            mode = self.source_mode if self.source_mode in {"wordpress", "static", "mixed"} else "wordpress"
+            wp_result = None
+            static_result = None
+            if mode in {"wordpress", "mixed"}:
+                wp_result = await self.embed_wordpress_content_chunked()
+            if mode == "wordpress":
+                await self.embed_external_urls()
+            if mode in {"static", "mixed"}:
+                static_result = await self.embed_static_urls()
             
             # Clear progress file on successful completion
             self.clear_progress()
@@ -583,6 +698,8 @@ class Embedder:
             return {
                 "status": "completed",
                 "wordpress_result": wp_result,
+                "static_result": static_result,
+                "source_mode": mode,
                 "message": "All content reindexed successfully"
             }
             
