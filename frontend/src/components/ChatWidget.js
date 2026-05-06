@@ -7,21 +7,17 @@ import ConsentMessage from './ConsentMessage';
 import { useTriggerDetection } from './TriggerDetector';
 // import TriggerMessageDisplay from './TriggerMessageDisplay'; // Removed as no longer needed
 
-const ChatWidget = ({ onClose, apiUrl }) => {
-  const initialBotGreeting = useMemo(() => ({
-    type: 'bot',
-    text: 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?',
-    timestamp: new Date(),
-  }), []);
-
-  const [messages, setMessages] = useState([]);
+const ChatWidget = ({ apiUrl }) => {
+  const [messages, setMessages] = useState([
+    {
+      id: 1,
+      text: 'Hello! I\'m your MRN Web Designs Assistant. How can I help you today with website design, development, SEO, or digital marketing?',
+      isBot: true,
+      timestamp: new Date(),
+    },
+  ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [consentGiven, setConsentGiven] = useState(false);
-  const [showConsent, setShowConsent] = useState(true);
-  const [sessionId, setSessionId] = useState(sessionStorage.getItem('migraine-chatbot-session-id')); // Initialize directly from sessionStorage
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false); // New state for history loading
-  const [chatDisabled, setChatDisabled] = useState(false); // Manage chatDisabled state here
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -328,7 +324,6 @@ const ChatWidget = ({ onClose, apiUrl }) => {
 
     } catch (err) {
       console.error('Error querying API:', err);
-      
       // Add error message
       const errorMessage = {
         type: 'bot',
@@ -343,39 +338,22 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   };
 
   return (
-    <WidgetContainer>
-      <WidgetHeader>
-        <WidgetTitle>Hello, I'm Allevia</WidgetTitle>
+    <WidgetContainer className="mrnwebdesigns-chatbot-widget-container">
+      <WidgetHeader className="mrnwebdesigns-chatbot-widget-header">
+        <WidgetTitle>MRN Web Designs Assistant</WidgetTitle>
       </WidgetHeader>
       
-      <MessageContainer>
-        {messages.map((message, index) => {
-          console.log("Rendering Message component with props:", message); // Debug log
-          return (
-            <Message
-              key={index}
-              type={message.type}
-              text={message.text}
-              timestamp={message.timestamp}
-              sources={message.sources}
-              isError={message.isError}
-              confidence={message.confidence}
-              source={message.source}
-              isTrigger={message.isTrigger} // Pass isTrigger prop
-              triggerCategory={message.triggerCategory} // Pass triggerCategory prop
-              triggerButtons={message.triggerButtons} // Pass triggerButtons prop
-              botResponseTitle={message.botResponseTitle} // Pass the title prop
-              onAcknowledge={message.isTrigger && message.triggerCategory === 'doctor' ? acknowledgeTrigger : null} // Pass acknowledge for doctor triggers
-              onEnableChat={message.isTrigger && message.triggerCategory === 'doctor' ? enableChat : null} // Pass enableChat for doctor triggers
-            />
-          );
-        })}
-        
-        {/* Show consent message after first bot message */}
-        {showConsent && (
-          <ConsentMessage
-            onAccept={handleConsentAccept}
-            onDecline={handleConsentDecline}
+      <MessageContainer className="mrnwebdesigns-chatbot-widget-message-container">
+        {messages.map((message, index) => (
+          <Message
+            key={index}
+            type={message.type}
+            text={message.text}
+            timestamp={message.timestamp}
+            sources={message.sources}
+            isError={message.isError}
+            confidence={message.confidence}
+            source={message.source}
           />
         )}
         
@@ -444,7 +422,7 @@ const WidgetHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  background: #bd1d73;
+  background: #bf362e;
   color: white;
 `;
 
@@ -452,7 +430,6 @@ const WidgetTitle = styled.h2`
   margin: 0;
   font-size: 1.2rem;
 `;
-
 
 const MessageContainer = styled.div`
   flex: 1;
@@ -478,7 +455,7 @@ const Input = styled.input`
   outline: none;
   
   &:focus {
-    border-color: #bd1d73;
+    border-color: #bf362e;
   }
   
   &:disabled {
@@ -489,7 +466,7 @@ const Input = styled.input`
 `;
 
 const SendButton = styled.button`
-  background: #bd1d73;
+  background: #bf362e;
   color: white;
   border: none;
   border-radius: 50%;

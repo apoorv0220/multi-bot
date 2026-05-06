@@ -4,8 +4,7 @@ import ChatWidget from './components/ChatWidget';
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://migraine.softdemonew.info/api');
-  // const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://localhost:8000');
+  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://144.217.68.58:8043');
 
   const closeChat = () => {
     setIsOpen(false);
@@ -34,7 +33,7 @@ function App() {
   }, []);
 
   return (
-    <AppContainer id="houseoftiles-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
+    <AppContainer id="mrnwebdesigns-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
       {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
     </AppContainer>
   );

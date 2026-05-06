@@ -56,14 +56,8 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigg
 
   // Original rendering for non-trigger messages
   return (
-    <MessageContainer isError={isError} type={type} isTrigger={isTrigger} triggerCategory={triggerCategory}>
-      <MessageContent 
-        isError={isError} 
-        type={type}
-        isTrigger={isTrigger} // Pass to styled component
-        triggerCategory={triggerCategory} // Pass to styled component
-      >
-        {isTrigger && <TriggerIcon category={triggerCategory}>⚠️</TriggerIcon>}
+    <MessageContainer isError={isError} type={type}>
+      <MessageContent isError={isError} type={type} className="mrnwebdesigns-chatbot-widget-message-content">
         <ReactMarkdown>{text}</ReactMarkdown>
         {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
           <ReadMoreButton 
@@ -76,7 +70,7 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigg
         )}
         {/* Trigger buttons are now handled by TriggerMessageDisplay */}
       </MessageContent>
-      <MessageTime type={type}>{formatTime(timestamp)}</MessageTime>
+      <MessageTime type={type} className="mrnwebdesigns-chatbot-widget-message-time">{formatTime(timestamp)}</MessageTime>
     </MessageContainer>
   );
 };

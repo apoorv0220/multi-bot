@@ -21,11 +21,18 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 COPY ./backend /app
 
 # Expose the API port
-EXPOSE 8023
+EXPOSE 8043
 
-# Set the default command (uvicorn for development, gunicorn for production)
+# Set environment variables
 ENV PYTHONPATH=/app
 ENV ENVIRONMENT=production
 
-# Use gunicorn for production
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8023"] 
+# Embedding processing configuration for chunked reindexing
+ENV EMBEDDING_BATCH_SIZE=10
+ENV EMBEDDING_CHUNK_SIZE=50
+ENV EMBEDDING_MAX_RETRIES=3
+ENV EMBEDDING_RETRY_DELAY=1.0
+ENV EMBEDDING_RATE_LIMIT_DELAY=0.1
+
+# Use gunicorn with extended timeout for long-running reindexing operations
+CMD ["gunicorn", "-w", "2", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8043", "--timeout", "3600", "--graceful-timeout", "300", "main:app"] 

@@ -23,8 +23,8 @@ COPY --from=build /app/build /usr/share/nginx/html
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port 3023
-EXPOSE 3023
+# Expose port 3043
+EXPOSE 3043
 
 # Start Nginx server
 CMD ["nginx", "-g", "daemon off;"] 
