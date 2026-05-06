@@ -1,211 +1,78 @@
-# 🌐 MRN Web Designs AI Chatbot
+# Multi-tenant Chatbot Platform
 
-An intelligent AI chatbot for MRN Web Designs - offering custom web design and digital marketing services to help businesses stand out from the competition by creating digital experiences that boost visibility and drive engagement. This chatbot helps clients with website design questions, digital marketing strategies, and understanding our custom solutions.
+A multi-tenant retrieval-augmented chatbot. Tenants own their content, branding,
+moderation policy, and embedded widget; visitors talk to a tenant-scoped
+assistant backed by per-tenant Qdrant collections, OpenAI for embeddings and
+chat completion, and an admin dashboard for everything in between.
 
-## 🚀 Features
+> **Documentation entry point:** [`docs/README.md`](./docs/README.md). Anything
+> beyond this quick-start belongs there.
 
-- 🤖 **AI-powered assistance** for web design, development, and digital marketing
-- 🔍 **Smart search** across MRN Web Designs content
-- 📱 **Embeddable widget** for any website
-- 🏗️ **WordPress integration** ready
-- 🐳 **Docker containerized** for easy deployment
+## What is in this repo
 
-## 📋 Prerequisites
+- **Backend** ([`backend/`](./backend/)) - FastAPI app (`app:app` from
+  [`backend/app.py`](./backend/app.py)), SQLAlchemy + Alembic against
+  Postgres, Qdrant for vectors, OpenAI for embeddings and chat completion,
+  Playwright + requests for content scraping, APScheduler for weekly
+  reindex.
+- **Frontend** ([`frontend/`](./frontend/)) - React 18 (CRA) admin
+  dashboard, embedded chat widget, and a vanilla `widget.js` loader.
+- **Docs** ([`docs/`](./docs/)) - architecture, schema, API,
+  multi-tenancy, deployment, and operations references.
+- **Compose stack** ([`docker-compose.yml`](./docker-compose.yml)) -
+  Postgres + Qdrant + backend + frontend.
 
-- Docker and Docker Compose installed
-- OpenAI API key
-- WordPress database access (optional, for content syncing)
+## Quick start (Docker Compose)
 
-## 🚀 Quick Start
-
-### 1. Clone the Repository
 ```bash
-git clone <your-repo-url>
-cd ai_chatbot
+git clone <repo-url>
+cd migraine-chatbot
+
+cp .env.example .env
+$EDITOR .env  # set OPENAI_API_KEY, JWT_SECRET, WIDGET_EMBED_KEYS_JSON, etc.
+
+docker compose build
+docker compose up -d
+
+docker compose ps
+docker compose logs -f backend
 ```
 
-### 2. Configure Environment
-Copy and edit the environment file:
-```bash
-cp backend/.env.example backend/.env
-```
+Default endpoints (override in `.env`):
 
-Edit `backend/.env` with your settings:
-```env
-# OpenAI Configuration (Required)
-OPENAI_API_KEY=your_openai_api_key_here
+- Frontend: `http://localhost:${FRONTEND_PORT:-3043}`
+- Backend API: `http://localhost:${BACKEND_PORT:-8043}` (Swagger at `/docs`)
+- Qdrant HTTP: `http://localhost:${QDRANT_HTTP_PORT:-6043}`
 
-# WordPress Database (Optional - for content syncing)
-WORDPRESS_DB_HOST=your_wordpress_host
-WORDPRESS_DB_USER=your_db_username
-WORDPRESS_DB_PASSWORD=your_db_password
-WORDPRESS_DB_NAME=your_db_name
-WORDPRESS_URL_TABLE=wp_custom_urls
-WORDPRESS_TABLE_PREFIX=wp_
+For everything else - bootstrapping a superadmin, applying migrations,
+adding tenants, configuring widget keys, enabling country blocking,
+running reindex - see the docs.
 
-# Qdrant Configuration
-QDRANT_HOST=mrnwebdesigns-qdrant
-QDRANT_PORT=6333  # Internal Docker port (always 6333)
-COLLECTION_NAME=mrnwebdesigns_content
+## Where to look next
 
-# Environment
-ENVIRONMENT=production
-```
+| You want to... | Read |
+| --- | --- |
+| Understand how the system fits together | [`docs/architecture.md`](./docs/architecture.md) |
+| Understand tenant isolation | [`docs/multi-tenancy.md`](./docs/multi-tenancy.md) |
+| Wire a new integration / endpoint | [`docs/api-reference.md`](./docs/api-reference.md) |
+| Work on the backend code | [`docs/backend-module-map.md`](./docs/backend-module-map.md) |
+| Work on the frontend / embed widget | [`docs/frontend-module-map.md`](./docs/frontend-module-map.md) |
+| Operate the platform | [`docs/deployment.md`](./docs/deployment.md), [`docs/background-jobs.md`](./docs/background-jobs.md) |
+| Configure environment | [`docs/environment-variables.md`](./docs/environment-variables.md) |
+| Run locally without Docker | [`docs/local-development.md`](./docs/local-development.md) |
+| Understand the database | [`docs/database-schema.md`](./docs/database-schema.md) |
+| Understand reindex / embeddings | [`docs/embedding-pipeline.md`](./docs/embedding-pipeline.md) |
+| Test IP / country blocks | [`docs/testing-ip-country-blocks.md`](./docs/testing-ip-country-blocks.md) |
+| Embed the chat on a tenant site | [`docs/widget-auth-architecture.md`](./docs/widget-auth-architecture.md), [`docs/frontend-module-map.md`](./docs/frontend-module-map.md) |
 
-### 3. Start the Application
-```bash
-# Build and start all services
-docker-compose up --build -d
+The full index, with an audience matrix, is in
+[`docs/README.md`](./docs/README.md).
 
-# Check if services are running
-docker-compose ps
+## License / attribution
 
-# View logs
-docker-compose logs -f
-```
-
-### 4. Verify Installation
-- **Frontend**: Open http://localhost:3043
-- **Backend API**: Open http://localhost:8043/docs
-- **Qdrant Health**: `curl http://localhost:6043/health`
-
-### 5. Initialize Content (Optional)
-```bash
-# Sync WordPress content if database is configured
-curl -X POST http://localhost:8043/api/reindex
-```
-
-## 🌐 Using the Chatbot
-
-### Standalone Widget
-Access the chatbot directly at: http://localhost:3043
-
-
-## 🛠️ Development
-
-### Stop Services
-```bash
-docker-compose down
-```
-
-### Rebuild After Changes
-```bash
-docker-compose down
-docker-compose up --build -d
-```
-
-### View Logs
-```bash
-# All services
-docker-compose logs -f
-
-# Specific service
-docker-compose logs -f mrnwebdesigns-backend
-docker-compose logs -f mrnwebdesigns-frontend
-docker-compose logs -f mrnwebdesigns-qdrant
-```
-
-## 📁 Project Structure
-```
-ai_chatbot/
-├── backend/                 # Python FastAPI backend
-│   ├── main.py             # Main API server
-│   ├── embedder.py         # Text embedding service
-│   ├── wordpress_fetcher.py # WordPress content sync
-│   ├── fuzzy_matcher.py    # Response matching
-│   └── .env.example        # Environment template
-├── frontend/               # React frontend
-│   ├── src/                # React components
-│   ├── public/             # Static files & widget
-│   └── package.json        # Dependencies
-├── docker-compose.yml      # Docker configuration
-└── README.md              # This file
-```
-
-## ⚙️ Configuration
-
-### Environment Variables
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key (required) | - |
-| `WORDPRESS_DB_HOST` | WordPress database host | - |
-| `WORDPRESS_DB_USER` | WordPress database user | - |
-| `WORDPRESS_DB_PASSWORD` | WordPress database password | - |
-| `WORDPRESS_DB_NAME` | WordPress database name | - |
-| `WORDPRESS_URL_TABLE` | Custom URLs table name | `wp_custom_urls` |
-| `WORDPRESS_TABLE_PREFIX` | WordPress table prefix | `wp_` |
-| `QDRANT_HOST` | Qdrant database host | `qdrant` |
-| `QDRANT_PORT` | Qdrant database port (internal) | `6333` |
-| `COLLECTION_NAME` | Vector collection name | `mrnwebdesigns_content` |
-
-### Ports
-| Service | Port | Description |
-|---------|------|-------------|
-| Frontend | 3043 | React chatbot widget |
-| Backend | 8043 | FastAPI server |
-| Qdrant | 6043 | Vector database |
-
-## 🔧 Troubleshooting
-
-### **Qdrant Port Conflicts**
-
-If you're running multiple projects with Qdrant, you have two options:
-
-#### 🔍 **Understanding Docker Port Mapping**
-Our configuration uses: `6043:6333`
-- **External access** (from host machine): `localhost:6043`
-- **Internal Docker communication**: `mrnwebdesigns-qdrant:6333`
-- **Why:** Qdrant always runs on port 6333 inside containers, we just map it externally
-
-#### Option 1: Separate Qdrant Instances (Current Setup)
-- MRN Web Designs uses port `6043` externally (maps to internal `6333`)
-- Complete isolation between projects
-
-#### Option 2: Shared Qdrant Instance (Alternative)
-To use the same Qdrant instance (port 6333) for both projects:
-
-1. **Remove the Qdrant service** from this docker-compose.yml
-2. **Update environment variables:**
-   ```env
-   QDRANT_HOST=mrnwebdesigns-qdrant
-   QDRANT_PORT=6333
-   COLLECTION_NAME=mrnwebdesigns_content  # Different collection name
-   ```
-3. **Benefits:** Resource efficient, single Qdrant management
-4. **Note:** Both projects share the same Qdrant but use different collections
-
-### Services Won't Start
-```bash
-# Check Docker is running
-docker --version
-
-# Check ports aren't in use
-netstat -tlnp | grep -E '(3043|8043|6043)'
-
-# Reset everything
-docker-compose down -v
-docker-compose up --build -d
-```
-
-### API Connection Issues
-1. Verify backend is running: `curl http://localhost:8043/health`
-2. Check environment variables in `backend/.env`
-3. View backend logs: `docker-compose logs mrnwebdesigns-backend`
-
-### No Chat Responses
-1. Ensure `OPENAI_API_KEY` is set correctly
-2. Check Qdrant is healthy: `curl http://localhost:6043/health`
-3. Initialize content: `curl -X POST http://localhost:8043/api/reindex`
-
-## 📚 API Documentation
-
-When the backend is running, visit http://localhost:8043/docs for interactive API documentation.
-
-## 🏭 Production Deployment
-
-For production deployment:
-1. Update domain names in environment files
-2. Use proper SSL certificates
-3. Configure firewalls for ports 3043, 8043
-4. Set up monitoring and backups for Qdrant data
-5. Use production-grade OpenAI API limits
+Tenant deployments using DB-IP IP-to-Country Lite for GeoIP must observe
+the DB-IP CC BY 4.0 attribution where geolocation is shown to end users
+(see [`backend/scripts/download_dbip_country_lite.py`](./backend/scripts/download_dbip_country_lite.py)).
+Other dependencies follow their respective licenses; see
+[`requirements.txt`](./requirements.txt) and
+[`frontend/package.json`](./frontend/package.json).
