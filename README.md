@@ -1,218 +1,211 @@
-# 🧠 AI Search Chatbot – Migraine.ie
+# 🌐 MRN Web Designs AI Chatbot
 
-This project is a smart, self-hosted AI chatbot that can be embedded into the Migraine.ie WordPress website. It allows users to search across Migraine.ie content and other credible external sources to get instant AI-powered answers. Built with React, Python, and Qdrant.
+An intelligent AI chatbot for MRN Web Designs - offering custom web design and digital marketing services to help businesses stand out from the competition by creating digital experiences that boost visibility and drive engagement. This chatbot helps clients with website design questions, digital marketing strategies, and understanding our custom solutions.
 
----
+## 🚀 Features
 
-## 🔧 Tech Stack
+- 🤖 **AI-powered assistance** for web design, development, and digital marketing
+- 🔍 **Smart search** across MRN Web Designs content
+- 📱 **Embeddable widget** for any website
+- 🏗️ **WordPress integration** ready
+- 🐳 **Docker containerized** for easy deployment
 
-| Layer          | Technology                                   |
-| -------------- | -------------------------------------------- |
-| Frontend       | React.js (JavaScript Widget)                 |
-| Backend        | Python (FastAPI / Flask)                     |
-| Vector DB      | Self-hosted Qdrant                           |
-| Embeddings     | OpenAI `text-embedding-3-small`              |
-| Content Source | WordPress MySQL DB + External URLs           |
-| Scraping       | Python (Requests, BeautifulSoup, Playwright) |
-| Deployment     | Docker + Cron Jobs (for scheduled indexing)  |
+## 📋 Prerequisites
 
----
+- Docker and Docker Compose installed
+- OpenAI API key
+- WordPress database access (optional, for content syncing)
 
-## 📦 Features
+## 🚀 Quick Start
 
-- 🔍 **AI-powered search** across Migraine.ie WordPress content
-- 🌐 **Additional credible sources** via URLs managed in WordPress DB
-- 🔁 **Weekly automatic re-indexing** of both WordPress and external URLs
-- 💬 React-based **floating chatbot widget** for easy website integration
-- 🔐 Environment-based config for secure credentials
-- 🧠 Prioritized search (Migraine content > External sources)
-- ✅ Fallback logic and source confidence scoring
-- 📄 Optional citations & answer source highlighting
-
----
-
-## 📁 Folder Structure
-
+### 1. Clone the Repository
 ```bash
-ai-chatbot/
-│
-├── backend/                # Python API & embedding logic
-│   ├── main.py             # FastAPI/Flask app
-│   ├── scraper.py          # Web scraping logic for external URLs
-│   ├── wordpress_fetcher.py# Pulls content from WordPress DB
-│   ├── embedder.py         # Embedding and Qdrant logic
-│   └── .env                # Secrets and DB config
-│
-├── frontend/               # React floating chatbot widget
-│   ├── public/
-│   ├── src/
-│   │   ├── App.js
-│   │   └── index.js
-│   └── build/              # Build for embedding
-│
-├── qdrant_data/            # Persistent storage for Qdrant
-├── docker-compose.yml      # Full stack orchestration
-├── README.md
-└── requirements.txt        # Python dependencies
+git clone <your-repo-url>
+cd ai_chatbot
 ```
 
-## 🚀 Installation & Setup
-
-### Prerequisites
-
-- Python 3.9+ with pip
-- Node.js 16+ with npm
-- Docker and Docker Compose (for production deployment)
-- An OpenAI API key
-- WordPress site with MySQL database
-
-### Quick Start
-
-The easiest way to start the entire application is using the provided startup script:
-
-```bash
-# Make sure Docker is running first
-./start_migraine_chatbot.sh
-```
-
-This script will:
-
-1. Start the Qdrant vector database container
-2. Set up a Python virtual environment if needed
-3. Launch the backend API server
-4. Provide instructions for starting the frontend
-
-### Manual Setup
-
-#### Step 1: Configure environment variables
-
+### 2. Configure Environment
+Copy and edit the environment file:
 ```bash
 cp backend/.env.example backend/.env
-# Edit the .env file with your credentials
 ```
 
-#### Step 2: Start Qdrant Vector Database
+Edit `backend/.env` with your settings:
+```env
+# OpenAI Configuration (Required)
+OPENAI_API_KEY=your_openai_api_key_here
 
-You can start the Qdrant server using Docker in one of two ways:
+# WordPress Database (Optional - for content syncing)
+WORDPRESS_DB_HOST=your_wordpress_host
+WORDPRESS_DB_USER=your_db_username
+WORDPRESS_DB_PASSWORD=your_db_password
+WORDPRESS_DB_NAME=your_db_name
+WORDPRESS_URL_TABLE=wp_custom_urls
+WORDPRESS_TABLE_PREFIX=wp_
 
-**Option 1: Using the provided script**
+# Qdrant Configuration
+QDRANT_HOST=mrnwebdesigns-qdrant
+QDRANT_PORT=6333  # Internal Docker port (always 6333)
+COLLECTION_NAME=mrnwebdesigns_content
 
-```bash
-./start_qdrant_docker.sh
+# Environment
+ENVIRONMENT=production
 ```
 
-**Option 2: Using Docker Compose**
-
-```bash
-docker-compose up -d qdrant
-```
-
-#### Step 3: Backend Setup
-
-```bash
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the backend server
-cd backend
-python -m uvicorn main:app --reload
-```
-
-#### Step 4: Frontend Setup
-
-```bash
-# Install Node.js dependencies
-cd frontend
-npm install
-
-# Start the development server
-npm start
-```
-
-The chatbot widget will be available at https://migraine.softdemonew.info
-
-### WordPress Integration
-
-1. Upload `frontend/public/migraine-chatbot.php` to your WordPress plugins directory.
-2. Activate the "Migraine.ie AI Chatbot" plugin from the WordPress admin dashboard.
-3. Configure the plugin settings at WordPress Admin > Migraine Chatbot.
-4. Add external URLs to the knowledge base from WordPress Admin > Migraine Chatbot > Custom URLs.
-
-## 🏗️ Production Deployment
-
-For production deployment, use Docker Compose:
-
+### 3. Start the Application
 ```bash
 # Build and start all services
-docker-compose up -d
+docker-compose up --build -d
+
+# Check if services are running
+docker-compose ps
 
 # View logs
 docker-compose logs -f
+```
 
-# Stop all services
+### 4. Verify Installation
+- **Frontend**: Open http://localhost:3043
+- **Backend API**: Open http://localhost:8043/docs
+- **Qdrant Health**: `curl http://localhost:6043/health`
+
+### 5. Initialize Content (Optional)
+```bash
+# Sync WordPress content if database is configured
+curl -X POST http://localhost:8043/api/reindex
+```
+
+## 🌐 Using the Chatbot
+
+### Standalone Widget
+Access the chatbot directly at: http://localhost:3043
+
+
+## 🛠️ Development
+
+### Stop Services
+```bash
 docker-compose down
 ```
 
-## 📄 API Documentation
+### Rebuild After Changes
+```bash
+docker-compose down
+docker-compose up --build -d
+```
 
-The backend API endpoints can be viewed at https://migraine.softdemonew.info/api/docs when the backend is running.
+### View Logs
+```bash
+# All services
+docker-compose logs -f
 
-## 📊 Customization Options
+# Specific service
+docker-compose logs -f mrnwebdesigns-backend
+docker-compose logs -f mrnwebdesigns-frontend
+docker-compose logs -f mrnwebdesigns-qdrant
+```
 
-- Edit the `.env` file to configure database connections, API keys, and other settings.
-- Modify the chatbot appearance by editing the styles in the frontend components.
-- Change the indexing schedule in the `scheduler.py` file.
+## 📁 Project Structure
+```
+ai_chatbot/
+├── backend/                 # Python FastAPI backend
+│   ├── main.py             # Main API server
+│   ├── embedder.py         # Text embedding service
+│   ├── wordpress_fetcher.py # WordPress content sync
+│   ├── fuzzy_matcher.py    # Response matching
+│   └── .env.example        # Environment template
+├── frontend/               # React frontend
+│   ├── src/                # React components
+│   ├── public/             # Static files & widget
+│   └── package.json        # Dependencies
+├── docker-compose.yml      # Docker configuration
+└── README.md              # This file
+```
 
-## 🔍 Troubleshooting
+## ⚙️ Configuration
 
-- If the chatbot fails to connect to the WordPress database, check your `.env` credentials.
-- If the embedding process fails, verify your OpenAI API key and subscription status.
-- Check the logs in `app.log` and `scheduler.log` for detailed error messages.
-- Make sure Docker is running before starting the Qdrant container.
+### Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | OpenAI API key (required) | - |
+| `WORDPRESS_DB_HOST` | WordPress database host | - |
+| `WORDPRESS_DB_USER` | WordPress database user | - |
+| `WORDPRESS_DB_PASSWORD` | WordPress database password | - |
+| `WORDPRESS_DB_NAME` | WordPress database name | - |
+| `WORDPRESS_URL_TABLE` | Custom URLs table name | `wp_custom_urls` |
+| `WORDPRESS_TABLE_PREFIX` | WordPress table prefix | `wp_` |
+| `QDRANT_HOST` | Qdrant database host | `qdrant` |
+| `QDRANT_PORT` | Qdrant database port (internal) | `6333` |
+| `COLLECTION_NAME` | Vector collection name | `mrnwebdesigns_content` |
 
-### Common Errors
+### Ports
+| Service | Port | Description |
+|---------|------|-------------|
+| Frontend | 3043 | React chatbot widget |
+| Backend | 8043 | FastAPI server |
+| Qdrant | 6043 | Vector database |
 
-#### Error: "Error searching Qdrant: [Errno 61] Connection refused"
+## 🔧 Troubleshooting
 
-This error occurs when the backend cannot connect to the Qdrant vector database. Follow these steps to fix it:
+### **Qdrant Port Conflicts**
 
-1. **Check if Docker is running**
-   ```bash
-   docker info
+If you're running multiple projects with Qdrant, you have two options:
+
+#### 🔍 **Understanding Docker Port Mapping**
+Our configuration uses: `6043:6333`
+- **External access** (from host machine): `localhost:6043`
+- **Internal Docker communication**: `mrnwebdesigns-qdrant:6333`
+- **Why:** Qdrant always runs on port 6333 inside containers, we just map it externally
+
+#### Option 1: Separate Qdrant Instances (Current Setup)
+- MRN Web Designs uses port `6043` externally (maps to internal `6333`)
+- Complete isolation between projects
+
+#### Option 2: Shared Qdrant Instance (Alternative)
+To use the same Qdrant instance (port 6333) for both projects:
+
+1. **Remove the Qdrant service** from this docker-compose.yml
+2. **Update environment variables:**
+   ```env
+   QDRANT_HOST=mrnwebdesigns-qdrant
+   QDRANT_PORT=6333
+   COLLECTION_NAME=mrnwebdesigns_content  # Different collection name
    ```
-   If you see an error, start Docker Desktop or the Docker daemon.
+3. **Benefits:** Resource efficient, single Qdrant management
+4. **Note:** Both projects share the same Qdrant but use different collections
 
-2. **Start Qdrant using the provided script**
-   ```bash
-   # From the project root directory
-   ./start_qdrant_docker.sh
-   ```
-   This will start a Qdrant server in a Docker container.
+### Services Won't Start
+```bash
+# Check Docker is running
+docker --version
 
-3. **Verify Qdrant is running**
-   ```bash
-   curl http://localhost:6333/health
-   ```
-   You should see a successful response.
+# Check ports aren't in use
+netstat -tlnp | grep -E '(3043|8043|6043)'
 
-4. **Restart the backend service**
-   ```bash
-   cd backend
-   python -m uvicorn main:app --reload
-   ```
+# Reset everything
+docker-compose down -v
+docker-compose up --build -d
+```
 
-5. **Test the reindexing process**
-   Open the example embed page and click the "Reindex All Content" button, or use:
-   ```bash
-   curl -X POST http://localhost:8013/api/reindex
-   ```
+### API Connection Issues
+1. Verify backend is running: `curl http://localhost:8043/health`
+2. Check environment variables in `backend/.env`
+3. View backend logs: `docker-compose logs mrnwebdesigns-backend`
 
-If you're still experiencing issues, check the `backend/.env` file to ensure your `QDRANT_HOST` and `QDRANT_PORT` settings are correct (should be `localhost` and `6333` respectively).
+### No Chat Responses
+1. Ensure `OPENAI_API_KEY` is set correctly
+2. Check Qdrant is healthy: `curl http://localhost:6043/health`
+3. Initialize content: `curl -X POST http://localhost:8043/api/reindex`
 
-## 🛠️ Database Management Tools
+## 📚 API Documentation
 
-Several utility scripts are provided to help manage and inspect the Qdrant vector database:
+When the backend is running, visit http://localhost:8043/docs for interactive API documentation.
+
+## 🏭 Production Deployment
+
+For production deployment:
+1. Update domain names in environment files
+2. Use proper SSL certificates
+3. Configure firewalls for ports 3043, 8043
+4. Set up monitoring and backups for Qdrant data
+5. Use production-grade OpenAI API limits

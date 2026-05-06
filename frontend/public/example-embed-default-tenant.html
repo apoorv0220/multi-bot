@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Embed Example - Default Tenant</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+    h1 { color: #bf362e; }
+    pre { background-color: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }
+    .note { background-color: #fffde7; padding: 15px; border-left: 4px solid #ffd600; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <script src="/runtime-config.js"></script>
+  <h1>Chatbot Embed Example - Default Tenant</h1>
+  <p>This page demonstrates the public website embed for the <strong>Default Tenant</strong>.</p>
+
+  <h2>How to Embed</h2>
+  <p>Add this snippet before your closing <code>&lt;/body&gt;</code> tag:</p>
+
+  <pre>&lt;script&gt;
+window.CHATBOT_WIDGET_CONFIG = {
+  baseUrl: "https://your-frontend-domain",
+  apiUrl: "https://your-backend-domain",
+  tenantPublicKey: "demo_pub_default_7721e85d"
+};
+(function () {
+  const script = document.createElement("script");
+  script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
+  script.async = true;
+  document.body.appendChild(script);
+})();
+&lt;/script&gt;</pre>
+
+  <div class="note">
+    Public embeds should not require login and should not show admin shell/header. This page is intended to simulate that public usage pattern.
+  </div>
+
+  <h2>Features</h2>
+  <ul>
+    <li>Tenant-scoped retrieval via widget key</li>
+    <li>Public visitor chat without auth flow</li>
+    <li>Session persistence per widget key</li>
+  </ul>
+
+  <script>
+    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    window.CHATBOT_WIDGET_CONFIG = {
+      baseUrl: resolvedWidgetBaseUrl,
+      apiUrl: resolvedApiBaseUrl,
+      tenantPublicKey: "demo_pub_default_7721e85d",
+    };
+    (function () {
+      const script = document.createElement("script");
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
+      script.async = true;
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html>

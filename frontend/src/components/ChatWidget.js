@@ -1,29 +1,89 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
-import axios from 'axios';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
-import ConsentMessage from './ConsentMessage';
-import { useTriggerDetection } from './TriggerDetector';
-// import TriggerMessageDisplay from './TriggerMessageDisplay'; // Removed as no longer needed
+import { client } from '../api';
 
-const ChatWidget = ({ onClose, apiUrl }) => {
-  const initialBotGreeting = useMemo(() => ({
-    type: 'bot',
-    text: 'Hello, I\'m Allevia. I\'m your migraine assistant. How can I help you today?',
-    timestamp: new Date(),
-  }), []);
+/** Shown until GET /api/public/config returns tenant branding (avoid wrong-tenant flash). */
+const FALLBACK_GREETING = "Hello! How can I help you today?";
+const FALLBACK_HEADER_TITLE = "Chat assistant";
 
-  const [messages, setMessages] = useState([]);
+const resolveInitialGreeting = () => FALLBACK_GREETING;
+const createVisitorId = () => {
+  if (window?.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `visitor-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const createBotMessage = (text) => ({
+  id: 1,
+  type: "bot",
+  text,
+  timestamp: new Date(),
+});
+
+/** Reject root-only "/" so joining `/api/assets/...` never yields a host-less URL (resolves to the embed origin). */
+const normalizeWidgetApiUrl = (value) => {
+  const s = String(value ?? "").trim();
+  if (!s || s === "/") return "";
+  return s.replace(/\/+$/, "");
+};
+
+/** `apiUrl` + path from public config; legacy rows may still store a full URL — strip to `/api/assets/...` first. */
+const resolvePublicAssetUrl = (raw, apiBase) => {
+  if (!raw) return "";
+  const base = normalizeWidgetApiUrl(apiBase);
+  if (!base) return "";
+  const root = base.replace(/\/+$/, "");
+  let path = raw.trim();
+  if (!path.startsWith("/")) {
+    const marker = "/api/assets/";
+    const i = path.indexOf(marker);
+    path = i >= 0 ? path.slice(i) : path;
+  }
+  if (!path.startsWith("/")) return path;
+  return `${root}${path}`;
+};
+
+const ChatWidget = ({ mode = "admin" }) => {
+  const [messages, setMessages] = useState([createBotMessage(resolveInitialGreeting())]);
+  const [headerTitle, setHeaderTitle] = useState(FALLBACK_HEADER_TITLE);
+  const [brandName, setBrandName] = useState("Nethues");
+  const [primaryColor, setPrimaryColor] = useState("#bf362e");
+  const [widgetWebsiteUrl, setWidgetWebsiteUrl] = useState("");
+  const [userMessageColor, setUserMessageColor] = useState("#bf362e");
+  const [botMessageColor, setBotMessageColor] = useState("#d5bbb9");
+  const [userMessageTextColor, setUserMessageTextColor] = useState("#ffffff");
+  const [botMessageTextColor, setBotMessageTextColor] = useState("#1a1a1a");
+  /** Path or URL from GET /api/public/config; joined to apiUrl for <img src> */
+  const [publicAvatarRaw, setPublicAvatarRaw] = useState("");
+  const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [consentGiven, setConsentGiven] = useState(false);
-  const [showConsent, setShowConsent] = useState(true);
-  const [sessionId, setSessionId] = useState(sessionStorage.getItem('migraine-chatbot-session-id')); // Initialize directly from sessionStorage
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false); // New state for history loading
-  const [chatDisabled, setChatDisabled] = useState(false); // Manage chatDisabled state here
+  const [apiUrl, setApiUrl] = useState(() => normalizeWidgetApiUrl(process.env.REACT_APP_API_URL || ""));
+  const [widgetKey, setWidgetKey] = useState(null);
+  const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
+  const [sessionId, setSessionId] = useState(localStorage.getItem("chat_session_id") || null);
+  const [visitorId, setVisitorId] = useState(localStorage.getItem("chat_visitor_id") || null);
+  const [publicConfigError, setPublicConfigError] = useState("");
+  const [isProfileRequired, setIsProfileRequired] = useState(false);
+  const [visitorName, setVisitorName] = useState("");
+  const [visitorEmail, setVisitorEmail] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [quotaBlocked, setQuotaBlocked] = useState(false);
+  const [quotaMessage, setQuotaMessage] = useState("");
+  const [idleRatingWaitSeconds, setIdleRatingWaitSeconds] = useState(120);
+  const [showRatingPrompt, setShowRatingPrompt] = useState(false);
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
   const messageEndRef = useRef(null);
   const inputRef = useRef(null);
+  const idleTimerRef = useRef(null);
+
+  const avatarDisplayUrl = useMemo(
+    () => resolvePublicAssetUrl(publicAvatarRaw, apiUrl),
+    [publicAvatarRaw, apiUrl],
+  );
 
   // Custom acknowledge and re-enable chat functions for TriggerMessageDisplay
   const acknowledgeTrigger = () => {
@@ -63,200 +123,210 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     inputRef.current?.focus();
   }, []);
 
-  // Check for existing consent in session storage and potentially create a session
   useEffect(() => {
-    const sessionConsent = sessionStorage.getItem('migraine-chatbot-consent');
-    if (sessionConsent === 'true') {
-      setConsentGiven(true);
-      setShowConsent(false);
-
-      // If consent is given and greeting isn't already the first message, add it
-      setMessages(prevMessages => {
-        if (prevMessages.length === 0 || prevMessages[0].text !== initialBotGreeting.text) {
-          return [initialBotGreeting, ...prevMessages];
-        }
-        return prevMessages;
-      });
-
-      // If consent is given but no session_id exists, create one via a dedicated endpoint
-      const ensureSessionId = async () => {
-        if (!sessionId) { // This condition will now correctly reflect sessionStorage
-          try {
-            const response = await axios.post(`${apiUrl}/api/start-session`, { session_id: null });
-            if (response.data.session_id) {
-              setSessionId(response.data.session_id);
-              sessionStorage.setItem('migraine-chatbot-session-id', response.data.session_id);
-              console.log("New session ID created and stored:", response.data.session_id);
-            }
-          } catch (error) {
-            console.error("Error ensuring session ID on consent accept:", error);
-          }
-        }
-      };
-      ensureSessionId();
-    }
-  }, [consentGiven, sessionId, apiUrl, initialBotGreeting]); // Depend on consentGiven, sessionId, apiUrl, and initialBotGreeting
-
-  // Load chat history if session_id exists and consent is given
-  useEffect(() => {
-    const loadChatHistory = async () => {
-      // Only load history if session_id and consent are confirmed
-      if (sessionId && consentGiven) {
-        setIsHistoryLoading(true); // Start loading
-        try {
-          const response = await axios.get(`${apiUrl}/api/chat-history/${sessionId}`);
-          const history = response.data.history.map(event => {
-            // Reconstruct message objects from history events
-            let sources_for_message = []; // Renamed to avoid confusion with event.bot_response_source
-            let triggerButtons = [];
-            let botResponseSourceType = 'unknown';
-            let botResponseTitle = ''; // Initialize botResponseTitle
-
-            // Parse bot_response_source from DB (which is a dict now)
-            if (event.bot_response_source && typeof event.bot_response_source === 'object') {
-                botResponseSourceType = event.bot_response_source.type;
-                if (event.bot_response_source.type === 'vector_search') {
-                    sources_for_message = event.bot_response_source.details?.sources || [];
-                } else if (event.bot_response_source.type === 'trigger') {
-                    triggerButtons = event.bot_response_source.buttons || [];
-                    // Use bot_response_title if available, otherwise infer from category
-                    botResponseTitle = event.bot_response_title || (event.event_type.replace('trigger_', '') === 'emergency' ? '⚠️ Emergency Medical Alert' : event.event_type.replace('trigger_', '') === 'suicide' ? '⚠️ Crisis Support Available' : '📋 Medical Advice Recommended');
-                }
-            }
-
-            if (event.event_type === 'chat_message') {
-                return [
-                    { type: 'user', text: event.user_message_text, timestamp: new Date(event.event_timestamp) },
-                    { 
-                        type: 'bot', 
-                        text: event.bot_response_text, 
-                        timestamp: new Date(event.event_timestamp), 
-                        sources: sources_for_message, // Pass extracted sources
-                        confidence: event.bot_response_confidence, 
-                        source: botResponseSourceType, // Pass source type
-                        botResponseTitle: botResponseTitle, // Pass the title
-                    }
-                ];
-            } else if (event.event_type.startsWith('trigger_')) {
-                // For trigger events, we need to add both the user's message and the bot's trigger response
-                return [
-                    { 
-                        type: 'user', 
-                        text: event.user_message_text, 
-                        timestamp: new Date(event.event_timestamp) 
-                    },
-                    {
-                        type: 'bot',
-                        text: event.bot_response_text,
-                        timestamp: new Date(event.event_timestamp),
-                        isTrigger: true,
-                        triggerCategory: event.event_type.replace('trigger_', ''),
-                        triggerButtons: triggerButtons, // Pass extracted trigger buttons
-                        botResponseTitle: botResponseTitle, // Pass the title
-                    }
-                ];
-            }
-            return null; // Should not happen
-          }).flat().filter(Boolean);
-          
-          // Filter out the initial bot greeting if history is loaded
-          if (history.length > 0) {
-            // Ensure the initial bot greeting is always the first message
-            const filteredHistory = history.filter(msg => 
-                !(msg.type === 'bot' && msg.text === initialBotGreeting.text)
-            );
-            setMessages([initialBotGreeting, ...filteredHistory]);
-
-            // After loading history, check if chat should be disabled
-            let shouldDisableChat = false;
-            // Also check for active triggers from history to set the `activeTrigger` state
-            
-            for (const msg of filteredHistory) {
-              if (msg.isTrigger) {
-                if (msg.triggerCategory === 'emergency' || msg.triggerCategory === 'suicide') {
-                  shouldDisableChat = true;
-                  
-                }
-                
-              }
-            }
-            setChatDisabled(shouldDisableChat);
-            // The activeTrigger state is no longer used for rendering a separate banner
-            // Instead, the Message component will render TriggerMessageDisplay if isTrigger is true
-
-            console.log("Loaded chat history:", history); // Debug log
-
-          } else {
-            // If no history, ensure only the initial bot greeting is present
-            setMessages([initialBotGreeting]);
-          }
-
-        } catch (error) {
-          console.error("Error loading chat history:", error);
-        } finally {
-          setIsHistoryLoading(false); // End loading
-        }
+    if (mode !== "public") return;
+    const onMessage = (event) => {
+      const data = event?.data;
+      if (!data || typeof data !== "object") return;
+      if (data.action !== "open-chat") return;
+      if (data.apiUrl) setApiUrl(normalizeWidgetApiUrl(data.apiUrl));
+      if (data.tenantPublicKey) setWidgetKey(data.tenantPublicKey);
+      if (data.chatbotInitialText) {
+        setMessages((prev) => (prev.length === 1 ? [createBotMessage(data.chatbotInitialText)] : prev));
+      }
+      if (data.chatbotHeaderTitle) {
+        setHeaderTitle(data.chatbotHeaderTitle);
+      }
+      const keySuffix = data.tenantPublicKey || "default";
+      const sessionKey = `chat_session_id_${keySuffix}`;
+      const visitorKey = `chat_visitor_id_${keySuffix}`;
+      const ratedSessionKey = `chat_session_rating_submitted_${keySuffix}`;
+      let existingVisitorId = localStorage.getItem(visitorKey);
+      if (!existingVisitorId) {
+        existingVisitorId = createVisitorId();
+        localStorage.setItem(visitorKey, existingVisitorId);
+      }
+      setSessionStorageKey(sessionKey);
+      setSessionId(localStorage.getItem(sessionKey) || null);
+      setVisitorId(existingVisitorId);
+      const existingSession = localStorage.getItem(sessionKey) || null;
+      if (existingSession && localStorage.getItem(`${ratedSessionKey}_${existingSession}`) === "true") {
+        setRatingSubmitted(true);
+      } else {
+        setRatingSubmitted(false);
+      }
+      if (!data.tenantPublicKey) {
+        setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
+      } else {
+        setPublicConfigError("");
       }
     };
-    loadChatHistory();
-  }, [sessionId, consentGiven, apiUrl, initialBotGreeting]);
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [mode]);
 
-  // Announce consent message to screen readers
   useEffect(() => {
-    if (showConsent) {
-      // Create a live region announcement for screen readers
-      const announcement = document.createElement('div');
-      announcement.setAttribute('aria-live', 'polite');
-      announcement.setAttribute('aria-atomic', 'true');
-      announcement.style.position = 'absolute';
-      announcement.style.left = '-10000px';
-      announcement.style.width = '1px';
-      announcement.style.height = '1px';
-      announcement.style.overflow = 'hidden';
-      announcement.textContent = 'Important disclaimer dialog has appeared. Please review the terms and conditions before proceeding.';
-      
-      document.body.appendChild(announcement);
-      
-      // Clean up after announcement
-      setTimeout(() => {
-        document.body.removeChild(announcement);
-      }, 1000);
-    }
-  }, [showConsent]);
-
-  // Handle consent acceptance
-  const handleConsentAccept = () => {
-    setConsentGiven(true);
-    setShowConsent(false);
-    sessionStorage.setItem('migraine-chatbot-consent', 'true');
-
-    // Add initial greeting after consent is accepted, if not already present
-    setMessages(prevMessages => {
-      if (prevMessages.length === 0 || prevMessages[0].text !== initialBotGreeting.text) {
-        return [initialBotGreeting, ...prevMessages];
+    if (mode !== "public" || !widgetKey || !visitorId || !apiUrl) return;
+    const checkProfile = async () => {
+      try {
+        const { data } = await client.get(`${apiUrl}/api/public/visitor-profile`, {
+          headers: {
+            "X-Widget-Key": widgetKey,
+            "X-Visitor-Id": visitorId,
+          },
+        });
+        setIsProfileRequired(!data?.profile_exists);
+      } catch (err) {
+        console.error("Error checking visitor profile:", err);
       }
-      return prevMessages;
-    });
+    };
+    checkProfile();
+  }, [apiUrl, mode, visitorId, widgetKey]);
+
+  useEffect(() => {
+    if (mode !== "public" || !widgetKey || !apiUrl) return;
+    const loadWidgetConfig = async () => {
+      try {
+        const { data } = await client.get(`${apiUrl}/api/public/config`, {
+          headers: { "X-Widget-Key": widgetKey },
+        });
+        if (data?.header_title) {
+          setHeaderTitle(data.header_title);
+        }
+        if (data?.welcome_message) {
+          setMessages((prev) => (prev.length === 1 ? [createBotMessage(data.welcome_message)] : prev));
+        }
+        setBrandName(data?.brand_name || "Nethues");
+        setPrimaryColor(data?.primary_color || "#bf362e");
+        setWidgetWebsiteUrl(data?.website_url || "");
+        setUserMessageColor(data?.user_message_color || "#bf362e");
+        setBotMessageColor(data?.bot_message_color || "#d5bbb9");
+        setUserMessageTextColor(data?.user_message_text_color || "#ffffff");
+        setBotMessageTextColor(data?.bot_message_text_color || "#1a1a1a");
+        setPublicAvatarRaw(data?.avatar_url || "");
+        setPrivacyPolicyUrl(data?.privacy_policy_url || "");
+        setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
+      } catch (err) {
+        console.error("Error loading widget config:", err);
+      }
+    };
+    loadWidgetConfig();
+  }, [apiUrl, mode, widgetKey]);
+
+  useEffect(() => {
+    if (mode !== "public" || !widgetKey || !visitorId || !apiUrl || !sessionId) return;
+    const checkExistingRating = async () => {
+      try {
+        const { data } = await client.get(`${apiUrl}/api/public/session-rating/${sessionId}`, {
+          headers: {
+            "X-Widget-Key": widgetKey,
+            "X-Visitor-Id": visitorId,
+          },
+        });
+        if (data?.submitted) {
+          setRatingSubmitted(true);
+          setSelectedRating(Number(data.rating || 0));
+          setShowRatingPrompt(false);
+        } else {
+          setRatingSubmitted(false);
+        }
+      } catch (err) {
+        console.error("Error checking session rating:", err);
+      }
+    };
+    checkExistingRating();
+  }, [apiUrl, mode, sessionId, visitorId, widgetKey]);
+
+  useEffect(() => () => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+  }, []);
+
+  const resetIdleRatingTimer = () => {
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+    }
+    if (mode !== "public" || !sessionId || ratingSubmitted || isProfileRequired || quotaBlocked) return;
+    idleTimerRef.current = setTimeout(() => {
+      setShowRatingPrompt(true);
+    }, Math.max(Number(idleRatingWaitSeconds || 120), 5) * 1000);
   };
 
-  // Handle consent decline
-  const handleConsentDecline = () => {
-    // Clear any existing consent from session storage
-    sessionStorage.removeItem('migraine-chatbot-consent');
-    
-    // Send message to parent window to close the entire widget
-    if (window.parent && window.parent !== window) {
-      // Use setTimeout to ensure the message is sent after any current operations
-      setTimeout(() => {
-        window.parent.postMessage('close-widget', '*');
-      }, 100);
+  const submitSessionRating = async (rating) => {
+    if (!sessionId || ratingSubmitted) return;
+    setIsSubmittingRating(true);
+    try {
+      await client.post(`${apiUrl}/api/public/session-rating`, {
+        session_id: sessionId,
+        rating,
+      }, {
+        headers: {
+          "X-Widget-Key": widgetKey,
+          "X-Visitor-Id": visitorId,
+        },
+      });
+      setSelectedRating(rating);
+      setRatingSubmitted(true);
+      setShowRatingPrompt(false);
+      const suffix = widgetKey || "default";
+      localStorage.setItem(`chat_session_rating_submitted_${suffix}_${sessionId}`, "true");
+    } catch (err) {
+      if (err?.response?.status === 409) {
+        setRatingSubmitted(true);
+        setShowRatingPrompt(false);
+        return;
+      }
+      setPublicConfigError(err?.response?.data?.detail || "Could not submit rating.");
+    } finally {
+      setIsSubmittingRating(false);
     }
-    // Don't call onClose() here as it might interfere with the parent window handling
+  };
+
+  const submitVisitorProfile = async () => {
+    if (!visitorName.trim() || !visitorEmail.trim()) return;
+    setIsSavingProfile(true);
+    try {
+      const { data } = await client.post(`${apiUrl}/api/public/visitor-profile`, {
+        visitor_id: visitorId,
+        name: visitorName.trim(),
+        email: visitorEmail.trim(),
+      }, {
+        headers: {
+          "X-Widget-Key": widgetKey,
+        },
+      });
+      const resolvedVisitorId = data?.visitor_id;
+      if (resolvedVisitorId && resolvedVisitorId !== visitorId) {
+        const keySuffix = widgetKey || "default";
+        const visitorKey = `chat_visitor_id_${keySuffix}`;
+        localStorage.setItem(visitorKey, resolvedVisitorId);
+        setVisitorId(resolvedVisitorId);
+      }
+      setIsProfileRequired(false);
+    } catch (err) {
+      console.error("Error saving visitor profile:", err);
+      setPublicConfigError(err?.response?.data?.detail || "Could not save profile. Please try again.");
+    } finally {
+      setIsSavingProfile(false);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
+    if (mode === "public" && !widgetKey) {
+      setPublicConfigError("Widget is misconfigured: tenantPublicKey is required.");
+      return;
+    }
+    if (mode === "public" && quotaBlocked) {
+      setPublicConfigError(quotaMessage || "Monthly message limit reached.");
+      return;
+    }
+    if (mode === "public" && isProfileRequired) {
+      setPublicConfigError("Please provide name and email first.");
+      return;
+    }
 
     // Check if consent has been given
     if (!consentGiven) {
@@ -296,14 +366,28 @@ const ChatWidget = ({ onClose, apiUrl }) => {
     }
 
     setIsLoading(true);
+    setShowRatingPrompt(false);
+    resetIdleRatingTimer();
 
     try {
-      // Call API with the new chat endpoint, including sessionId
-      const response = await axios.post(`${apiUrl}/api/chat`, {
+      const endpoint = mode === "public" ? "/api/public/chat" : "/api/chat";
+      const requestUrl = mode === "public" ? `${apiUrl}${endpoint}` : endpoint;
+      const response = await client.post(requestUrl, {
         message: input,
+        session_id: sessionId,
         max_results: 3,
-        session_id: sessionId, // Pass session_id to backend
+      }, {
+        headers: mode === "public" ? { "X-Widget-Key": widgetKey, "X-Visitor-Id": visitorId } : undefined,
       });
+      if (response.data.session_id) {
+        const previousSessionId = sessionId;
+        setSessionId(response.data.session_id);
+        localStorage.setItem(sessionStorageKey, response.data.session_id);
+        if (previousSessionId !== response.data.session_id) {
+          setRatingSubmitted(false);
+          setSelectedRating(0);
+        }
+      }
 
       // If a new session_id is returned, update state and sessionStorage
       if (response.data.session_id && response.data.session_id !== sessionId) {
@@ -319,16 +403,22 @@ const ChatWidget = ({ onClose, apiUrl }) => {
         timestamp: new Date(),
         sources: response.data.sources || [], // Use the 'sources' directly for 'Read More' in Message component
         confidence: response.data.confidence,
-        source: response.data.source, // This is now a string like 'vector_search'
-        sourceDetails: response.data.source_details, // Pass source_details for potential future use or debugging
+        source: response.data.source,
+        messageId: response.data.message_id,
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
-
-      // History is now saved directly by the backend in /api/chat endpoint
-
+      if (mode === "public") {
+        setQuotaBlocked(false);
+      }
     } catch (err) {
       console.error('Error querying API:', err);
-      
+      if (mode === "public" && err?.response?.status === 429 && err?.response?.data?.detail === "tenant_message_quota_exceeded") {
+        const limitMessage = err?.response?.headers?.["x-quota-message"] || "Monthly message limit reached. Please try again next month.";
+        setQuotaBlocked(true);
+        setQuotaMessage(limitMessage);
+        setPublicConfigError(limitMessage);
+        return;
+      }
       // Add error message
       const errorMessage = {
         type: 'bot',
@@ -343,39 +433,36 @@ const ChatWidget = ({ onClose, apiUrl }) => {
   };
 
   return (
-    <WidgetContainer>
-      <WidgetHeader>
-        <WidgetTitle>Hello, I'm Allevia</WidgetTitle>
+    <WidgetContainer
+      className="mrnwebdesigns-chatbot-widget-container"
+      $userBubbleColor={userMessageColor}
+      $botBubbleColor={botMessageColor}
+    >
+      <WidgetHeader className="mrnwebdesigns-chatbot-widget-header" $primaryColor={primaryColor}>
+        <HeaderRow>
+          {avatarDisplayUrl ? <HeaderAvatar src={avatarDisplayUrl} alt="brand avatar" /> : null}
+          <WidgetTitle>{headerTitle}</WidgetTitle>
+        </HeaderRow>
       </WidgetHeader>
+      <PoweredBy>Powered by {brandName || "Nethues"}</PoweredBy>
       
-      <MessageContainer>
-        {messages.map((message, index) => {
-          console.log("Rendering Message component with props:", message); // Debug log
-          return (
-            <Message
-              key={index}
-              type={message.type}
-              text={message.text}
-              timestamp={message.timestamp}
-              sources={message.sources}
-              isError={message.isError}
-              confidence={message.confidence}
-              source={message.source}
-              isTrigger={message.isTrigger} // Pass isTrigger prop
-              triggerCategory={message.triggerCategory} // Pass triggerCategory prop
-              triggerButtons={message.triggerButtons} // Pass triggerButtons prop
-              botResponseTitle={message.botResponseTitle} // Pass the title prop
-              onAcknowledge={message.isTrigger && message.triggerCategory === 'doctor' ? acknowledgeTrigger : null} // Pass acknowledge for doctor triggers
-              onEnableChat={message.isTrigger && message.triggerCategory === 'doctor' ? enableChat : null} // Pass enableChat for doctor triggers
-            />
-          );
-        })}
-        
-        {/* Show consent message after first bot message */}
-        {showConsent && (
-          <ConsentMessage
-            onAccept={handleConsentAccept}
-            onDecline={handleConsentDecline}
+      <MessageContainer className="mrnwebdesigns-chatbot-widget-message-container">
+        {messages.map((message, index) => (
+          <Message
+            key={index}
+            type={message.type}
+            text={message.text}
+            timestamp={message.timestamp}
+            sources={message.sources}
+            isError={message.isError}
+            confidence={message.confidence}
+            source={message.source}
+            messageId={message.messageId}
+            mode={mode}
+            apiUrl={apiUrl}
+            widgetKey={widgetKey}
+            userBubbleTextColor={userMessageTextColor}
+            botBubbleTextColor={botMessageTextColor}
           />
         )}
         
@@ -412,23 +499,87 @@ const ChatWidget = ({ onClose, apiUrl }) => {
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={
-            !consentGiven ? "Please accept the disclaimer above to continue..." :
-            chatDisabled ? "Chat disabled due to trigger detection. Use 'Re-enable Chat' button to continue..." :
-            "Type your message..."
-          }
-          disabled={isLoading || !consentGiven || chatDisabled}
+          placeholder="Type your message..."
+          disabled={isLoading || (mode === "public" && (isProfileRequired || quotaBlocked))}
         />
-        <SendButton type="submit" disabled={isLoading || !input.trim() || !consentGiven || chatDisabled}>
+        <SendButton
+          type="submit"
+          disabled={isLoading || !input.trim() || (mode === "public" && (isProfileRequired || quotaBlocked))}
+          $primaryColor={primaryColor}
+        >
           <BsSend />
         </SendButton>
       </InputForm>
+      {mode === "public" && isProfileRequired && (
+        <ProfileCaptureContainer>
+          <ProfileTitle>Before we continue, please share your details:</ProfileTitle>
+          <Input
+            type="text"
+            value={visitorName}
+            onChange={(e) => setVisitorName(e.target.value)}
+            placeholder="Your name"
+            disabled={isSavingProfile}
+          />
+          <Input
+            type="email"
+            value={visitorEmail}
+            onChange={(e) => setVisitorEmail(e.target.value)}
+            placeholder="Your email"
+            disabled={isSavingProfile}
+          />
+          <ProfileSaveButton
+            type="button"
+            disabled={isSavingProfile || !visitorName.trim() || !visitorEmail.trim()}
+            onClick={submitVisitorProfile}
+          >
+            {isSavingProfile ? "Saving..." : "Continue to chat"}
+          </ProfileSaveButton>
+        </ProfileCaptureContainer>
+      )}
+      {mode === "public" && showRatingPrompt && !ratingSubmitted && sessionId && (
+        <RatingContainer>
+          <ProfileTitle>Please rate your overall experience:</ProfileTitle>
+          <StarRow>
+            {[1, 2, 3, 4, 5].map((star) => (
+              <StarButton
+                key={star}
+                type="button"
+                disabled={isSubmittingRating}
+                onClick={() => submitSessionRating(star)}
+              >
+                {star}
+              </StarButton>
+            ))}
+          </StarRow>
+        </RatingContainer>
+      )}
+      {mode === "public" && ratingSubmitted && selectedRating > 0 && (
+        <RatingSubmittedText>Thanks for rating: {selectedRating}/5</RatingSubmittedText>
+      )}
+      {(privacyPolicyUrl || widgetWebsiteUrl) && (
+        <FooterLinks>
+          {widgetWebsiteUrl ? (
+            <PrivacyPolicyLink href={widgetWebsiteUrl} target="_blank" rel="noreferrer">
+              Website
+            </PrivacyPolicyLink>
+          ) : null}
+          {privacyPolicyUrl && widgetWebsiteUrl ? <FooterSep aria-hidden>|</FooterSep> : null}
+          {privacyPolicyUrl ? (
+            <PrivacyPolicyLink href={privacyPolicyUrl} target="_blank" rel="noreferrer">
+              Privacy Policy
+            </PrivacyPolicyLink>
+          ) : null}
+        </FooterLinks>
+      )}
+      {publicConfigError && <ConfigError>{publicConfigError}</ConfigError>}
     </WidgetContainer>
   );
 };
 
 // Styled components
 const WidgetContainer = styled.div`
+  --primary-color: ${(p) => p.$userBubbleColor || "#bf362e"};
+  --secondary-color: ${(p) => p.$botBubbleColor || "#d5bbb9"};
   display: flex;
   flex-direction: column;
   width: 380px;
@@ -444,7 +595,7 @@ const WidgetHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  background: #72b519;
+  background: ${(props) => props.$primaryColor || "#bf362e"};
   color: white;
 `;
 
@@ -453,6 +604,25 @@ const WidgetTitle = styled.h2`
   font-size: 1.2rem;
 `;
 
+const HeaderRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+`;
+
+const HeaderAvatar = styled.img`
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.2);
+`;
+
+const PoweredBy = styled.div`
+  font-size: 0.75rem;
+  color: #666;
+  padding: 6px 15px 0;
+`;
 
 const MessageContainer = styled.div`
   flex: 1;
@@ -478,7 +648,7 @@ const Input = styled.input`
   outline: none;
   
   &:focus {
-    border-color: #72b519;
+    border-color: ${(props) => props.$primaryColor || "#bf362e"};
   }
   
   &:disabled {
@@ -489,7 +659,7 @@ const Input = styled.input`
 `;
 
 const SendButton = styled.button`
-  background: #72b519;
+  background: ${(props) => props.$primaryColor || "#bf362e"};
   color: white;
   border: none;
   border-radius: 50%;
@@ -506,7 +676,7 @@ const SendButton = styled.button`
   }
   
   &:hover:not(:disabled) {
-    background: #5a8f15;
+    filter: brightness(0.92);
   }
 `;
 
@@ -531,6 +701,85 @@ const LoadingDots = styled.div`
     0%, 80%, 100% { opacity: 0; }
     40% { opacity: 1; }
   }
+`;
+
+const ConfigError = styled.div`
+  color: #c62828;
+  font-size: 0.85rem;
+  padding: 8px 12px 12px;
+`;
+
+const FooterLinks = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 15px 8px;
+  font-size: 0.75rem;
+`;
+
+const FooterSep = styled.span`
+  color: #999;
+  user-select: none;
+`;
+
+const PrivacyPolicyLink = styled.a`
+  color: #555;
+  text-decoration: underline;
+`;
+
+const ProfileCaptureContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #eee;
+  padding: 12px 15px;
+`;
+
+const ProfileTitle = styled.div`
+  font-size: 0.85rem;
+  color: #444;
+`;
+
+const ProfileSaveButton = styled.button`
+  border: none;
+  background: #bf362e;
+  color: white;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+
+  &:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+`;
+
+const RatingContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid #eee;
+  padding: 12px 15px;
+`;
+
+const StarRow = styled.div`
+  display: flex;
+  gap: 6px;
+`;
+
+const StarButton = styled.button`
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+`;
+
+const RatingSubmittedText = styled.div`
+  color: #2e7d32;
+  font-size: 0.8rem;
+  padding: 0 15px 8px;
 `;
 
 export default ChatWidget; 

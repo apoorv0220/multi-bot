@@ -19,13 +19,21 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Copy backend code
 COPY ./backend /app
+RUN chmod +x /app/entrypoint.sh
 
 # Expose the API port
-EXPOSE 8013
+EXPOSE 8043
 
-# Set the default command (uvicorn for development, gunicorn for production)
+# Set environment variables
 ENV PYTHONPATH=/app
 ENV ENVIRONMENT=production
 
-# Use gunicorn for production
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "main:app", "--bind", "0.0.0.0:8013"] 
+# Embedding processing configuration for chunked reindexing
+ENV EMBEDDING_BATCH_SIZE=10
+ENV EMBEDDING_CHUNK_SIZE=50
+ENV EMBEDDING_MAX_RETRIES=3
+ENV EMBEDDING_RETRY_DELAY=1.0
+ENV EMBEDDING_RATE_LIMIT_DELAY=0.1
+
+# Use startup script with migration guard
+CMD ["/app/entrypoint.sh"]

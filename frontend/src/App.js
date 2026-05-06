@@ -1,51 +1,115 @@
-import React, { useState, useEffect } from 'react';
-import styled from 'styled-components';
+import React, { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { AppBar, Box, Button, Container, CssBaseline, Stack, Toolbar, Typography } from '@mui/material';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import ChatWidget from './components/ChatWidget';
+import LoginPage from './components/LoginPage';
+import AdminDashboard from './components/AdminDashboard';
+import { loadToken, setAuthToken, setAuthFailureHandler } from './api';
 
-function App() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'https://migraine.softdemonew.info/api');
-  // const [apiUrl, setApiUrl] = useState(process.env.REACT_APP_API_URL || 'http://localhost:8000');
+function AppContent({ auth, onLogin, onLogout }) {
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  const closeChat = () => {
-    setIsOpen(false);
-  };
+  const handleSessionExpired = useCallback(() => {
+    onLogout();
+    navigate('/admin/dashboard/overview', { replace: true });
+  }, [navigate, onLogout]);
 
-  // Listen for messages from parent window if embedded as widget
   useEffect(() => {
-    const handleMessage = (event) => {
-      // Accept messages from any origin when in widget mode
-      const data = event.data;
-      
-      if (typeof data === 'object' && data.action === 'open-chat') {
-        setIsOpen(true);
-        if (data.apiUrl) {
-          setApiUrl(data.apiUrl);
-        }
-      } else if (data === 'close-chat') {
-        setIsOpen(false);
-      } else if (data === 'toggle-chat') {
-        setIsOpen(prev => !prev);
-      }
-    };
+    setAuthFailureHandler(handleSessionExpired);
+    return () => setAuthFailureHandler(() => {});
+  }, [handleSessionExpired]);
+  const isAdminRoute = location.pathname.startsWith("/admin");
+  const isEmbedRoute = location.pathname === "/embed";
 
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  if (isEmbedRoute) {
+    return <ChatWidget mode="public" />;
+  }
 
   return (
-    <AppContainer id="migraine-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
-      {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
-      {/* <ChatButton onClick={toggleChat} isOpen={isOpen} /> */}
-    </AppContainer>
+    <>
+      {isAdminRoute && (
+        <AppBar position="static" color="inherit" elevation={1}>
+          <Toolbar>
+            <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>Chatbot Control</Typography>
+            {auth && (
+              <Stack direction="row" spacing={2} alignItems="center">
+                <Link to="/admin/dashboard/overview">Dashboard</Link>
+                <Button onClick={onLogout} variant="outlined">Logout</Button>
+              </Stack>
+            )}
+          </Toolbar>
+        </AppBar>
+      )}
+      <Container maxWidth="xl" disableGutters>
+        <Box sx={{ minHeight: isAdminRoute ? "calc(100vh - 64px)" : "100vh" }}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/admin/dashboard/overview" replace />} />
+            <Route path="/admin/chat" element={<Navigate to="/admin/dashboard/overview" replace />} />
+            <Route path="/admin/dashboard/*" element={auth ? <AdminDashboard role={auth.role} tenantId={auth.tenant_id} tenantIds={auth.tenant_ids || []} /> : <LoginPage onLogin={onLogin} />} />
+            <Route path="/admin/dashboard" element={<Navigate to="/admin/dashboard/overview" replace />} />
+            <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+          </Routes>
+        </Box>
+      </Container>
+    </>
   );
 }
 
-const AppContainer = styled.div`
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-`;
+function App() {
+  const [auth, setAuth] = useState(null);
+  const theme = createTheme({
+    palette: {
+      mode: "light",
+      primary: { main: "#0f62fe" },
+      secondary: { main: "#6f42c1" },
+      background: { default: "#f6f8fb" },
+    },
+    shape: { borderRadius: 10 },
+  });
+
+  useEffect(() => {
+    if (loadToken()) {
+      const cachedRole = localStorage.getItem("role");
+      const cachedTenant = localStorage.getItem("tenant_id");
+      const cachedTenantIdsRaw = localStorage.getItem("tenant_ids");
+      let cachedTenantIds = [];
+      if (cachedTenantIdsRaw) {
+        try {
+          cachedTenantIds = JSON.parse(cachedTenantIdsRaw);
+        } catch (err) {
+          cachedTenantIds = [];
+        }
+      }
+      if (cachedRole) setAuth({ role: cachedRole, tenant_id: cachedTenant, tenant_ids: cachedTenantIds });
+    }
+  }, []);
+
+  const onLogin = (data) => {
+    setAuth(data);
+    localStorage.setItem("role", data.role);
+    localStorage.setItem("tenant_id", data.tenant_id || "");
+    localStorage.setItem("tenant_ids", JSON.stringify(data.tenant_ids || []));
+  };
+
+  const onLogout = () => {
+    setAuthToken(null);
+    setAuth(null);
+    localStorage.removeItem("role");
+    localStorage.removeItem("tenant_id");
+    localStorage.removeItem("tenant_ids");
+    localStorage.removeItem("admin_dashboard_selected_tenant_id");
+  };
+
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <BrowserRouter>
+        <AppContent auth={auth} onLogin={onLogin} onLogout={onLogout} />
+      </BrowserRouter>
+    </ThemeProvider>
+  );
+}
 
 export default App; 

@@ -1,30 +1,22 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
-import TriggerMessageDisplay from './TriggerMessageDisplay'; // Import the new component
+import { client } from '../api';
 
-// Determine background color for trigger messages
-const getTriggerBackgroundColor = (category) => {
-  switch (category) {
-    case 'emergency': return '#ffebee'; // Light red
-    case 'suicide': return '#fff3e0'; // Light orange
-    case 'doctor': return '#e8f5e9'; // Light green
-    default: return 'var(--secondary-color)';
-  }
-};
-
-// Determine border color for trigger messages
-const getTriggerBorderColor = (category) => {
-  switch (category) {
-    case 'emergency': return '#d32f2f'; // Red
-    case 'suicide': return '#f57c00'; // Orange
-    case 'doctor': return '#4caf50'; // Green
-    default: return 'transparent';
-  }
-};
-
-const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigger, triggerCategory, triggerButtons = [], botResponseTitle }) => {
-  // console.log("Message component received props:", { type, text, isTrigger, triggerCategory, sources, triggerButtons }); // Debug log removed
+const Message = ({
+  type,
+  text,
+  timestamp,
+  sources = [],
+  isError,
+  source,
+  messageId,
+  mode = "admin",
+  apiUrl = "",
+  widgetKey = "",
+  userBubbleTextColor = "#ffffff",
+  botBubbleTextColor = "#1a1a1a",
+}) => {
   // Format timestamp
   const formatTime = (date) => {
     return new Intl.DateTimeFormat('en-US', {
@@ -54,29 +46,51 @@ const Message = ({ type, text, timestamp, sources = [], isError, source, isTrigg
     );
   }
 
-  // Original rendering for non-trigger messages
+  const feedbackStorageKey = useMemo(
+    () => (messageId ? `feedback_${mode}_${widgetKey || "admin"}_${messageId}` : ""),
+    [messageId, mode, widgetKey]
+  );
+  const [selectedVote, setSelectedVote] = useState(() => (feedbackStorageKey ? localStorage.getItem(feedbackStorageKey) : ""));
+
+  const sendFeedback = async (vote) => {
+    if (!messageId) return;
+    try {
+      const endpoint = mode === "public" ? `/api/public/messages/${messageId}/feedback` : `/api/messages/${messageId}/feedback`;
+      const requestUrl = mode === "public" ? `${apiUrl}${endpoint}` : endpoint;
+      await client.post(requestUrl, { vote }, {
+        headers: mode === "public" ? { "X-Widget-Key": widgetKey } : undefined,
+      });
+      setSelectedVote(vote);
+      if (feedbackStorageKey) {
+        localStorage.setItem(feedbackStorageKey, vote);
+      }
+    } catch (err) {
+      console.error("Feedback failed", err);
+    }
+  };
+
   return (
-    <MessageContainer isError={isError} type={type} isTrigger={isTrigger} triggerCategory={triggerCategory}>
-      <MessageContent 
-        isError={isError} 
+    <MessageContainer isError={isError} type={type}>
+      <MessageContent
+        isError={isError}
         type={type}
-        isTrigger={isTrigger} // Pass to styled component
-        triggerCategory={triggerCategory} // Pass to styled component
+        className="mrnwebdesigns-chatbot-widget-message-content"
+        $userText={userBubbleTextColor}
+        $botText={botBubbleTextColor}
       >
-        {isTrigger && <TriggerIcon category={triggerCategory}>⚠️</TriggerIcon>}
         <ReactMarkdown>{text}</ReactMarkdown>
         {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
-          <ReadMoreButton 
-            href={sources[0].url} 
-            target="_blank" 
-            rel="noopener noreferrer"
-          >
-            Read More
-          </ReadMoreButton>
+          <>
+            <ReadMoreButton href={sources[0].url} target="_blank" rel="noopener noreferrer">Read More</ReadMoreButton>
+            <FeedbackRow>
+              <FeedbackButton selected={selectedVote === "up"} onClick={() => sendFeedback("up")} type="button">👍</FeedbackButton>
+              <FeedbackButton selected={selectedVote === "down"} onClick={() => sendFeedback("down")} type="button">👎</FeedbackButton>
+            </FeedbackRow>
+          </>
         )}
         {/* Trigger buttons are now handled by TriggerMessageDisplay */}
       </MessageContent>
-      <MessageTime type={type}>{formatTime(timestamp)}</MessageTime>
+      <MessageTime type={type} className="mrnwebdesigns-chatbot-widget-message-time">{formatTime(timestamp)}</MessageTime>
     </MessageContainer>
   );
 };
@@ -97,7 +111,10 @@ const MessageContent = styled.div`
     if (props.isTrigger) return getTriggerBackgroundColor(props.triggerCategory); // Corrected: use local function
     return props.type !== 'user' ? 'var(--secondary-color)' : 'var(--primary-color)';
   }};
-  color: ${props => props.type !== 'user' ? 'var(--text-color)' : 'white'};
+  color: ${(props) => {
+    if (props.isError) return '#fff';
+    return props.type === 'user' ? props.$userText : props.$botText;
+  }};
   padding: 12px 16px;
   border-radius: 18px;
   border-bottom-left-radius: ${props => props.type !== 'user' ? '4px' : '18px'};
@@ -113,7 +130,11 @@ const MessageContent = styled.div`
   }
   
   a {
-    color: ${props => props.type !== 'user' ? 'var(--primary-color)' : 'white'};
+    color: ${(props) => {
+      if (props.isError) return '#fff';
+      if (props.type === 'user') return props.$userText;
+      return 'var(--primary-color)';
+    }};
     text-decoration: underline;
   }
   
@@ -147,16 +168,18 @@ const MessageTime = styled.span`
   margin-top: 5px;
 `;
 
-const TriggerIcon = styled.span`
-  position: absolute;
-  top: -8px; // Adjust as needed
-  left: -8px; // Adjust as needed
-  font-size: 1.2em;
-  background-color: white;
-  border-radius: 50%;
-  padding: 2px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-  z-index: 10; // Ensure it's above the message content
+const FeedbackRow = styled.div`
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+`;
+
+const FeedbackButton = styled.button`
+  border: 1px solid ${props => (props.selected ? "var(--primary-color)" : "#ddd")};
+  background: ${props => (props.selected ? "rgba(191, 54, 46, 0.12)" : "white")};
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
 `;
 
 export default Message; 

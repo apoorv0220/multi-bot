@@ -1,6 +1,6 @@
 {
-  "short_name": "Migraine Chat",
-  "name": "Migraine.ie AI Chatbot",
+  "short_name": "MRN Web Designs Chat",
+  "name": "MRN Web Designs AI Chatbot",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,6 +20,6 @@
   ],
   "start_url": ".",
   "display": "standalone",
-  "theme_color": "#72b519",
+  "theme_color": "#bf362e",
   "background_color": "#ffffff"
 } 

@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MRN Web Designs - Reindexing Admin</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        button {
+            background: #007cba;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #005a8b;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-family: monospace;
+            white-space: pre-line;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #4caf50;
+            transition: width 0.3s ease;
+        }
+        .error {
+            color: #d32f2f;
+            background: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .success {
+            color: #388e3c;
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        input[type="number"] {
+            width: 80px;
+            padding: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        .jobs-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .job-item {
+            background: #f8f9fa;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border-left: 4px solid #007cba;
+        }
+        .api-config {
+            background: #e3f2fd;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        .api-config input {
+            width: 300px;
+            padding: 5px;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 MRN Web Designs - Reindexing Administration</h1>
+        
+        <!-- API Configuration -->
+        <div class="api-config">
+            <strong>🔧 API Configuration:</strong><br>
+            Backend URL: <input type="text" id="apiBaseUrl" value="" placeholder="https://api.your-server.com">
+            <button onclick="updateApiBase()" style="padding: 5px 10px; font-size: 12px;">Update</button>
+            <div style="margin-top: 5px; font-size: 12px; color: #666;">
+                For production: Use your backend base URL (e.g., https://api.your-domain.com)
+            </div>
+        </div>
+        
+        <!-- Start Reindexing Section -->
+        <div class="section">
+            <h3>🚀 Start Reindexing</h3>
+            <div>
+                <label>Chunk Size: <input type="number" id="chunkSize" value="50" min="10" max="200"></label>
+                <label>Batch Size: <input type="number" id="batchSize" value="10" min="1" max="50"></label>
+                <label><input type="checkbox" id="forceRestart"> Force Restart</label>
+            </div>
+            <div style="margin-top: 10px;">
+                <button onclick="startReindexing()">Start Reindexing</button>
+                <button onclick="getStatus()">Refresh Status</button>
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                💡 For 284+ WordPress posts, try: Chunk Size: 30, Batch Size: 8
+            </div>
+        </div>
+
+        <!-- Status Section -->
+        <div class="section">
+            <h3>📊 Current Status</h3>
+            <div id="statusContainer">
+                <div class="status">Click "Refresh Status" to check current status</div>
+            </div>
+        </div>
+
+        <!-- Jobs List Section -->
+        <div class="section">
+            <h3>📋 Recent Jobs</h3>
+            <button onclick="listJobs()">Refresh Jobs List</button>
+            <div id="jobsContainer" class="jobs-list">
+                <div class="status">Click "Refresh Jobs List" to see recent jobs</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Default API base - will be updated based on environment
+        let API_BASE = '';
+        
+        // Auto-detect API base URL on page load
+        function initializeApiBase() {
+            const currentHost = window.location.hostname;
+            const currentProtocol = window.location.protocol;
+            
+            // Default to same-origin backend routing (recommended with reverse proxy)
+            API_BASE = `${currentProtocol}//${currentHost}`;
+            
+            document.getElementById('apiBaseUrl').value = API_BASE;
+        }
+        
+        // Update API base URL
+        function updateApiBase() {
+            API_BASE = document.getElementById('apiBaseUrl').value.trim();
+            if (!API_BASE.startsWith('http')) {
+                API_BASE = 'http://' + API_BASE;
+            }
+            showStatus(`API base updated to: ${API_BASE}`, 'success');
+        }
+
+        let currentJobId = null;
+        let statusInterval = null;
+
+        // Start reindexing
+        async function startReindexing() {
+            const chunkSize = parseInt(document.getElementById('chunkSize').value);
+            const batchSize = parseInt(document.getElementById('batchSize').value);
+            const forceRestart = document.getElementById('forceRestart').checked;
+
+            const requestData = {
+                chunk_size: chunkSize,
+                batch_size: batchSize,
+                force_restart: forceRestart
+            };
+
+            try {
+                showStatus('Starting reindexing...', 'info');
+                
+                const response = await fetch(`${API_BASE}/api/reindex`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    currentJobId = result.job_id;
+                    showStatus(`✅ Reindexing started successfully!
+Job ID: ${result.job_id}
+Status: ${result.status}
+Estimated Duration: ${result.estimated_duration || 'Unknown'}
+Message: ${result.message}`, 'success');
+                    
+                    // Start auto-refresh for this job
+                    startAutoRefresh();
+                } else {
+                    showStatus(`❌ Failed to start reindexing: ${result.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`❌ Error connecting to backend: ${error.message}
+Please check if backend is running at: ${API_BASE}`, 'error');
+            }
+        }
+
+        // Get current status
+        async function getStatus(jobId = null) {
+            try {
+                const url = jobId ? 
+                    `${API_BASE}/api/reindex/status?job_id=${jobId}` : 
+                    `${API_BASE}/api/reindex/status`;
+                
+                const response = await fetch(url);
+                const result = await response.json();
+
+                if (response.ok) {
+                    displayStatus(result);
+                } else {
+                    showStatus(`❌ Failed to get status: ${result.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`❌ Error connecting to backend: ${error.message}
+Please check if backend is running at: ${API_BASE}`, 'error');
+            }
+        }
+
+        // Display detailed status
+        function displayStatus(status) {
+            let statusHtml = `
+                <div class="status">
+                    <strong>📊 Job Status</strong>
+                    Job ID: ${status.job_id || 'N/A'}
+                    Status: ${getStatusEmoji(status.status)} ${status.status}
+                    Message: ${status.message}
+            `;
+
+            if (status.start_time) {
+                statusHtml += `Start Time: ${new Date(status.start_time).toLocaleString()}`;
+            }
+
+            if (status.elapsed_time) {
+                statusHtml += `Elapsed Time: ${formatDuration(status.elapsed_time)}`;
+            }
+
+            if (status.progress) {
+                const progress = status.progress;
+                statusHtml += `
+<strong>📈 Progress Details:</strong>
+Total Items: ${progress.total_items}
+Processed: ${progress.processed_items}
+Failed: ${progress.failed_items}
+Progress: ${progress.progress_percentage.toFixed(1)}%
+Current Batch: ${progress.current_batch}
+                `;
+
+                statusHtml += '</div>';
+
+                // Add progress bar
+                statusHtml += `
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${progress.progress_percentage}%"></div>
+                    </div>
+                `;
+            } else {
+                statusHtml += '</div>';
+            }
+
+            if (status.job_id && status.status === 'running') {
+                statusHtml += `
+                    <button onclick="cancelJob('${status.job_id}')" style="background: #d32f2f;">
+                        Cancel Job
+                    </button>
+                `;
+            }
+
+            document.getElementById('statusContainer').innerHTML = statusHtml;
+        }
+
+        // List all jobs
+        async function listJobs() {
+            try {
+                const response = await fetch(`${API_BASE}/api/reindex/jobs`);
+                const result = await response.json();
+
+                if (response.ok) {
+                    displayJobs(result);
+                } else {
+                    showStatus(`❌ Failed to list jobs: ${result.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`❌ Error connecting to backend: ${error.message}
+Please check if backend is running at: ${API_BASE}`, 'error');
+            }
+        }
+
+        // Display jobs list
+        function displayJobs(jobsData) {
+            const jobs = jobsData.jobs || [];
+            let jobsHtml = `
+                <div class="status">
+                    <strong>📋 Jobs Summary</strong>
+                    Total Jobs: ${jobsData.total_jobs}
+                    Active Jobs: ${jobsData.active_jobs}
+                </div>
+            `;
+
+            if (jobs.length === 0) {
+                jobsHtml += '<div class="status">No jobs found</div>';
+            } else {
+                jobs.forEach(job => {
+                    jobsHtml += `
+                        <div class="job-item">
+                            <strong>${getStatusEmoji(job.status)} ${job.job_id}</strong><br>
+                            Status: ${job.status}<br>
+                            Start: ${job.start_time ? new Date(job.start_time).toLocaleString() : 'N/A'}<br>
+                            ${job.elapsed_time ? `Duration: ${formatDuration(job.elapsed_time)}<br>` : ''}
+                            Message: ${job.message}
+                            ${job.status === 'running' ? 
+                                `<br><button onclick="getStatus('${job.job_id}')" style="font-size: 12px; padding: 5px 10px;">View Details</button>
+                                 <button onclick="cancelJob('${job.job_id}')" style="font-size: 12px; padding: 5px 10px; background: #d32f2f;">Cancel</button>` : ''
+                            }
+                        </div>
+                    `;
+                });
+            }
+
+            document.getElementById('jobsContainer').innerHTML = jobsHtml;
+        }
+
+        // Cancel a job
+        async function cancelJob(jobId) {
+            if (!confirm(`Are you sure you want to cancel job ${jobId}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/api/reindex/jobs/${jobId}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    showStatus(`✅ Job cancellation requested: ${result.message}`, 'success');
+                    // Refresh status and jobs list
+                    await getStatus();
+                    await listJobs();
+                } else {
+                    showStatus(`❌ Failed to cancel job: ${result.detail}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`❌ Error connecting to backend: ${error.message}
+Please check if backend is running at: ${API_BASE}`, 'error');
+            }
+        }
+
+        // Auto-refresh status for running jobs
+        function startAutoRefresh() {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+            }
+
+            statusInterval = setInterval(async () => {
+                await getStatus(currentJobId);
+            }, 5000); // Refresh every 5 seconds
+        }
+
+        function stopAutoRefresh() {
+            if (statusInterval) {
+                clearInterval(statusInterval);
+                statusInterval = null;
+            }
+        }
+
+        // Utility functions
+        function showStatus(message, type) {
+            const container = document.getElementById('statusContainer');
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : 'status';
+            container.innerHTML = `<div class="${className}">${message}</div>`;
+        }
+
+        function getStatusEmoji(status) {
+            const emojis = {
+                'idle': '💤',
+                'starting': '🚀',
+                'running': '⚡',
+                'completed': '✅',
+                'failed': '❌',
+                'cancelled': '🚫'
+            };
+            return emojis[status] || '❓';
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 60) {
+                return `${seconds.toFixed(1)}s`;
+            } else if (seconds < 3600) {
+                return `${(seconds / 60).toFixed(1)}m`;
+            } else {
+                return `${(seconds / 3600).toFixed(1)}h`;
+            }
+        }
+
+        // Initialize page
+        window.onload = function() {
+            initializeApiBase();
+            getStatus();
+            listJobs();
+        };
+
+        // Stop auto-refresh when page is closed
+        window.onbeforeunload = function() {
+            stopAutoRefresh();
+        };
+    </script>
+</body>
+</html> 

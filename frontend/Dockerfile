@@ -2,6 +2,9 @@ FROM node:18-alpine AS build
 
 WORKDIR /app
 
+ARG REACT_APP_API_URL
+ENV REACT_APP_API_URL=${REACT_APP_API_URL}
+
 # Copy package.json and package-lock.json
 COPY package*.json ./
 
@@ -22,9 +25,11 @@ COPY --from=build /app/build /usr/share/nginx/html
 
 # Copy custom nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
+RUN chmod +x /docker-entrypoint.d/40-runtime-config.sh
 
-# Expose port 3001
-EXPOSE 3001
+# Expose nginx port
+EXPOSE 80
 
 # Start Nginx server
 CMD ["nginx", "-g", "daemon off;"] 
