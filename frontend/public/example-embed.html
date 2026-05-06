@@ -128,14 +128,14 @@
         // Update UI
         statusElement.className = 'loading';
         statusElement.style.display = 'block';
-        statusElement.innerText = 'Reindexing in progress. This may take several minutes...';
+        statusElement.innerText = 'Reindexing in progress. Processing content in chunks to avoid timeouts...';
         buttonElement.disabled = true;
         
         // Get API URL from configuration
         const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG.apiUrl || 'http://144.217.68.58:8043';
         
-        // Call the reindex API endpoint
-        fetch(`${apiUrl}/api/reindex`, {
+        // Call the chunked reindex API endpoint
+        fetch(`${apiUrl}/api/reindex-chunked`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -151,7 +151,7 @@
         })
         .then(data => {
           statusElement.className = 'success';
-          statusElement.innerText = 'Reindexing started successfully! This process will continue in the background.';
+          statusElement.innerText = 'Reindexing completed successfully! All content has been processed and indexed.';
         })
         .catch(error => {
           statusElement.className = 'error';
