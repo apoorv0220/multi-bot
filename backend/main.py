@@ -128,8 +128,8 @@ class SearchResult(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None
-    max_results: int = 5
+    max_results: int = 3
+    session_id: str | None = None  # Add session_id to ChatRequest
 
 
 class ChatResponse(BaseModel):
@@ -3146,6 +3146,41 @@ async def list_reindex_jobs(
         }
         for j in jobs
     ]
+
+# Add a new endpoint for chunked reindexing with progress tracking
+@app.post("/api/reindex-chunked")
+async def trigger_chunked_reindex():
+    """Trigger a chunked content reindexing with progress tracking"""
+    try:
+        # First check if Qdrant is accessible
+        try:
+            collections = qdrant_client.get_collections().collections
+            logger.info(f"Successfully connected to Qdrant. Found {len(collections)} collections.")
+        except Exception as e:
+            logger.error(f"Error connecting to Qdrant before reindexing: {e}")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Cannot connect to Qdrant database. Please ensure Qdrant is running: {e}"
+            )
+        
+        # Create a simple progress callback that logs progress
+        def progress_callback(message, current, total):
+            logger.info(f"Progress: {message} ({current}/{total})")
+        
+        # Run reindexing with progress tracking
+        embedder_instance = Embedder(client=qdrant_client)
+        await embedder_instance.reindex_all_content(progress_callback)
+        
+        return {
+            "status": "success", 
+            "message": "Content reindexing completed successfully"
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions as they already have proper status codes and details
+        raise
+    except Exception as e:
+        logger.error(f"Error during reindexing: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to complete reindexing: {e}")
 
 # Add global exception handler middleware
 @app.middleware("http")

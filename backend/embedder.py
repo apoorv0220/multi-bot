@@ -507,63 +507,95 @@ class Embedder:
         
         if not external_urls:
             logger.warning("No external URLs found")
+            if progress_callback:
+                progress_callback("No external URLs found", 0, 0)
             return
         
         logger.info(f"Scraping and embedding {len(external_urls)} external URLs...")
+        if progress_callback:
+            progress_callback(f"Scraping {len(external_urls)} external URLs...", 0, len(external_urls))
         
-        # Scrape URLs
-        scraped_contents = await scrape_urls(external_urls)
+        logger.info("Clearing existing external content...")
+        if progress_callback:
+            progress_callback("Clearing existing external content...", 0, len(external_urls))
         
-        # Process scraped content
-        points = []
+        self.qdrant_client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source_type",
+                            match=models.MatchValue(value="external")
+                        )
+                    ]
+                )
+            )
+        )
         
-        for content in scraped_contents:
-            # Prepare text for embedding (title + content)
-            text = f"{content['title']}\n\n{content['content']}"
+        chunk_size = 5
+        total_processed = 0
+        total_embedded = 0
+        
+        for i in range(0, len(external_urls), chunk_size):
+            chunk_urls = external_urls[i:i+chunk_size]
             
             # Generate embedding
             embedding = await self.generate_embedding_with_retry(text)
             
-            if embedding:
-                # Create point with proper UUID
-                # Create a deterministic UUID based on the URL
-                point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, content['url']))
+            try:
+                scraped_contents = await scrape_urls(chunk_urls)
                 
-                point = PointStruct(
-                    id=point_id,
-                    vector=embedding,
-                    payload=content
-                )
+                chunk_points = []
                 
-                points.append(point)
-        
-        if points:
-            # First, delete all existing external content
-            self.qdrant_client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="source_type",
-                                match=models.MatchValue(value="external")
+                for content in scraped_contents:
+                    try:
+                        text = f"{content['title']}\n\n{content['content']}"
+                        
+                        embedding = await self.generate_embedding(text)
+                        
+                        if embedding:
+                            point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, content['url']))
+                            
+                            point = PointStruct(
+                                id=point_id,
+                                vector=embedding,
+                                payload=content
                             )
-                        ]
-                    )
-                )
-            )
-            
-            # Upload new points in batches
-            batch_size = 100
-            for i in range(0, len(points), batch_size):
-                batch_points = points[i:i+batch_size]
-                self.qdrant_client.upsert(
-                    collection_name=self.collection_name,
-                    points=batch_points
-                )
-                logger.info(f"Uploaded {min(i+batch_size, len(points))}/{len(points)} external URLs")
+                            
+                            chunk_points.append(point)
+                            total_embedded += 1
+                        
+                        total_processed += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing external content {content.get('url', 'unknown')}: {e}")
+                        total_processed += 1
+                        continue
+                
+                if chunk_points:
+                    try:
+                        self.qdrant_client.upsert(
+                            collection_name=self.collection_name,
+                            points=chunk_points
+                        )
+                        logger.info(f"Uploaded chunk: {len(chunk_points)} external URLs")
+                        if progress_callback:
+                            progress_callback(f"Uploaded {total_embedded} external URLs so far...", total_processed, len(external_urls))
+                    except Exception as e:
+                        logger.error(f"Error uploading external chunk: {e}")
+                        if progress_callback:
+                            progress_callback(f"Error uploading external chunk: {e}", total_processed, len(external_urls))
+                
+            except Exception as e:
+                logger.error(f"Error scraping chunk: {e}")
+                if progress_callback:
+                    progress_callback(f"Error scraping chunk: {e}", total_processed, len(external_urls))
+                total_processed += len(chunk_urls)
         
-        logger.info(f"Successfully embedded {len(points)} external URLs")
+        logger.info(f"Successfully embedded {total_embedded} external URLs out of {len(external_urls)} total")
+        if progress_callback:
+            progress_callback(f"Completed! Embedded {total_embedded} external URLs", len(external_urls), len(external_urls))
     
     async def reindex_all_content(self):
         """Reindex all content with chunked processing to prevent timeouts"""
