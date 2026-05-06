@@ -117,7 +117,17 @@ class FuzzyMatcher:
             threshold (int): Minimum similarity score (0-100) to consider a match
         """
         self.threshold = threshold
-        self.responses = PERSONALIZED_RESPONSES
+        # Combine all response dictionaries
+        self.responses = {
+            **GREETING_RESPONSES,
+            **IDENTITY_RESPONSES,
+            **POSITIVE_RESPONSES,
+            **RANDOM_RESPONSES,
+            **CLARIFICATION_RESPONSES,
+            **HELP_RESPONSES,
+            **SIMPLE_RESPONSES,
+            **EMERGENCY_RESPONSES
+        }
         self.greeting_patterns = [
             "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
             "how are you", "how are you doing", "what's up", "how's it going"

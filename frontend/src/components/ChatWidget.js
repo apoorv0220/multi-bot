@@ -444,7 +444,7 @@ const WidgetHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   padding: 15px;
-  background: #72b519;
+  background: #bd1d73;
   color: white;
 `;
 
@@ -478,7 +478,7 @@ const Input = styled.input`
   outline: none;
   
   &:focus {
-    border-color: #72b519;
+    border-color: #bd1d73;
   }
   
   &:disabled {
@@ -489,7 +489,7 @@ const Input = styled.input`
 `;
 
 const SendButton = styled.button`
-  background: #72b519;
+  background: #bd1d73;
   color: white;
   border: none;
   border-radius: 50%;

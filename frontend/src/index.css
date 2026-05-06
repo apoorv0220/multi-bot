@@ -14,9 +14,9 @@ code {
 
 /* Global styles for the chatbot widget */
 :root {
-  --primary-color: #72b519;
-  --primary-dark: #72b519;
-  --secondary-color: #e4efdf;
+  --primary-color: #bd1d73;
+  --primary-dark: #bd1d73;
+  --secondary-color: #ffd5eb;
   --text-color: #333;
   --light-text: #777;
   --error-color: #e74c3c;
@@ -30,7 +30,7 @@ code {
 }
 
 /* Ensure the widget is only visible when included in another site */
-#migraine-chatbot-widget {
+#houseoftiles-chatbot-widget {
   position: fixed;
   z-index: 999999;
   transition: all 0.3s ease;

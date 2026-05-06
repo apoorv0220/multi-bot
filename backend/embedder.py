@@ -35,7 +35,7 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Define Qdrant connection parameters from environment or use defaults
-QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "houseoftiles-qdrant")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 
 # Create a shared QdrantClient instance - will be set by main.py
@@ -52,7 +52,7 @@ class Embedder:
             self._connect_to_qdrant()
         
         # Collection name for Qdrant
-        self.collection_name = os.getenv("COLLECTION_NAME", "migraine_content")
+        self.collection_name = os.getenv("COLLECTION_NAME", "houseoftiles_content")
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -384,7 +384,7 @@ class Embedder:
 async def test_embedder():
     """Test the Embedder class by connecting to the local Qdrant server and testing a simple embedding"""
     embedder = Embedder()
-    test_text = "This is a test of the embedding system for Migraine.ie"
+    test_text = "This is a test of the embedding system for House of Tiles"
     embedding = await embedder.generate_embedding(test_text)
     
     if embedding:

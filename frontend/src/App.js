@@ -34,9 +34,8 @@ function App() {
   }, []);
 
   return (
-    <AppContainer id="migraine-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
+    <AppContainer id="houseoftiles-chatbot-widget" className={isOpen ? '' : 'closed-container'}>
       {isOpen && <ChatWidget onClose={closeChat} apiUrl={apiUrl} />}
-      {/* <ChatButton onClick={toggleChat} isOpen={isOpen} /> */}
     </AppContainer>
   );
 }

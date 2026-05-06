@@ -1,6 +1,14 @@
 import os
+import logging
 import pymysql
 from dotenv import load_dotenv
+
+# Configure proper logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("embedder")
 
 # Load environment variables
 load_dotenv()
@@ -13,6 +21,7 @@ class WordPressFetcher:
         self.password = os.getenv("WORDPRESS_DB_PASSWORD")
         self.database = os.getenv("WORDPRESS_DB_NAME")
         self.url_table = os.getenv("WORDPRESS_URL_TABLE")
+        self.table_prefix = os.getenv("WORDPRESS_TABLE_PREFIX", "afn_")
 
     def get_connection(self):
         """Establish a connection to the WordPress database"""
@@ -40,7 +49,7 @@ class WordPressFetcher:
         try:
             with connection.cursor() as cursor:
                 # Query to get published posts and pages with their metadata
-                query = """
+                query = f"""
                 SELECT 
                     p.ID as id,
                     p.post_title as title,
@@ -49,7 +58,7 @@ class WordPressFetcher:
                     p.post_date as date,
                     CONCAT(%s, p.post_name) as url
                 FROM 
-                    wp_posts p
+                    {self.table_prefix}posts p
                 WHERE 
                     p.post_status = 'publish' AND
                     p.post_status NOT IN ('trash', 'draft', 'auto-draft', 'private', 'pending', 'future') AND
@@ -61,9 +70,13 @@ class WordPressFetcher:
                 ORDER BY 
                     p.post_date DESC
                 """
+
+                logger.info(f"Query: {query}")
                 
                 # Website URL with trailing slash
                 site_url = self._get_site_url()
+
+                logger.info(f"Site URL: {site_url}")
                 
                 cursor.execute(query, (site_url,))
                 results = cursor.fetchall()
@@ -121,15 +134,15 @@ class WordPressFetcher:
         """Get the WordPress site URL from options table"""
         connection = self.get_connection()
         if not connection:
-            return "https://migraine.ie/"
+            return "https://houseoftiles.ie/"
         
         try:
             with connection.cursor() as cursor:
-                query = """
+                query = f"""
                 SELECT 
                     option_value
                 FROM 
-                    wp_options
+                    {self.table_prefix}options
                 WHERE 
                     option_name = 'siteurl'
                 LIMIT 1
@@ -144,10 +157,10 @@ class WordPressFetcher:
                         site_url += '/'
                     return site_url
                 else:
-                    return "https://migraine.ie/"
+                    return "https://houseoftiles.ie/"
         except Exception as e:
             print(f"Error fetching site URL: {e}")
-            return "https://migraine.ie/"
+            return "https://houseoftiles.ie/"
         finally:
             connection.close()
     
