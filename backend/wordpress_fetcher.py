@@ -15,18 +15,22 @@ logger = logging.getLogger("wordpress_fetcher")
 load_dotenv()
 
 class WordPressFetcher:
-    def __init__(self):
-        self.host = os.getenv("WORDPRESS_DB_HOST")
-        self.port = int(os.getenv("WORDPRESS_DB_PORT", 3306))
-        self.user = os.getenv("WORDPRESS_DB_USER")
-        self.password = os.getenv("WORDPRESS_DB_PASSWORD")
-        self.database = os.getenv("WORDPRESS_DB_NAME")
-        self.url_table = os.getenv("WORDPRESS_URL_TABLE")
-        self.table_prefix = os.getenv("WORDPRESS_TABLE_PREFIX", "afn_")
+    def __init__(self, source_config=None, fallback_site_url: str | None = None):
+        source_config = source_config or {}
+        self.fallback_site_url = (fallback_site_url or "").strip() or None
+        self.host = source_config.get("host") or os.getenv("WORDPRESS_DB_HOST")
+        self.port = int(source_config.get("port") or os.getenv("WORDPRESS_DB_PORT", 3306))
+        self.user = source_config.get("user") or os.getenv("WORDPRESS_DB_USER")
+        self.password = source_config.get("password") or os.getenv("WORDPRESS_DB_PASSWORD")
+        self.database = source_config.get("database") or os.getenv("WORDPRESS_DB_NAME")
+        self.url_table = source_config.get("url_table") or os.getenv("WORDPRESS_URL_TABLE")
+        self.table_prefix = source_config.get("table_prefix") or os.getenv("WORDPRESS_TABLE_PREFIX", "afn_")
+        self.last_connection_error = None
 
     def get_connection(self):
         """Establish a connection to the WordPress database"""
         try:
+            self.last_connection_error = None
             connection = pymysql.connect(
                 host=self.host,
                 port=self.port,
@@ -38,14 +42,16 @@ class WordPressFetcher:
             )
             return connection
         except Exception as e:
-            print(f"Error connecting to WordPress database: {e}")
+            self.last_connection_error = str(e)
+            logger.error(f"Error connecting to WordPress database: {e}")
             return None
 
     def get_all_posts(self):
         """Fetch all published posts and pages from WordPress"""
         connection = self.get_connection()
         if not connection:
-            return []
+            detail = self.last_connection_error or "unknown connection error"
+            raise ConnectionError(f"Failed to connect to WordPress database for posts fetch: {detail}")
         
         try:
             with connection.cursor() as cursor:
@@ -94,7 +100,7 @@ class WordPressFetcher:
                 
                 return results
         except Exception as e:
-            print(f"Error fetching WordPress posts: {e}")
+            logger.error(f"Error fetching WordPress posts: {e}")
             return []
         finally:
             connection.close()
@@ -103,7 +109,8 @@ class WordPressFetcher:
         """Fetch all external URLs from the custom URL table"""
         connection = self.get_connection()
         if not connection:
-            return []
+            detail = self.last_connection_error or "unknown connection error"
+            raise ConnectionError(f"Failed to connect to WordPress database for external URLs fetch: {detail}")
         
         try:
             with connection.cursor() as cursor:
@@ -127,7 +134,7 @@ class WordPressFetcher:
                     
                     # Validate and fix the URL
                     original_url = result['url']
-                    fixed_url = validate_and_fix_url(original_url)
+                    fixed_url = validate_and_fix_url(original_url, fallback_base=self.fallback_site_url)
                     
                     if fixed_url != original_url:
                         logger.warning(f"Fixed external URL: {original_url} -> {fixed_url}")
@@ -141,7 +148,7 @@ class WordPressFetcher:
                 
                 return processed_results
         except Exception as e:
-            print(f"Error fetching external URLs: {e}")
+            logger.error(f"Error fetching external URLs: {e}")
             return []
         finally:
             connection.close()
@@ -175,7 +182,7 @@ class WordPressFetcher:
                 else:
                     return "https://mrnwebdesigns.com/"
         except Exception as e:
-            print(f"Error fetching site URL: {e}")
+            logger.warning(f"Error fetching site URL: {e}")
             return "https://mrnwebdesigns.com/"
         finally:
             connection.close()

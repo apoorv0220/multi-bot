@@ -1,6 +1,6 @@
 """
-URL validation and fallback utilities for MRN Web Designs chatbot.
-Handles invalid URLs by falling back to contact-us page.
+URL validation and fallbacks for chatbot content and citations.
+Prefers tenant `widget_website_url` when passed as `fallback_base`; avoids hardcoded third-party sites.
 """
 
 import re
@@ -164,15 +164,13 @@ def validate_and_fix_url(url: str, fallback_base: Optional[str] = None) -> str:
         logger.info(f"Using base URL fallback: {base_url}")
         return base_url
     
-    # Use provided fallback base
+    # Use provided fallback base (e.g. tenant widget_website_url)
     if fallback_base and is_valid_url(fallback_base):
         logger.info(f"Using provided fallback: {fallback_base}")
         return fallback_base
-    
-    # Last resort: return contact-us page for the MRN Web Designs site
-    default_contact_url = "https://mrnwebdesigns.com/contact-us/"
-    logger.info(f"Using default contact-us fallback: {default_contact_url}")
-    return default_contact_url
+
+    logger.info("No valid URL or fallback_base; returning empty string")
+    return ""
 
 def clean_wordpress_url(site_url: str, post_name: str, post_id: int = None) -> str:
     """
@@ -188,7 +186,7 @@ def clean_wordpress_url(site_url: str, post_name: str, post_id: int = None) -> s
         str: Clean URL or contact-us page fallback
     """
     if not site_url or not post_name:
-        return get_contact_url(site_url) if site_url else "https://mrnwebdesigns.com/contact-us/"
+        return get_contact_url(site_url) if site_url else ""
     
     # Ensure site_url has trailing slash
     if not site_url.endswith('/'):

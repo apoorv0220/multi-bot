@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chatbot Embed - Two Tenant Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 24px;
+      line-height: 1.6;
+    }
+    h1 { color: #bf362e; }
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+      background: #fafafa;
+    }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    button {
+      background-color: #bf362e;
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { background-color: #4550c0; }
+    code { background: #f1f3f5; padding: 2px 6px; border-radius: 4px; }
+    pre {
+      background: #f5f5f5;
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+    }
+    .note {
+      border-left: 4px solid #ff9800;
+      background: #fff8e1;
+      padding: 12px;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <script src="/runtime-config.js"></script>
+  <h1>Two-Tenant Embed Demo</h1>
+  <p>
+    Yes, your understanding is correct: plugin integration stays the same, but each client site should use its own tenant config/key.
+    This page provides two separate demo configs for the two tenants currently in your DB.
+  </p>
+
+  <div class="card">
+    <h2>Tenant A</h2>
+    <p><strong>Name:</strong> Migraine</p>
+    <p><strong>Tenant ID:</strong> <code>4c97be2e-0adf-4101-b215-9e612f7b35b7</code></p>
+    <p><strong>Demo Public Key:</strong> <code>demo_pub_migraine_4c97be2e</code></p>
+    <pre>&lt;script&gt;
+window.CHATBOT_WIDGET_CONFIG = {
+  baseUrl: "https://your-frontend-domain",
+  apiUrl: "https://your-backend-domain",
+  tenantPublicKey: "demo_pub_migraine_4c97be2e"
+};
+&lt;/script&gt;</pre>
+    <button onclick="loadTenant('migraine')">Load Migraine Widget Config</button>
+  </div>
+
+  <div class="card">
+    <h2>Tenant B</h2>
+    <p><strong>Name:</strong> Default Tenant</p>
+    <p><strong>Tenant ID:</strong> <code>7721e85d-9290-4464-b02d-f87f12bc48c0</code></p>
+    <p><strong>Demo Public Key:</strong> <code>demo_pub_default_7721e85d</code></p>
+    <pre>&lt;script&gt;
+window.CHATBOT_WIDGET_CONFIG = {
+  baseUrl: "https://your-frontend-domain",
+  apiUrl: "https://your-backend-domain",
+  tenantPublicKey: "demo_pub_default_7721e85d"
+};
+&lt;/script&gt;</pre>
+    <button onclick="loadTenant('default')">Load Default Tenant Widget Config</button>
+  </div>
+
+  <div class="note">
+    These keys are demo placeholders in the embed config. To enforce real public-visitor isolation without login, backend should validate <code>tenantPublicKey</code> (or issue short-lived public tokens) on a dedicated public chat endpoint.
+  </div>
+
+  <script>
+    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const TENANT_CONFIGS = {
+      migraine: {
+        baseUrl: resolvedWidgetBaseUrl,
+        apiUrl: resolvedApiBaseUrl,
+        tenantPublicKey: "demo_pub_migraine_4c97be2e",
+      },
+      default: {
+        baseUrl: resolvedWidgetBaseUrl,
+        apiUrl: resolvedApiBaseUrl,
+        tenantPublicKey: "demo_pub_default_7721e85d",
+      },
+    };
+
+    function removeExistingWidget() {
+      const iframe = document.getElementById("mrnwebdesigns-chatbot-iframe");
+      const button = document.getElementById("mrnwebdesigns-chatbot-toggle");
+      if (iframe) iframe.remove();
+      if (button) button.remove();
+      document.querySelectorAll("script[data-widget-loader='true']").forEach((el) => el.remove());
+    }
+
+    function loadTenant(tenantKey) {
+      removeExistingWidget();
+      window.CHATBOT_WIDGET_CONFIG = TENANT_CONFIGS[tenantKey];
+      const script = document.createElement("script");
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
+      script.async = true;
+      script.dataset.widgetLoader = "true";
+      document.body.appendChild(script);
+    }
+  </script>
+</body>
+</html>

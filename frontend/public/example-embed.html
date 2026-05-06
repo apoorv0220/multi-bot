@@ -27,53 +27,10 @@
       border-left: 4px solid #ffd600;
       margin: 20px 0;
     }
-    .admin-panel {
-      background-color: #f5f5f5;
-      padding: 20px;
-      border-radius: 5px;
-      margin: 30px 0;
-      border: 1px solid #ddd;
-    }
-    .admin-panel h2 {
-      margin-top: 0;
-      color: #333;
-    }
-    button {
-      background-color: #bf362e;
-      color: white;
-      border: none;
-      padding: 10px 15px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    button:hover {
-      background-color: #4550c0;
-    }
-    #reindex-status {
-      margin-top: 10px;
-      padding: 10px;
-      border-radius: 4px;
-      display: none;
-    }
-    .success {
-      background-color: #e8f5e9;
-      color: #2e7d32;
-      border: 1px solid #a5d6a7;
-    }
-    .error {
-      background-color: #ffebee;
-      color: #c62828;
-      border: 1px solid #ef9a9a;
-    }
-    .loading {
-      background-color: #e3f2fd;
-      color: #1565c0;
-      border: 1px solid #90caf9;
-    }
   </style>
 </head>
 <body>
+  <script src="/runtime-config.js"></script>
   <h1>MRN Web Designs Chatbot - Embed Example</h1>
   
   <p>This page demonstrates how to embed the MRN Web Designs AI chatbot into any website.</p>
@@ -83,18 +40,17 @@
   <p>To embed the chatbot on your website, add the following code before the closing <code>&lt;/body&gt;</code> tag:</p>
   
   <pre>&lt;script&gt;
-  // Optional configuration
-  window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-    baseUrl: 'http://144.217.68.58:3043',       // URL where the chatbot widget is hosted
-    apiUrl: 'http://144.217.68.58:8043',       // URL of the backend API
-    primaryColor: '#bf362e',                    // Chatbot theme color  
-    position: 'bottom-right'                    // Position on page (bottom-right, bottom-left)
+  // Optional configuration (legacy: window.MRNWEBDESIGNS_CHATBOT_CONFIG still works)
+  window.CHATBOT_WIDGET_CONFIG = {
+    baseUrl: 'https://your-frontend-domain',    // URL where the chatbot widget is hosted
+    apiUrl: 'https://your-backend-domain',      // URL of the backend API
+    tenantPublicKey: 'replace-with-widget-key'  // Per-tenant public embed key (from admin / DB)
   };
   
   // Load the widget script
   (function() {
     const script = document.createElement('script');
-    script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + '/widget.js';
+    script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
     script.async = true;
     document.body.appendChild(script);
   })();
@@ -102,6 +58,7 @@
 
   <div class="note">
     <strong>Note:</strong> When deploying to production, update the URLs to your actual hosted domain.
+    Each site must set <code>tenantPublicKey</code> to the embed key issued for <em>that</em> tenant (literal string in the snippet you paste); the backend maps it via <code>WIDGET_EMBED_KEYS_JSON</code>.
   </div>
   
   <h2>Features</h2>
@@ -113,83 +70,21 @@
     <li>Responsive design (works on mobile and desktop)</li>
   </ul>
   
-  <!-- Admin Panel for Reindexing -->
-  <div class="admin-panel">
-    <h2>Admin Controls</h2>
-    <p>Use the button below to manually trigger content reindexing from WordPress and external URLs.</p>
-    <button id="reindex-button" onclick="triggerReindex()">Reindex All Content</button>
-    <div id="reindex-status"></div>
-    
-    <script>
-      function triggerReindex() {
-        const statusElement = document.getElementById('reindex-status');
-        const buttonElement = document.getElementById('reindex-button');
-        
-        // Update UI
-        statusElement.className = 'loading';
-        statusElement.style.display = 'block';
-        statusElement.innerText = 'Reindexing in progress. Processing content in chunks to avoid timeouts...';
-        buttonElement.disabled = true;
-        
-        // Get API URL from configuration
-        const apiUrl = window.MRNWEBDESIGNS_CHATBOT_CONFIG.apiUrl || 'http://144.217.68.58:8043';
-        
-        // Call the chunked reindex API endpoint
-        fetch(`${apiUrl}/api/reindex-chunked`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        })
-        .then(response => {
-          if (!response.ok) {
-            return response.json().then(errorData => {
-              throw new Error(errorData.detail || `Server returned ${response.status}: ${response.statusText}`);
-            });
-          }
-          return response.json();
-        })
-        .then(data => {
-          statusElement.className = 'success';
-          statusElement.innerText = 'Reindexing completed successfully! All content has been processed and indexed.';
-        })
-        .catch(error => {
-          statusElement.className = 'error';
-          
-          // Handle specific error messages
-          let errorMessage = error.message || 'Failed to trigger reindexing';
-          
-          // Check for connection refused error
-          if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError') || 
-              errorMessage.includes('Connection refused')) {
-            errorMessage = 'Connection error: The server appears to be offline or unavailable. Please ensure the backend server is running.';
-          } else if (errorMessage.includes('Cannot connect to Qdrant')) {
-            errorMessage = 'Database connection error: Qdrant database is not accessible. Please ensure Qdrant is running.';
-          }
-          
-          statusElement.innerText = `Error: ${errorMessage}`;
-        })
-        .finally(() => {
-          buttonElement.disabled = false;
-        });
-      }
-    </script>
-  </div>
-  
   <!-- Example of how to embed the chatbot -->
   <script>
-    // Optional configuration
-    window.MRNWEBDESIGNS_CHATBOT_CONFIG = {
-      baseUrl: 'http://144.217.68.58:3043',
-      apiUrl: 'http://144.217.68.58:8043',
-      primaryColor: '#bf362e',
-      position: 'bottom-right'
+    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    window.CHATBOT_WIDGET_CONFIG = {
+      baseUrl: resolvedWidgetBaseUrl,
+      apiUrl: resolvedApiBaseUrl,
+      // Demo key only — production sites paste their own tenant embed key here (not from runtime-config).
+      tenantPublicKey: "demo_pub_default_7721e85d",
     };
     
     // Load the widget script
     (function() {
       const script = document.createElement('script');
-      script.src = window.MRNWEBDESIGNS_CHATBOT_CONFIG.baseUrl + '/widget.js';
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
       script.async = true;
       document.body.appendChild(script);
     })();

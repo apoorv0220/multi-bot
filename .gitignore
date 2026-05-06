@@ -67,6 +67,11 @@ Thumbs.db
 *.swo
 *~
 
+# GeoIP MMDB (downloaded; see backend/scripts/download_dbip_country_lite.py)
+data/geoip/*.mmdb
+data/geoip/*.mmdb.gz
+data/geoip/*.download
+
 # Docker
 .docker/
 docker-compose.override.yml

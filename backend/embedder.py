@@ -23,6 +23,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("embedder")
 
+# Qdrant payload defaults (legacy single-tenant); overridden per tenant via Embedder constructor.
+LEGACY_VECTOR_PRIMARY_SOURCE_TYPE = "mrnwebdesigns_ie"
+LEGACY_VECTOR_PRIMARY_SOURCE_LABEL = "MRN Web Designs"
+
 # Import local modules with relative imports
 try:
     from .wordpress_fetcher import WordPressFetcher
@@ -70,7 +74,17 @@ class ProcessingProgress:
         }
 
 class Embedder:
-    def __init__(self, client=None):
+    def __init__(
+        self,
+        client=None,
+        collection_name: Optional[str] = None,
+        source_config: Optional[Dict[str, Any]] = None,
+        progress_callback=None,
+        usage_callback=None,
+        vector_payload_source_type: Optional[str] = None,
+        vector_payload_source_label: Optional[str] = None,
+        url_fallback_base: Optional[str] = None,
+    ):
         # Use the provided client or the global client
         self.qdrant_client = client or qdrant_client
         
@@ -79,8 +93,18 @@ class Embedder:
             logger.info(f"Creating new Qdrant client connecting to {QDRANT_HOST}:{QDRANT_PORT}")
             self._connect_to_qdrant()
         
-        # Collection name for Qdrant
-        self.collection_name = os.getenv("COLLECTION_NAME", "mrnwebdesigns_content")
+        # Collection name for Qdrant (tenant-specific should be passed explicitly)
+        self.collection_name = collection_name or os.getenv("COLLECTION_NAME")
+        if not self.collection_name:
+            raise ValueError("collection_name must be provided for multi-tenant indexing")
+        self.source_config = source_config or {}
+        self.progress_callback = progress_callback
+        self.usage_callback = usage_callback
+        st = (vector_payload_source_type or "").strip()
+        self.vector_payload_source_type = st or LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+        lb = (vector_payload_source_label or "").strip()
+        self.vector_payload_source_label = lb or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
+        self.url_fallback_base = (url_fallback_base or "").strip() or None
         
         # Embedding model
         self.embedding_model = "text-embedding-3-small"
@@ -183,6 +207,19 @@ class Embedder:
                     model=self.embedding_model,
                     input=text
                 )
+                usage = response.usage or {}
+                if self.usage_callback:
+                    try:
+                        self.usage_callback(
+                            {
+                                "model_name": self.embedding_model,
+                                "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+                                "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+                                "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+                            }
+                        )
+                    except Exception as usage_err:
+                        logger.warning(f"Usage callback failed: {usage_err}")
                 
                 return response.data[0].embedding
                 
@@ -203,6 +240,19 @@ class Embedder:
                             model=self.embedding_model,
                             input=shorter_text
                         )
+                        usage = response.usage or {}
+                        if self.usage_callback:
+                            try:
+                                self.usage_callback(
+                                    {
+                                        "model_name": self.embedding_model,
+                                        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+                                        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+                                        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+                                    }
+                                )
+                            except Exception as usage_err:
+                                logger.warning(f"Usage callback failed: {usage_err}")
                         return response.data[0].embedding
                     except Exception as e2:
                         logger.error(f"Error after aggressive truncation: {e2}")
@@ -281,8 +331,8 @@ class Embedder:
                             "url": post['url'],
                             "type": post['type'],
                             "date": str(post['date']),
-                            "source": "MRN Web Designs",
-                            "source_type": "mrnwebdesigns_ie"  # Used for filtering
+                            "source": self.vector_payload_source_label,
+                            "source_type": self.vector_payload_source_type,
                         }
                         
                         # Create point with UUID format
@@ -329,7 +379,7 @@ class Embedder:
         logger.info("Starting chunked WordPress content embedding...")
         
         # Get WordPress content
-        wp_fetcher = WordPressFetcher()
+        wp_fetcher = WordPressFetcher(source_config=self.source_config, fallback_site_url=self.url_fallback_base)
         posts = wp_fetcher.get_all_posts()
         
         if not posts:
@@ -357,7 +407,7 @@ class Embedder:
                             must=[
                                 models.FieldCondition(
                                     key="source_type",
-                                    match=models.MatchValue(value="mrnwebdesigns_ie")
+                                    match=models.MatchValue(value=self.vector_payload_source_type),
                                 )
                             ]
                         )
@@ -392,6 +442,11 @@ class Embedder:
                 self.current_progress.failed_items += len(batch_posts) - len(batch_points)
                 self.current_progress.last_update_time = time.time()
                 self.save_progress(self.current_progress)
+                if self.progress_callback:
+                    try:
+                        self.progress_callback(self.current_progress.to_dict())
+                    except Exception as cb_err:
+                        logger.warning(f"Progress callback failed: {cb_err}")
                 
                 logger.info(f"Progress: {self.current_progress.processed_items}/{total_posts} posts processed ({self.current_progress.processed_items/total_posts*100:.1f}%)")
             
@@ -444,9 +499,10 @@ class Embedder:
         result = await self.embed_wordpress_content_chunked()
         logger.info(f"Successfully embedded WordPress posts: {result}")
     
-    async def embed_external_urls(self, progress_callback=None):
-        """Embed content from external URLs and store in Qdrant with chunked processing"""
-        wp_fetcher = WordPressFetcher()
+    async def embed_external_urls(self):
+        """Embed content from external URLs and store in Qdrant"""
+        # Get external URLs from WordPress
+        wp_fetcher = WordPressFetcher(source_config=self.source_config, fallback_site_url=self.url_fallback_base)
         external_urls = wp_fetcher.get_external_urls()
         
         if not external_urls:
