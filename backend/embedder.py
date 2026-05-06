@@ -514,27 +514,44 @@ class Embedder:
         
         if not external_urls:
             logger.warning("No external URLs found")
+            if progress_callback:
+                progress_callback("No external URLs found", 0, 0)
             return
         
         logger.info(f"Scraping and embedding {len(external_urls)} external URLs...")
+        if progress_callback:
+            progress_callback(f"Scraping {len(external_urls)} external URLs...", 0, len(external_urls))
         
-        # Scrape URLs
-        scraped_contents = await scrape_urls(external_urls)
+        logger.info("Clearing existing external content...")
+        if progress_callback:
+            progress_callback("Clearing existing external content...", 0, len(external_urls))
         
-        # Process scraped content
-        points = []
+        self.qdrant_client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source_type",
+                            match=models.MatchValue(value="external")
+                        )
+                    ]
+                )
+            )
+        )
         
-        for content in scraped_contents:
-            # Prepare text for embedding (title + content)
-            text = f"{content['title']}\n\n{content['content']}"
+        chunk_size = 5
+        total_processed = 0
+        total_embedded = 0
+        
+        for i in range(0, len(external_urls), chunk_size):
+            chunk_urls = external_urls[i:i+chunk_size]
             
             # Generate embedding
             embedding = await self.generate_embedding_with_retry(text)
             
-            if embedding:
-                # Create point with proper UUID
-                # Create a deterministic UUID based on the URL
-                point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, content['url']))
+            try:
+                scraped_contents = await scrape_urls(chunk_urls)
                 
                 point = PointStruct(
                     id=point_id,
@@ -542,18 +559,19 @@ class Embedder:
                     payload={**content, "content_bucket": "external_url"}
                 )
                 
-                points.append(point)
-        
-        if points:
-            # First, delete all existing external content
-            self.qdrant_client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="source_type",
-                                match=models.MatchValue(value="external")
+                for content in scraped_contents:
+                    try:
+                        text = f"{content['title']}\n\n{content['content']}"
+                        
+                        embedding = await self.generate_embedding(text)
+                        
+                        if embedding:
+                            point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, content['url']))
+                            
+                            point = PointStruct(
+                                id=point_id,
+                                vector=embedding,
+                                payload=content
                             )
                         ]
                     )

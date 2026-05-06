@@ -28,7 +28,23 @@ const Message = ({
   // Check if any sources have a score of at least 30%
   const hasHighConfidenceSource = sources && 
     sources.length > 0 && 
-    sources.some(source => source.score >= 0.3);
+    sources.some(s => s.score >= 0.3); // Renamed 'source' to 's' to avoid conflict with prop 'source'
+
+  // If it's a trigger message, render TriggerMessageDisplay
+  if (isTrigger) {
+    return (
+      <MessageContainer type={type} isTrigger={isTrigger} triggerCategory={triggerCategory}>
+        <TriggerMessageDisplay
+          title={botResponseTitle || (triggerCategory === 'emergency' ? '⚠️ Emergency Medical Alert' : triggerCategory === 'suicide' ? '⚠️ Crisis Support Available' : '📋 Medical Advice Recommended')}
+          message={text}
+          buttons={triggerButtons}
+          category={triggerCategory}
+          // onAcknowledge and onEnableChat are not passed here, as Message component is for display only
+        />
+        <MessageTime type={type}>{formatTime(timestamp)}</MessageTime>
+      </MessageContainer>
+    );
+  }
 
   const feedbackStorageKey = useMemo(
     () => (messageId ? `feedback_${mode}_${widgetKey || "admin"}_${messageId}` : ""),
@@ -72,6 +88,7 @@ const Message = ({
             </FeedbackRow>
           </>
         )}
+        {/* Trigger buttons are now handled by TriggerMessageDisplay */}
       </MessageContent>
       <MessageTime type={type} className="mrnwebdesigns-chatbot-widget-message-time">{formatTime(timestamp)}</MessageTime>
     </MessageContainer>
@@ -89,7 +106,9 @@ const MessageContainer = styled.div`
 
 const MessageContent = styled.div`
   background-color: ${props => {
+    // console.log("MessageContent styling evaluation:", { isTrigger: props.isTrigger, triggerCategory: props.triggerCategory }); // Debug log removed
     if (props.isError) return 'var(--error-color)';
+    if (props.isTrigger) return getTriggerBackgroundColor(props.triggerCategory); // Corrected: use local function
     return props.type !== 'user' ? 'var(--secondary-color)' : 'var(--primary-color)';
   }};
   color: ${(props) => {
@@ -102,6 +121,8 @@ const MessageContent = styled.div`
   border-bottom-right-radius: ${props => props.type !== 'user' ? '18px' : '4px'};
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   word-break: break-word;
+  border: ${props => props.isTrigger ? `1px solid ${getTriggerBorderColor(props.triggerCategory)}` : 'none'}; // Corrected: use local function
+  position: relative; // For trigger icon positioning
   
   p {
     margin: 0;

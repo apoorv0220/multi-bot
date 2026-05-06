@@ -85,6 +85,34 @@ const ChatWidget = ({ mode = "admin" }) => {
     [publicAvatarRaw, apiUrl],
   );
 
+  // Custom acknowledge and re-enable chat functions for TriggerMessageDisplay
+  const acknowledgeTrigger = () => {
+    // For doctor triggers, re-enable chat when acknowledged
+    // This will be called from TriggerMessageDisplay within the Message component
+    setChatDisabled(false); // This will only affect doctor triggers, as emergency/suicide chat is disabled.
+  };
+
+  const enableChat = () => {
+    setChatDisabled(false);
+  };
+
+  // Function to save chat events to backend
+  const saveHistory = async (eventData) => {
+    try {
+      // Ensure bot_response_source is structured correctly before sending
+      if (eventData.bot_response_source && typeof eventData.bot_response_source === 'object') {
+        // This object is already prepared by TriggerDetector.js
+        // The backend expects this as a dict for JSON serialization
+      }
+      await axios.post(`${apiUrl}/api/save-history`, { ...eventData, session_id: sessionId });
+    } catch (error) {
+      console.error("Error saving chat event to backend:", error);
+    }
+  };
+
+  // Initialize trigger detection
+  const { checkTriggers } = useTriggerDetection(saveHistory);
+
   // Auto-scroll to bottom when messages change
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -300,14 +328,43 @@ const ChatWidget = ({ mode = "admin" }) => {
       return;
     }
 
-    // Add user message
+    // Check if consent has been given
+    if (!consentGiven) {
+      return; // Don't process input until consent is given
+    }
+
+    // Add user message to display immediately
     const userMessage = {
       type: 'user',
       text: input,
       timestamp: new Date(),
     };
     setMessages((prevMessages) => [...prevMessages, userMessage]);
-    setInput('');
+    setInput(''); // Clear input immediately after adding user message
+
+    // Check for trigger words before processing
+    const trigger = await checkTriggers(userMessage.text); // Pass the text of the user message for trigger detection
+    if (trigger) {
+      // Disable chat based on trigger category
+      if (trigger.category === 'emergency' || trigger.category === 'suicide') {
+        setChatDisabled(true);
+      }
+      // Add bot trigger response message to the chat
+      const botTriggerMessage = {
+        type: 'bot',
+        text: trigger.response.message,
+        timestamp: new Date(),
+        isTrigger: true,
+        triggerCategory: trigger.category,
+        triggerButtons: trigger.response.buttons,
+        botResponseTitle: trigger.response.title,
+      };
+      setMessages((prevMessages) => [...prevMessages, botTriggerMessage]);
+
+      // saveHistory is now called inside useTriggerDetection
+      return; // Exit as trigger response is handled by renderTriggerResponse and saveHistory
+    }
+
     setIsLoading(true);
     setShowRatingPrompt(false);
     resetIdleRatingTimer();
@@ -332,12 +389,19 @@ const ChatWidget = ({ mode = "admin" }) => {
         }
       }
 
+      // If a new session_id is returned, update state and sessionStorage
+      if (response.data.session_id && response.data.session_id !== sessionId) {
+        setSessionId(response.data.session_id);
+        sessionStorage.setItem('migraine-chatbot-session-id', response.data.session_id);
+        console.log("New session ID received and stored during chat:", response.data.session_id);
+      }
+
       // Add bot response with the new response format
       const botMessage = {
         type: 'bot',
         text: response.data.response,
         timestamp: new Date(),
-        sources: response.data.sources || [],
+        sources: response.data.sources || [], // Use the 'sources' directly for 'Read More' in Message component
         confidence: response.data.confidence,
         source: response.data.source,
         messageId: response.data.message_id,
@@ -400,7 +464,23 @@ const ChatWidget = ({ mode = "admin" }) => {
             userBubbleTextColor={userMessageTextColor}
             botBubbleTextColor={botMessageTextColor}
           />
-        ))}
+        )}
+        
+        {/* Render active trigger banner dynamically */}
+        {/* This is no longer needed as trigger messages are now handled by the Message component */}
+        
+        {/* Show loading indicator for history fetch */}
+        {isHistoryLoading && (
+          <LoadingMessage>
+            <LoadingDots>
+              <span>.</span>
+              <span>.</span>
+              <span>.</span>
+            </LoadingDots>
+            <p>Loading chat history...</p>
+          </LoadingMessage>
+        )}
+
         {isLoading && (
           <LoadingMessage>
             <LoadingDots>
@@ -569,6 +649,12 @@ const Input = styled.input`
   
   &:focus {
     border-color: ${(props) => props.$primaryColor || "#bf362e"};
+  }
+  
+  &:disabled {
+    background-color: #f5f5f5;
+    color: #999;
+    cursor: not-allowed;
   }
 `;
 
