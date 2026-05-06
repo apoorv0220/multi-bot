@@ -264,6 +264,15 @@ async def generate_answer(query: str, context_texts: List[str]) -> str:
         logger.error(f"Error generating answer: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate answer")
 
+# Helper function to normalize text for keyword matching
+def normalize_text_for_keywords(text: str) -> str:
+    """Normalize text by lowercasing, removing punctuation, and extra spaces."""
+    import re
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9\s]', '', text) # Remove punctuation
+    text = re.sub(r'\s+', ' ', text).strip() # Replace multiple spaces with single space
+    return text
+
 # API endpoint for the chat query
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> Dict[str, Any]:
@@ -329,13 +338,69 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         embedding = await generate_embedding(request.message)
         
         # Search in Qdrant
-        search_results = await search_qdrant(embedding, request.max_results)
+        raw_search_results = await search_qdrant(embedding, request.max_results)
         
+        # --- Start of new minimalist solution: Keyword-Based Reranking/Boosting ---
+        # Normalize the query for keyword matching
+        normalized_query_words = set(normalize_text_for_keywords(request.message).split())
+        
+        # Create a mutable list of results to allow reordering
+        reordered_results = []
+        
+        # Separate exact matches and other results
+        exact_match_results = []
+        other_results = []
+
+        for result in raw_search_results:
+            title = result.payload.get('title', '')
+            url = result.payload.get('url', '')
+            content_preview = result.payload.get('content', '')
+
+            normalized_title = normalize_text_for_keywords(title)
+            normalized_url_path = normalize_text_for_keywords(url.split('/')[-1].replace('-', ' ')) # Get last part of URL and replace hyphens
+            normalized_content = normalize_text_for_keywords(content_preview)
+            
+            # Check for strong keyword overlap in title or URL for boosting
+            # This logic needs careful tuning to avoid over-boosting irrelevant results
+            title_keywords = set(normalized_title.split())
+            url_keywords = set(normalized_url_path.split())
+            content_keywords = set(normalized_content.split())
+            
+            # Simple overlap check: at least 2 common words, or a significant portion of query words in title/url
+            common_words_in_title = len(normalized_query_words.intersection(title_keywords))
+            common_words_in_url = len(normalized_query_words.intersection(url_keywords))
+            common_words_in_content = len(normalized_query_words.intersection(content_keywords))
+
+            # A simple rule: if a significant portion of query words (e.g., >= 50%) are in the title or URL, consider it a strong match.
+            # Or if it's a direct phrase match in the title
+            is_strong_title_match = (common_words_in_title >= len(normalized_query_words) * 0.5) or (normalize_text_for_keywords(request.message) in normalized_title)
+            is_strong_url_match = (common_words_in_url >= len(normalized_query_words) * 0.5) or (normalize_text_for_keywords(request.message) in normalized_url_path)
+            
+            # Prioritize results where title or URL path strongly match the query
+            if is_strong_title_match or is_strong_url_match:
+                # Assign a very high temporary score to ensure it's at the top, or use a separate list
+                exact_match_results.append(result)
+            else:
+                other_results.append(result)
+
+        # Sort exact matches (if any) by their original Qdrant score (highest first)
+        exact_match_results.sort(key=lambda x: x.score, reverse=True)
+        # Sort other results by their original Qdrant score
+        other_results.sort(key=lambda x: x.score, reverse=True)
+        
+        # Combine: exact matches first, then other results
+        search_results_with_rerank = exact_match_results + other_results
+        
+        # If there are more results than max_results, truncate
+        search_results = search_results_with_rerank[:request.max_results]
+        
+        # --- End of new minimalist solution ---
+
         # Prepare context for OpenAI
         context_texts = []
         sources_for_response: List[SearchResult] = [] # Use explicit type hint for clarity
 
-        logger.info(f"Search results: {len(search_results)}")
+        logger.info(f"Search results after rerank: {len(search_results)}")
         
         # Filter out low confidence results (less than 30%)
         filtered_results = [result for result in search_results if result.score >= 0.3]
