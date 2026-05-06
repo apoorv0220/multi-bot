@@ -128,8 +128,8 @@ class SearchResult(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None
-    max_results: int = 5
+    max_results: int = 3
+    session_id: str | None = None  # Add session_id to ChatRequest
 
 
 class ChatResponse(BaseModel):
