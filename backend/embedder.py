@@ -158,157 +158,227 @@ class Embedder:
                     logger.error(f"Error after aggressive truncation: {e2}")
             return None
     
-    async def embed_wordpress_content(self):
-        """Embed WordPress content and store in Qdrant"""
+    async def embed_wordpress_content(self, progress_callback=None):
+        """Embed WordPress content and store in Qdrant with chunked processing"""
         # Get WordPress content
         wp_fetcher = WordPressFetcher()
         posts = wp_fetcher.get_all_posts()
         
         if not posts:
             logger.warning("No WordPress posts found")
+            if progress_callback:
+                progress_callback("No WordPress posts found", 0, 0)
             return
         
         logger.info(f"Embedding {len(posts)} WordPress posts...")
+        if progress_callback:
+            progress_callback(f"Processing {len(posts)} WordPress posts...", 0, len(posts))
         
-        # Process each post
-        points = []
+        logger.info("Clearing existing WordPress content...")
+        if progress_callback:
+            progress_callback("Clearing existing WordPress content...", 0, len(posts))
         
-        for post in posts:
-            # Prepare text for embedding (title + content)
-            text = f"{post['title']}\n\n{post['content']}"
-            
-            # Generate embedding
-            embedding = await self.generate_embedding(text)
-            
-            if embedding:
-                # Payload data for Qdrant
-                payload = {
-                    "title": post['title'],
-                    "content": post['content'],
-                    "url": post['url'],
-                    "type": post['type'],
-                    "date": str(post['date']),
-                    "source": "House of Tiles",
-                    "source_type": "houseoftiles_ie"  # Used for filtering
-                }
-                
-                # Create point with UUID format
-                # Create a deterministic UUID based on the post ID
-                point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"wp_{post['id']}"))
-                
-                point = PointStruct(
-                    id=point_id,
-                    vector=embedding,
-                    payload=payload
-                )
-                
-                points.append(point)
-        
-        if points:
-            # First, delete all existing WordPress content
-            self.qdrant_client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="source_type",
-                                match=models.MatchValue(value="houseoftiles_ie")
-                            )
-                        ]
-                    )
+        self.qdrant_client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source_type",
+                            match=models.MatchValue(value="migraine_ie")
+                        )
+                    ]
                 )
             )
-            
-            # Upload new points in batches
-            batch_size = 100
-            for i in range(0, len(points), batch_size):
-                batch_points = points[i:i+batch_size]
-                self.qdrant_client.upsert(
-                    collection_name=self.collection_name,
-                    points=batch_points
-                )
-                logger.info(f"Uploaded {min(i+batch_size, len(points))}/{len(points)} WordPress posts")
+        )
         
-        logger.info(f"Successfully embedded {len(points)} WordPress posts")
+        chunk_size = 10
+        total_processed = 0
+        total_embedded = 0
+        
+        for i in range(0, len(posts), chunk_size):
+            chunk_posts = posts[i:i+chunk_size]
+            chunk_points = []
+            
+            logger.info(f"Processing chunk {i//chunk_size + 1}/{(len(posts) + chunk_size - 1)//chunk_size}")
+            if progress_callback:
+                progress_callback(f"Processing chunk {i//chunk_size + 1}/{(len(posts) + chunk_size - 1)//chunk_size}", total_processed, len(posts))
+            
+            for post in chunk_posts:
+                try:
+                    text = f"{post['title']}\n\n{post['content']}"
+                    
+                    embedding = await self.generate_embedding(text)
+                    
+                    if embedding:
+                        payload = {
+                            "title": post['title'],
+                            "content": post['content'],
+                            "url": post['url'],
+                            "type": post['type'],
+                            "date": str(post['date']),
+                            "source": "Migraine.ie",
+                            "source_type": "migraine_ie"
+                        }
+                        
+                        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"wp_{post['id']}"))
+                        
+                        point = PointStruct(
+                            id=point_id,
+                            vector=embedding,
+                            payload=payload
+                        )
+                        
+                        chunk_points.append(point)
+                        total_embedded += 1
+                    
+                    total_processed += 1
+                    
+                except Exception as e:
+                    logger.error(f"Error processing post {post.get('id', 'unknown')}: {e}")
+                    total_processed += 1
+                    continue
+            
+            if chunk_points:
+                try:
+                    self.qdrant_client.upsert(
+                        collection_name=self.collection_name,
+                        points=chunk_points
+                    )
+                    logger.info(f"Uploaded chunk: {len(chunk_points)} posts")
+                    if progress_callback:
+                        progress_callback(f"Uploaded {total_embedded} posts so far...", total_processed, len(posts))
+                except Exception as e:
+                    logger.error(f"Error uploading chunk: {e}")
+                    if progress_callback:
+                        progress_callback(f"Error uploading chunk: {e}", total_processed, len(posts))
+        
+        logger.info(f"Successfully embedded {total_embedded} WordPress posts out of {len(posts)} total")
+        if progress_callback:
+            progress_callback(f"Completed! Embedded {total_embedded} WordPress posts", len(posts), len(posts))
     
-    async def embed_external_urls(self):
-        """Embed content from external URLs and store in Qdrant"""
-        # Get external URLs from WordPress
+    async def embed_external_urls(self, progress_callback=None):
+        """Embed content from external URLs and store in Qdrant with chunked processing"""
         wp_fetcher = WordPressFetcher()
         external_urls = wp_fetcher.get_external_urls()
         
         if not external_urls:
             logger.warning("No external URLs found")
+            if progress_callback:
+                progress_callback("No external URLs found", 0, 0)
             return
         
         logger.info(f"Scraping and embedding {len(external_urls)} external URLs...")
+        if progress_callback:
+            progress_callback(f"Scraping {len(external_urls)} external URLs...", 0, len(external_urls))
         
-        # Scrape URLs
-        scraped_contents = await scrape_urls(external_urls)
+        logger.info("Clearing existing external content...")
+        if progress_callback:
+            progress_callback("Clearing existing external content...", 0, len(external_urls))
         
-        # Process scraped content
-        points = []
-        
-        for content in scraped_contents:
-            # Prepare text for embedding (title + content)
-            text = f"{content['title']}\n\n{content['content']}"
-            
-            # Generate embedding
-            embedding = await self.generate_embedding(text)
-            
-            if embedding:
-                # Create point with proper UUID
-                # Create a deterministic UUID based on the URL
-                point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, content['url']))
-                
-                point = PointStruct(
-                    id=point_id,
-                    vector=embedding,
-                    payload=content
-                )
-                
-                points.append(point)
-        
-        if points:
-            # First, delete all existing external content
-            self.qdrant_client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="source_type",
-                                match=models.MatchValue(value="external")
-                            )
-                        ]
-                    )
+        self.qdrant_client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="source_type",
+                            match=models.MatchValue(value="external")
+                        )
+                    ]
                 )
             )
+        )
+        
+        chunk_size = 5
+        total_processed = 0
+        total_embedded = 0
+        
+        for i in range(0, len(external_urls), chunk_size):
+            chunk_urls = external_urls[i:i+chunk_size]
             
-            # Upload new points in batches
-            batch_size = 100
-            for i in range(0, len(points), batch_size):
-                batch_points = points[i:i+batch_size]
-                self.qdrant_client.upsert(
-                    collection_name=self.collection_name,
-                    points=batch_points
-                )
-                logger.info(f"Uploaded {min(i+batch_size, len(points))}/{len(points)} external URLs")
+            logger.info(f"Scraping chunk {i//chunk_size + 1}/{(len(external_urls) + chunk_size - 1)//chunk_size}")
+            if progress_callback:
+                progress_callback(f"Scraping chunk {i//chunk_size + 1}/{(len(external_urls) + chunk_size - 1)//chunk_size}", total_processed, len(external_urls))
+            
+            try:
+                scraped_contents = await scrape_urls(chunk_urls)
+                
+                chunk_points = []
+                
+                for content in scraped_contents:
+                    try:
+                        text = f"{content['title']}\n\n{content['content']}"
+                        
+                        embedding = await self.generate_embedding(text)
+                        
+                        if embedding:
+                            point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, content['url']))
+                            
+                            point = PointStruct(
+                                id=point_id,
+                                vector=embedding,
+                                payload=content
+                            )
+                            
+                            chunk_points.append(point)
+                            total_embedded += 1
+                        
+                        total_processed += 1
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing external content {content.get('url', 'unknown')}: {e}")
+                        total_processed += 1
+                        continue
+                
+                if chunk_points:
+                    try:
+                        self.qdrant_client.upsert(
+                            collection_name=self.collection_name,
+                            points=chunk_points
+                        )
+                        logger.info(f"Uploaded chunk: {len(chunk_points)} external URLs")
+                        if progress_callback:
+                            progress_callback(f"Uploaded {total_embedded} external URLs so far...", total_processed, len(external_urls))
+                    except Exception as e:
+                        logger.error(f"Error uploading external chunk: {e}")
+                        if progress_callback:
+                            progress_callback(f"Error uploading external chunk: {e}", total_processed, len(external_urls))
+                
+            except Exception as e:
+                logger.error(f"Error scraping chunk: {e}")
+                if progress_callback:
+                    progress_callback(f"Error scraping chunk: {e}", total_processed, len(external_urls))
+                total_processed += len(chunk_urls)
         
-        logger.info(f"Successfully embedded {len(points)} external URLs")
+        logger.info(f"Successfully embedded {total_embedded} external URLs out of {len(external_urls)} total")
+        if progress_callback:
+            progress_callback(f"Completed! Embedded {total_embedded} external URLs", len(external_urls), len(external_urls))
     
-    async def reindex_all_content(self):
-        """Reindex all content (WordPress posts and external URLs)"""
+    async def reindex_all_content(self, progress_callback=None):
+        """Reindex all content (WordPress posts and external URLs) with progress tracking"""
         logger.info("Starting full content reindexing...")
+        if progress_callback:
+            progress_callback("Starting full content reindexing...", 0, 100)
         
-        # Embed WordPress content
-        await self.embed_wordpress_content()
-        
-        # Embed external URLs
-        await self.embed_external_urls()
-        
-        logger.info("Content reindexing completed")
+        try:
+            if progress_callback:
+                progress_callback("Processing WordPress content...", 10, 100)
+            await self.embed_wordpress_content(progress_callback)
+            
+            if progress_callback:
+                progress_callback("Processing external URLs...", 60, 100)
+            await self.embed_external_urls(progress_callback)
+            
+            logger.info("Content reindexing completed")
+            if progress_callback:
+                progress_callback("Content reindexing completed successfully!", 100, 100)
+                
+        except Exception as e:
+            logger.error(f"Error during reindexing: {e}")
+            if progress_callback:
+                progress_callback(f"Error during reindexing: {e}", 0, 100)
+            raise
 
 # Test function if this module is run directly
 async def test_embedder():

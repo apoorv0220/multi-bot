@@ -1,6 +1,8 @@
+import asyncio
 import os
 import json
 import uuid
+from datetime import datetime
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -14,6 +16,10 @@ import logging
 from fuzzy_matcher import FuzzyMatcher
 from typing import Optional, Dict, Any, List
 
+from embedder import Embedder
+from wordpress_fetcher import WordPressFetcher
+from database import ChatDatabase # Import the new ChatDatabase class
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -26,13 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger("houseoftiles-chatbot")
 
 # Local imports - use relative imports
-try:
-    from .embedder import Embedder
-    from .wordpress_fetcher import WordPressFetcher
-except ImportError:
-    # Fallback for direct module execution
-    from embedder import Embedder
-    from wordpress_fetcher import WordPressFetcher
+from scraper import WebScraper
 
 # Load environment variables
 load_dotenv()
@@ -44,7 +44,7 @@ app = FastAPI(title="House of Tiles AI Chatbot API",
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development - update for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -94,6 +94,12 @@ embedder_module.qdrant_client = qdrant_client
 # Initialize fuzzy matcher
 fuzzy_matcher = FuzzyMatcher(threshold=80)
 
+# Initialize database
+db = ChatDatabase()
+
+# Initialize scraper
+scraper = WebScraper()
+
 # Define request models
 class QueryRequest(BaseModel):
     query: str
@@ -112,14 +118,32 @@ class QueryResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None
-    max_results: int = 5
+    max_results: int = 3
+    session_id: str | None = None  # Add session_id to ChatRequest
 
 class ChatResponse(BaseModel):
     response: str
-    source: Optional[str] = None
-    confidence: Optional[float] = None
-    sources: Optional[List[SearchResult]] = None
+    source: str 
+    confidence: float
+    sources: List[SearchResult] | None = None # Full sources data
+    session_id: str | None = None
+    source_details: dict | None = None # New field for structured source data
+
+
+class SaveHistoryRequest(BaseModel):
+    session_id: str
+    event_type: str
+    user_message_text: str | None = None
+    bot_response_text: str | None = None
+    bot_response_source: dict | None = None
+    bot_response_confidence: float | None = None
+    trigger_detection_method: str | None = None
+    trigger_confidence: float | None = None
+    trigger_matched_phrase: str | None = None
+
+
+class StartSessionRequest(BaseModel):
+    session_id: str | None = None
 
 # Helper function to generate embeddings
 async def generate_embedding(text: str) -> List[float]:
@@ -241,6 +265,15 @@ async def generate_answer(query: str, context_texts: List[str]) -> str:
         logger.error(f"Error generating answer: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate answer")
 
+# Helper function to normalize text for keyword matching
+def normalize_text_for_keywords(text: str) -> str:
+    """Normalize text by lowercasing, removing punctuation, and extra spaces."""
+    import re
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9\s]', '', text) # Remove punctuation
+    text = re.sub(r'\s+', ' ', text).strip() # Replace multiple spaces with single space
+    return text
+
 # API endpoint for the chat query
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> Dict[str, Any]:
@@ -249,58 +282,158 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
     Falls back to vector search if no fuzzy match is found.
     """
     try:
+        # Get or create session
+        session_data = db.get_or_create_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=500, detail="Could not create or retrieve session")
+        internal_session_id = session_data['id']
+        current_session_uuid = session_data['session_id']
+
         # Try fuzzy matching first
         fuzzy_response = fuzzy_matcher.get_response(request.message)
         if fuzzy_response:
             logger.info(f"Fuzzy match found for query: {request.message}")
-            return {
-                "response": fuzzy_response,
-                "source": "fuzzy_match",
-                "confidence": 1.0,
-                "sources": []
+            # Log chat message (user input + bot response) to the database
+            event_data = {
+                "chatbot_session_id": internal_session_id,
+                "event_type": "chat_message", 
+                "user_message_text": request.message,
+                "bot_response_text": fuzzy_response,
+                "bot_response_source": {"type": "fuzzy_match"}, # Consistent JSON for DB
+                "bot_response_confidence": 1.0,
             }
+            db.save_chat_event(event_data)
+            logger.debug(f"Event data sent to db.save_chat_event (fuzzy_match): {event_data}") # Debug log
+            return ChatResponse(
+                response=fuzzy_response,
+                source="fuzzy_match", # Simple string
+                confidence=1.0,
+                sources=[],
+                session_id=current_session_uuid,
+                source_details={"type": "fuzzy_match"} # Structured data
+            )
         
-        # If no fuzzy match, proceed with vector search
+        # If Qdrant is not available, return a default message
         if qdrant_client is None:
             logger.warning("Qdrant is not available, cannot perform vector search.")
-            return {
-                "response": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
-                "source": "unavailable",
-                "confidence": 0.0,
-                "sources": []
+            event_data = {
+                "chatbot_session_id": internal_session_id,
+                "event_type": "chat_message", 
+                "user_message_text": request.message,
+                "bot_response_text": "Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                "bot_response_source": {"type": "qdrant_unavailable"}, # Consistent JSON for DB
+                "bot_response_confidence": 0.0,
             }
-
+            db.save_chat_event(event_data)
+            logger.debug(f"Event data sent to db.save_chat_event (qdrant_unavailable): {event_data}") # Debug log
+            return ChatResponse(
+                response="Sorry, our knowledge base is temporarily unavailable. Please try again later or ask a basic question.",
+                source="qdrant_unavailable", # Simple string
+                confidence=0.0,
+                sources=[],
+                session_id=current_session_uuid,
+                source_details={"type": "qdrant_unavailable"} # Structured data
+            )
+        
         # Generate embedding for the query
         embedding = await generate_embedding(request.message)
         
         # Search in Qdrant
-        search_results = await search_qdrant(embedding, request.max_results)
+        raw_search_results = await search_qdrant(embedding, request.max_results)
         
+        # --- Start of new minimalist solution: Keyword-Based Reranking/Boosting ---
+        # Normalize the query for keyword matching
+        normalized_query_words = set(normalize_text_for_keywords(request.message).split())
+        
+        # Create a mutable list of results to allow reordering
+        reordered_results = []
+        
+        # Separate exact matches and other results
+        exact_match_results = []
+        other_results = []
+
+        for result in raw_search_results:
+            title = result.payload.get('title', '')
+            url = result.payload.get('url', '')
+            content_preview = result.payload.get('content', '')
+
+            normalized_title = normalize_text_for_keywords(title)
+            normalized_url_path = normalize_text_for_keywords(url.split('/')[-1].replace('-', ' ')) # Get last part of URL and replace hyphens
+            normalized_content = normalize_text_for_keywords(content_preview)
+            
+            # Check for strong keyword overlap in title or URL for boosting
+            # This logic needs careful tuning to avoid over-boosting irrelevant results
+            title_keywords = set(normalized_title.split())
+            url_keywords = set(normalized_url_path.split())
+            content_keywords = set(normalized_content.split())
+            
+            # Simple overlap check: at least 2 common words, or a significant portion of query words in title/url
+            common_words_in_title = len(normalized_query_words.intersection(title_keywords))
+            common_words_in_url = len(normalized_query_words.intersection(url_keywords))
+            common_words_in_content = len(normalized_query_words.intersection(content_keywords))
+
+            # A simple rule: if a significant portion of query words (e.g., >= 50%) are in the title or URL, consider it a strong match.
+            # Or if it's a direct phrase match in the title
+            is_strong_title_match = (common_words_in_title >= len(normalized_query_words) * 0.5) or (normalize_text_for_keywords(request.message) in normalized_title)
+            is_strong_url_match = (common_words_in_url >= len(normalized_query_words) * 0.5) or (normalize_text_for_keywords(request.message) in normalized_url_path)
+            
+            # Prioritize results where title or URL path strongly match the query
+            if is_strong_title_match or is_strong_url_match:
+                # Assign a very high temporary score to ensure it's at the top, or use a separate list
+                exact_match_results.append(result)
+            else:
+                other_results.append(result)
+
+        # Sort exact matches (if any) by their original Qdrant score (highest first)
+        exact_match_results.sort(key=lambda x: x.score, reverse=True)
+        # Sort other results by their original Qdrant score
+        other_results.sort(key=lambda x: x.score, reverse=True)
+        
+        # Combine: exact matches first, then other results
+        search_results_with_rerank = exact_match_results + other_results
+        
+        # If there are more results than max_results, truncate
+        search_results = search_results_with_rerank[:request.max_results]
+        
+        # --- End of new minimalist solution ---
+
         # Prepare context for OpenAI
         context_texts = []
-        sources = []
+        sources_for_response: List[SearchResult] = [] # Use explicit type hint for clarity
 
-        logger.info(f"Search results: {len(search_results)}")
+        logger.info(f"Search results after rerank: {len(search_results)}")
         
         # Filter out low confidence results (less than 30%)
         filtered_results = [result for result in search_results if result.score >= 0.3]
-        logger.info(f"Filtered results (confidence ≥ 30%): {len(filtered_results)}")
+        logger.info(f"Filtered results (confidence >= 30%): {len(filtered_results)}")
         
         # If no results have confidence above 30%, don't use any context
         if not filtered_results:
             logger.info("No high-confidence results found. Returning empty response.")
+            event_data = {
+                "chatbot_session_id": internal_session_id,
+                "event_type": "chat_message", 
+                "user_message_text": request.message,
+                "bot_response_text": "I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
+                "bot_response_source": {"type": "no_reliable_info"}, # Consistent JSON for DB
+                "bot_response_confidence": 0.0,
+            }
+            db.save_chat_event(event_data)
+            logger.debug(f"Event data sent to db.save_chat_event (no_reliable_info): {event_data}") # Debug log
             return ChatResponse(
-                response="I apologize, but I couldn't find specific information about that in our House of Tiles knowledge base. Please rephrase or ask about tiles, flooring, bathroom solutions, or other home improvement topics.",
-                source="vector_search",
+                response="I don't have enough reliable information to answer your question accurately. Could you please rephrase or ask about a different migraine-related topic?",
+                sources=[],
+                source="no_reliable_info", # Simple string
                 confidence=0.0,
-                sources=[]
+                session_id=current_session_uuid,
+                source_details={"type": "no_reliable_info"} # Structured data
             )
         
         # Process results
         for result in filtered_results:
             content_preview = result.payload['content']
             context_texts.append(f"Source: {result.payload['source']}\nURL: {result.payload['url']}\n{content_preview}")
-            sources.append(SearchResult(
+            sources_for_response.append(SearchResult(
                 content=result.payload['content'][:200] + "...",
                 source=result.payload['source'],
                 url=result.payload['url'],
@@ -311,16 +444,41 @@ async def chat(request: ChatRequest) -> Dict[str, Any]:
         logger.info(f"Generating answer for query: {request.message}")
         answer = await generate_answer(request.message, context_texts)
         
+        # Log chat message (user input + bot response) to the database
+        event_data = {
+            "chatbot_session_id": internal_session_id,
+            "event_type": "chat_message",
+            "user_message_text": request.message,
+            "bot_response_text": answer,
+            "bot_response_source": {"type": "vector_search", "details": {"sources": [s.model_dump() for s in sources_for_response]}}, # Structured JSON for DB
+            "bot_response_confidence": filtered_results[0].score if filtered_results else 0.0,
+        }
+        db.save_chat_event(event_data)
+        logger.debug(f"Event data sent to db.save_chat_event (vector_search): {event_data}") # Debug log
+
         return ChatResponse(
             response=answer,
-            source="vector_search",
+            sources=sources_for_response, # Use the list of SearchResult objects
+            source="vector_search", # Simple string
             confidence=filtered_results[0].score if filtered_results else 0.0,
-            sources=sources
+            session_id=current_session_uuid,
+            source_details={"type": "vector_search", "sources": [s.model_dump() for s in sources_for_response]} # Structured data
         )
 
     except Exception as e:
-        logger.error(f"Error processing chat request: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Error processing chat request: {str(e)}")
+        # Log the bot error to the database
+        event_data = {
+            "chatbot_session_id": internal_session_id,
+            "event_type": "chat_message", 
+            "user_message_text": request.message,
+            "bot_response_text": "Sorry, I had trouble getting your answer. Please try again later.",
+            "bot_response_source": {"type": "error_handler"}, # Consistent JSON for DB
+            "bot_response_confidence": 0.0,
+        }
+        db.save_chat_event(event_data)
+        logger.debug(f"Event data sent to db.save_chat_event (error_handler): {event_data}") # Debug log
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Health check endpoint
 @app.get("/health")
@@ -377,6 +535,41 @@ async def trigger_reindex(background_tasks: BackgroundTasks):
         logger.error(f"Error starting reindexing: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to start reindexing: {e}")
 
+# Add a new endpoint for chunked reindexing with progress tracking
+@app.post("/api/reindex-chunked")
+async def trigger_chunked_reindex():
+    """Trigger a chunked content reindexing with progress tracking"""
+    try:
+        # First check if Qdrant is accessible
+        try:
+            collections = qdrant_client.get_collections().collections
+            logger.info(f"Successfully connected to Qdrant. Found {len(collections)} collections.")
+        except Exception as e:
+            logger.error(f"Error connecting to Qdrant before reindexing: {e}")
+            raise HTTPException(
+                status_code=503, 
+                detail=f"Cannot connect to Qdrant database. Please ensure Qdrant is running: {e}"
+            )
+        
+        # Create a simple progress callback that logs progress
+        def progress_callback(message, current, total):
+            logger.info(f"Progress: {message} ({current}/{total})")
+        
+        # Run reindexing with progress tracking
+        embedder_instance = Embedder(client=qdrant_client)
+        await embedder_instance.reindex_all_content(progress_callback)
+        
+        return {
+            "status": "success", 
+            "message": "Content reindexing completed successfully"
+        }
+    except HTTPException:
+        # Re-raise HTTP exceptions as they already have proper status codes and details
+        raise
+    except Exception as e:
+        logger.error(f"Error during reindexing: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to complete reindexing: {e}")
+
 # Add global exception handler middleware
 @app.middleware("http")
 async def exception_handling_middleware(request: Request, call_next):
@@ -394,6 +587,56 @@ async def exception_handling_middleware(request: Request, call_next):
             status_code=500,
             content={"detail": f"Internal server error: {str(e)}"}
         )
+
+# Add new endpoint for saving chat history
+@app.post("/api/save-history")
+async def save_history(request: SaveHistoryRequest):
+    try:
+        session_data = db.get_or_create_session(request.session_id)
+        if not session_data:
+            raise HTTPException(status_code=500, detail="Could not create or retrieve session")
+        internal_session_id = session_data['id']
+
+        event_data = request.dict(exclude_unset=True)
+        event_data["chatbot_session_id"] = internal_session_id
+        event_data.pop("session_id") # Remove external session_id as we use internal_session_id
+
+        logger.debug(f"Event data sent to db.save_chat_event (save-history): {event_data}") # Debug log
+        if db.save_chat_event(event_data):
+            return {"status": "success"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save chat event")
+    except Exception as e:
+        logger.exception(f"Error in save-history endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# Add new endpoint for retrieving chat history
+@app.get("/api/chat-history/{session_id}")
+async def get_chat_history(session_id: str):
+    try:
+        history = db.get_chat_history(session_id)
+        # Convert datetime objects to string for JSON serialization
+        for event in history:
+            if 'event_timestamp' in event and isinstance(event['event_timestamp'], datetime):
+                event['event_timestamp'] = event['event_timestamp'].isoformat()
+        return {"history": history}
+    except Exception as e:
+        logger.exception(f"Error in chat-history endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/start-session")
+async def start_session(request: StartSessionRequest):
+    try:
+        session_data = db.get_or_create_session(request.session_id)
+        logger.info(f"Session data: {session_data}")
+        if not session_data:
+            raise HTTPException(status_code=500, detail="Could not create or retrieve session")
+        return {"session_id": session_data['session_id']}
+    except Exception as e:
+        logger.exception(f"Error in start-session endpoint: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # Run the app
 if __name__ == "__main__":

@@ -2,94 +2,110 @@ from fuzzywuzzy import fuzz
 from typing import Dict, Optional, Tuple, List
 
 # Expanded hardcoded responses for common queries
-GREETING_RESPONSES = {
-    "hi": "Hi, I'm your House of Tiles Assistant. How can I help you with tiles, flooring, or home improvement today?",
-    "hello": "Hello! I'm here to help you with any tile, flooring, or home design questions.",
-    "hey": "Hey there! I'm your House of Tiles assistant. What can I help you with?",
-    "good morning": "Good morning! I'm here to help with your tile and flooring questions.",
-    "good afternoon": "Good afternoon! How can I assist you with tiles, flooring, or bathroom design?",
-    "good evening": "Good evening! I'm here to help with your tile and flooring queries.",
-    "how are you": "I'm functioning well and ready to help with your tile and flooring questions!",
-    "how are you doing": "I'm doing great and ready to assist with your home improvement queries!",
-    "what's up": "I'm here to help with tile, flooring, and home design information. What would you like to know?",
-    "how's it going": "I'm doing well and ready to assist with your tile and flooring queries!",
-    "how have you been": "I'm functioning well and ready to help with your home improvement questions!",
-    "what's new": "I'm here to help with tile, flooring, and design information. What would you like to know?",
-    "how's your day": "I'm having a good day and ready to help with your tile and flooring questions!",
-    "how's everything": "Everything is working well! How can I help with your home improvement questions?",
-}
-
-IDENTITY_RESPONSES = {
-    "who are you": "I'm a House of Tiles assistant here to help with your tile, flooring, and home improvement needs.",
-    "what are you": "I'm an AI assistant specialized in providing tile, flooring, and home design information.",
-    "what can you do": "I can help answer questions about tiles, flooring, bathroom design, and home improvement using our extensive product knowledge and design expertise.",
-    "how can you help": "I can provide information about our tile and flooring products, design advice, installation guidance, and help you make the best choices for your home or commercial project.",
-    "what is your purpose": "My purpose is to provide accurate, helpful information about tiles, flooring, and home improvement to support your design journey.",
-    "tell me about yourself": "I'm an AI assistant specialized in tile, flooring, and home design information. I can help answer your questions about our products, design options, and installation guidance.",
-    "what do you know": "I'm knowledgeable about tiles, flooring, bathroom design, home improvement, and our extensive product range. What would you like to know?",
-    "what are your capabilities": "I can provide information about tiles and flooring, answer questions about design and installation, and help you find the perfect solutions for your project.",
-}
-
-POSITIVE_RESPONSES = {
-    "thank you": "You're welcome! Is there anything else you'd like to know about our tiles or flooring?",
-    "thanks": "My pleasure! Let me know if you have any other questions about home improvement.",
-    "thank you so much": "You're very welcome! Feel free to ask about any other tile or flooring needs.",
-    "thanks a lot": "You're welcome! Is there anything else I can help you with regarding your project?",
-    "appreciate it": "I'm glad I could help! Any other questions about tiles or flooring?",
-    "that's helpful": "Great! Is there anything else you'd like to know about our products?",
-    "perfect": "Wonderful! Let me know if you need any other information about tiles or flooring.",
-    "excellent": "I'm pleased to help! Any other questions about your home improvement project?",
-    "great": "Excellent! Is there anything else you'd like to know about our tiles or flooring?",
-    "awesome": "I'm glad that was helpful! Any other questions about home design?",
-    "that's great": "I'm glad I could help! Is there anything else you'd like to know about tiles or flooring?",
-}
-
-RANDOM_RESPONSES = {
-    "test": "I'm working perfectly! How can I help you with tiles, flooring, or home design?",
-    "testing": "Test successful! What would you like to know about our products?",
-    "are you there": "Yes, I'm here! How can I assist with your tile and flooring needs?",
-    "are you working": "Yes, I'm working perfectly! What can I help you with today?",
-    "can you hear me": "Yes, I can understand you! How can I help with your home improvement project?",
-    "hello world": "Hello! Welcome to House of Tiles. How can I assist you today?",
-    "ping": "Pong! I'm here to help with your tile and flooring questions.",
-    "echo": "Echo received! How can I help with your home improvement needs?",
-    "what's happening": "I'm here to help with tile, flooring, and design information. What would you like to know?",
-    "what's going on": "I'm ready to assist with your tile and flooring queries. What would you like to know?",
-    "what's the matter": "I'm here to help with tile, flooring, and design information. What would you like to know?",
-    "what's wrong": "I'm here to help with tile, flooring, and design information. What would you like to know?",
-    "what's the problem": "I'm here to help with tile, flooring, and design information. What would you like to know?",
-}
-
-CLARIFICATION_RESPONSES = {
-    "what do you mean": "I'm here to provide information about tiles, flooring, and home design. Could you please rephrase your question?",
-    "i don't understand": "I apologize for any confusion. Could you please ask your question about tiles or flooring in a different way?",
-    "can you explain": "I'd be happy to explain. What specific aspect of tiles, flooring, or design would you like to know more about?",
-    "i'm confused": "Let me help clarify. What specific aspect of tiles, flooring, or home improvement would you like to know more about?",
-    "i don't get it": "Let me explain differently. What would you like to know about our tiles, flooring, or design services?",
-    "can you clarify": "Of course! What specific aspect of tiles, flooring, or home improvement would you like me to clarify?",
-}
-
-HELP_RESPONSES = {
-    "help": "I'm here to help! What would you like to know about tiles, flooring, or home design?",
-    "i need help": "I'm ready to assist you. What tile, flooring, or design information are you looking for?",
-    "can you help me": "Of course! I'm here to help with any tile, flooring, or home improvement questions you have.",
-    "i need assistance": "I'm here to help! What tile, flooring, or design information do you need?",
-    "can you assist me": "I'd be happy to assist you. What would you like to know about our products or services?",
-    "i need support": "I'm here to support you. What tile, flooring, or design information would be helpful?",
-}
-
-SIMPLE_RESPONSES = {
-    "yes": "Great! What would you like to know about tiles, flooring, or home design?",
-    "no": "No problem. Is there something else you'd like to ask about our products or services?",
-    "maybe": "That's okay. Take your time. I'm here when you have questions about tiles or flooring.",
-    "sure": "Great! What would you like to know about our tiles, flooring, or design services?",
-    "okay": "Perfect! What tile, flooring, or design information can I help you with?",
-    "alright": "Great! What would you like to know about our products?",
-}
-
-EMERGENCY_RESPONSES = {
-    "emergency": "For urgent property issues, please contact appropriate emergency services. For tile and flooring information, I'm here to help.",
-    "urgent": "For urgent matters, please contact the appropriate services. For general tile and flooring information, I'm here to assist.",
+PERSONALIZED_RESPONSES = {
+    # Greetings
+    "hi": "Hi, I'm Allevia. I'm your migraine assistant. How can I assist you today?",
+    "hello": "Hello! I'm here to help you with any migraine-related questions.",
+    "hey": "Hey there! I'm Allevia. I'm your migraine assistant. What can I help you with?",
+    "good morning": "Good morning! I'm here to help with your migraine questions.",
+    "good afternoon": "Good afternoon! How can I assist you with migraine-related information?",
+    "good evening": "Good evening! I'm here to help with your migraine queries.",
+    "how are you": "I'm functioning well and ready to help with your migraine questions!",
+    "how are you doing": "I'm doing great and ready to assist with your migraine queries!",
+    "what's up": "I'm here to help with migraine-related information. What would you like to know?",
+    "how's it going": "I'm doing well and ready to assist with your migraine queries!",
+    "how have you been": "I'm functioning well and ready to help with your migraine questions!",
+    "what's new": "I'm here to help with migraine-related information. What would you like to know?",
+    "how's your day": "I'm having a good day and ready to help with your migraine questions!",
+    "how's everything": "Everything is working well! How can I help with your migraine questions?",
+    
+    # Identity and Capabilities
+    "who are you": "I'm a migraine-focused assistant here to support your health journey.",
+    "what are you": "I'm an AI assistant specialized in providing migraine-related information and support.",
+    "what can you do": "I can help answer questions about migraines using trusted sources, provide information about symptoms, treatments, and lifestyle management.",
+    "how can you help": "I can provide information about migraines, their causes, treatments, and management strategies from reliable medical sources.",
+    "what is your purpose": "My purpose is to provide accurate, helpful information about migraines and support your health journey.",
+    "tell me about yourself": "I'm an AI assistant specialized in migraine information and support. I can help answer your questions about migraines, their causes, treatments, and management strategies.",
+    "what do you know": "I'm knowledgeable about migraines, including their causes, symptoms, treatments, and management strategies. What would you like to know?",
+    "what are your capabilities": "I can provide information about migraines, answer questions about symptoms and treatments, and help you find relevant resources.",
+    
+    # Gratitude
+    "thank you": "You're welcome! I'm here anytime you need help.",
+    "thanks": "Glad I could help. Ask me anything!",
+    "appreciate it": "Happy to help! Feel free to ask more questions.",
+    "that's helpful": "I'm glad that was helpful! Is there anything else you'd like to know?",
+    "thank you so much": "You're very welcome! I'm here to help anytime.",
+    "thanks a lot": "My pleasure! Feel free to ask more questions.",
+    "i appreciate it": "Happy to help! What else would you like to know?",
+    "that's great": "I'm glad I could help! Is there anything else you'd like to know about migraines?",
+    
+    # Farewell
+    "bye": "Take care! Wishing you good health.",
+    "goodbye": "Goodbye! Take care of yourself.",
+    "see you": "See you later! Take care.",
+    "farewell": "Farewell! Wishing you well.",
+    "see you later": "See you later! Take care of yourself.",
+    "talk to you later": "Looking forward to our next chat! Take care.",
+    "have a good day": "Thank you! You have a great day too. Take care!",
+    "take care": "You too! Take care of yourself.",
+    
+    # Common Questions
+    "what's happening": "I'm here to help with migraine-related information. What would you like to know?",
+    "what's going on": "I'm ready to assist with your migraine queries. What would you like to know?",
+    "what's the matter": "I'm here to help with migraine-related information. What would you like to know?",
+    "what's wrong": "I'm here to help with migraine-related information. What would you like to know?",
+    "what's the problem": "I'm here to help with migraine-related information. What would you like to know?",
+    
+    # Clarification
+    "what do you mean": "I'm here to provide information about migraines. Could you please rephrase your question?",
+    "i don't understand": "I apologize for any confusion. Could you please ask your question about migraines in a different way?",
+    "can you explain": "I'd be happy to explain. What specific aspect of migraines would you like to know more about?",
+    "i'm confused": "Let me help clarify. What specific aspect of migraines would you like to know more about?",
+    "i don't get it": "Let me explain differently. What would you like to know about migraines?",
+    "can you clarify": "Of course! What specific aspect of migraines would you like me to clarify?",
+    
+    # Help
+    "help": "I'm here to help! What would you like to know about migraines?",
+    "i need help": "I'm ready to assist you. What migraine-related information are you looking for?",
+    "can you help me": "Of course! I'm here to help with any migraine-related questions you have.",
+    "i need assistance": "I'm here to help! What migraine-related information do you need?",
+    "can you assist me": "I'd be happy to assist you. What would you like to know about migraines?",
+    "i need support": "I'm here to support you. What migraine-related information would be helpful?",
+    
+    # Confirmation
+    "yes": "Great! What would you like to know about migraines?",
+    "no": "No problem. Is there something else you'd like to ask about migraines?",
+    "maybe": "That's okay. Take your time. I'm here when you have questions about migraines.",
+    "sure": "Great! What would you like to know about migraines?",
+    "okay": "Perfect! What migraine-related information can I help you with?",
+    "alright": "Great! What would you like to know about migraines?",
+    
+    # Emergency
+    "emergency": "If you're experiencing a medical emergency, please call emergency services immediately. For non-emergency migraine information, I'm here to help.",
+    "urgent": "For urgent medical concerns, please contact your healthcare provider or emergency services. For general migraine information, I'm here to assist.",
+    "help me now": "If this is a medical emergency, please call emergency services immediately. For migraine information, I'm here to help.",
+    "it's urgent": "For urgent medical concerns, please contact your healthcare provider or emergency services. For general migraine information, I'm here to assist.",
+    
+    # Technical
+    "error": "I'm sorry you're experiencing an issue. Could you please rephrase your question about migraines?",
+    "not working": "I'm here to help. Could you please rephrase your question about migraines?",
+    "broken": "I'm functioning properly. How can I help you with migraine-related information?",
+    "something's wrong": "I'm here to help. Could you please rephrase your question about migraines?",
+    "it's not working": "I'm functioning properly. How can I help you with migraine-related information?",
+    
+    # Small Talk
+    "nice to meet you": "Nice to meet you too! I'm here to help with your migraine questions.",
+    "pleasure to meet you": "The pleasure is mine! How can I help with your migraine queries?",
+    "how's your day going": "I'm having a good day and ready to help with your migraine questions!",
+    "what's the weather like": "I'm focused on helping with migraine-related information. What would you like to know?",
+    "how's your weekend": "I'm here to help with migraine-related information. What would you like to know?",
+    
+    # Politeness
+    "please": "I'm here to help! What would you like to know about migraines?",
+    "excuse me": "Yes, how can I help you with migraine-related information?",
+    "pardon me": "No problem! How can I assist you with migraine-related questions?",
+    "sorry": "No need to apologize! How can I help with your migraine questions?",
+    "i apologize": "No need to apologize! What would you like to know about migraines?",
 }
 
 class FuzzyMatcher:

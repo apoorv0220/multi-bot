@@ -1,8 +1,10 @@
 (function() {
   // Configuration - set this to your actual deployed URL in production
-  const widgetUrl = window.HOUSEOFTILES_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3023';
-  const apiUrl = window.HOUSEOFTILES_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8023';
-  const primaryColor = window.HOUSEOFTILES_CHATBOT_CONFIG?.primaryColor || '#bd1d73';
+  const widgetUrl = window.MIGRAINE_CHATBOT_CONFIG?.baseUrl || 'http://localhost:3000';
+  const apiUrl = window.MIGRAINE_CHATBOT_CONFIG?.apiUrl || 'http://localhost:8000';
+  // const widgetUrl = 'http://localhost:3000';
+  // const apiUrl = 'http://localhost:8000';
+  const primaryColor = window.MIGRAINE_CHATBOT_CONFIG?.primaryColor || '#72b519';
   
   // Create iframe for the widget
   function createChatbotIframe() {

@@ -61,8 +61,12 @@ class WordPressFetcher:
                     {self.table_prefix}posts p
                 WHERE 
                     p.post_status = 'publish' AND
+                    p.post_status NOT IN ('trash', 'draft', 'auto-draft', 'private', 'pending', 'future') AND
                     p.post_type IN ('post', 'page') AND
-                    p.post_content != ''
+                    p.post_type NOT IN ('attachment', 'revision', 'nav_menu_item', 'custom_css', 'customize_changeset') AND
+                    p.post_content != '' AND
+                    p.post_content IS NOT NULL AND
+                    LENGTH(TRIM(p.post_content)) > 50
                 ORDER BY 
                     p.post_date DESC
                 """
