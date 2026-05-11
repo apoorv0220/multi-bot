@@ -340,6 +340,26 @@ def _tenant_origin_allowed(tenant: Optional[Tenant], origin: Optional[str]) -> b
     return _origin_allowed(origin)
 
 
+def _effective_widget_origin(request: Optional[Request], origin: Optional[str]) -> Optional[str]:
+    """Browser `Origin` is often omitted on same-origin GET; fall back to `Referer` scheme+host."""
+    if origin:
+        stripped = origin.strip()
+        if stripped:
+            return stripped
+    if request is None:
+        return None
+    referer = request.headers.get("referer") or request.headers.get("Referer")
+    if not referer:
+        return None
+    try:
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        return None
+    return None
+
+
 def _extract_client_ip(request: Optional[Request]) -> Optional[str]:
     if request is None:
         return None
@@ -1228,7 +1248,7 @@ async def get_public_widget_config(
     tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    if not _tenant_origin_allowed(tenant, origin):
+    if not _tenant_origin_allowed(tenant, _effective_widget_origin(request_obj, origin)):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     _enforce_public_security_and_quota(
         db=db,
@@ -1401,7 +1421,7 @@ async def get_public_session_rating_status(
 ):
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
     tenant = db.get(Tenant, uuid.UUID(tenant_id))
-    if not _tenant_origin_allowed(tenant, origin):
+    if not _tenant_origin_allowed(tenant, _effective_widget_origin(request_obj, origin)):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     _enforce_public_security_and_quota(
         db=db,
@@ -1431,7 +1451,7 @@ async def submit_public_session_rating(
 ):
     tenant_id = _resolve_embed_tenant_id(x_widget_key)
     tenant = db.get(Tenant, uuid.UUID(tenant_id))
-    if not _tenant_origin_allowed(tenant, origin):
+    if not _tenant_origin_allowed(tenant, _effective_widget_origin(request_obj, origin)):
         raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     _enforce_public_security_and_quota(
         db=db,
@@ -3286,8 +3306,8 @@ async def exception_handling_middleware(request: Request, call_next):
 
 
 async def tenant_cors_enforcement_middleware(request: Request, call_next):
-    origin = request.headers.get("origin")
-    if not origin or not request.url.path.startswith("/api/"):
+    effective_origin = _effective_widget_origin(request, request.headers.get("origin"))
+    if not effective_origin or not request.url.path.startswith("/api/"):
         return await call_next(request)
     is_public_api = request.url.path.startswith("/api/public/")
 
@@ -3326,7 +3346,7 @@ async def tenant_cors_enforcement_middleware(request: Request, call_next):
             except Exception:
                 tenant_obj = None
 
-    if tenant_obj and not _tenant_origin_allowed(tenant_obj, origin):
+    if tenant_obj and not _tenant_origin_allowed(tenant_obj, effective_origin):
         return JSONResponse(status_code=403, content={"detail": "Origin not allowed for tenant"})
     return await call_next(request)
 

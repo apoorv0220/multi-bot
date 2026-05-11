@@ -13,7 +13,9 @@ async def run_authenticated_chat(request, user_ctx, db) -> Dict[str, Any]:
 async def run_public_chat(request, db, x_widget_key, x_visitor_id, origin, request_obj=None):
     tenant_id = legacy_main._resolve_embed_tenant_id(x_widget_key)
     tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
-    if not legacy_main._tenant_origin_allowed(tenant, origin):
+    if not legacy_main._tenant_origin_allowed(
+        tenant, legacy_main._effective_widget_origin(request_obj, origin)
+    ):
         raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
     legacy_main._enforce_public_security_and_quota(db=db, tenant_id=tenant_id, request_obj=request_obj)
     visitor_id = legacy_main._normalize_visitor_id(x_visitor_id)

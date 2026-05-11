@@ -4,7 +4,9 @@ import main as legacy_main
 async def get_visitor_profile(*, db, x_widget_key, x_visitor_id, origin, request_obj=None):
     tenant_id = legacy_main._resolve_embed_tenant_id(x_widget_key)
     tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
-    if not legacy_main._tenant_origin_allowed(tenant, origin):
+    if not legacy_main._tenant_origin_allowed(
+        tenant, legacy_main._effective_widget_origin(request_obj, origin)
+    ):
         raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
     legacy_main._enforce_public_security_and_quota(
         db=db,
@@ -21,7 +23,9 @@ async def get_visitor_profile(*, db, x_widget_key, x_visitor_id, origin, request
 async def upsert_visitor_profile(*, payload, db, x_widget_key, origin, request_obj=None):
     tenant_id = legacy_main._resolve_embed_tenant_id(x_widget_key)
     tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
-    if not legacy_main._tenant_origin_allowed(tenant, origin):
+    if not legacy_main._tenant_origin_allowed(
+        tenant, legacy_main._effective_widget_origin(request_obj, origin)
+    ):
         raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
     legacy_main._enforce_public_security_and_quota(
         db=db,
@@ -63,7 +67,9 @@ async def upsert_visitor_profile(*, payload, db, x_widget_key, origin, request_o
 async def add_public_feedback(*, message_id, payload, db, x_widget_key, origin, request_obj=None):
     tenant_id = legacy_main._resolve_embed_tenant_id(x_widget_key)
     tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
-    if not legacy_main._tenant_origin_allowed(tenant, origin):
+    if not legacy_main._tenant_origin_allowed(
+        tenant, legacy_main._effective_widget_origin(request_obj, origin)
+    ):
         raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
     legacy_main._enforce_public_security_and_quota(
         db=db,
