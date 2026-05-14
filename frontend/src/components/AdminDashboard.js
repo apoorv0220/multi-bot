@@ -1733,12 +1733,18 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 helperText="Example: mysql://user:password@host:3306/database"
                 fullWidth
               />
-              <TextField
-                label="Source DB Type"
-                value={sourceDbType}
-                onChange={(e) => setSourceDbType(e.target.value)}
-                fullWidth
-              />
+              <FormControl fullWidth>
+                <InputLabel>Source DB Type</InputLabel>
+                <Select
+                  label="Source DB Type"
+                  value={sourceDbType}
+                  onChange={(e) => setSourceDbType(e.target.value)}
+                >
+                  <MenuItem value="wordpress">WordPress</MenuItem>
+                  <MenuItem value="woocommerce">WooCommerce</MenuItem>
+                  <MenuItem value="static">Static-only</MenuItem>
+                </Select>
+              </FormControl>
               <FormControl fullWidth>
                 <InputLabel>Source Mode</InputLabel>
                 <Select

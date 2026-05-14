@@ -7,8 +7,6 @@ This script provides command-line interface to monitor and control reindexing jo
 import asyncio
 import sys
 import argparse
-import json
-from datetime import datetime
 import aiohttp
 import os
 from dotenv import load_dotenv
@@ -17,27 +15,76 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class ReindexManager:
-    def __init__(self, api_url: str = None):
+    def __init__(self, api_url: str = None, bearer_token: str | None = None):
         default_port = os.getenv("BACKEND_PORT") or os.getenv("API_PORT", "8043")
         self.api_url = api_url or f"http://localhost:{default_port}"
-        
+        self.bearer_token = bearer_token or os.getenv("REINDEX_BEARER_TOKEN") or os.getenv("BEARER_TOKEN")
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.bearer_token:
+            headers["Authorization"] = f"Bearer {self.bearer_token}"
+        return headers
+
+    @staticmethod
+    def _extract_error_detail(payload):
+        if isinstance(payload, dict):
+            return payload.get("detail") or payload.get("error") or "Unknown error"
+        return str(payload or "Unknown error")
+
+    @staticmethod
+    def _job_identifier(job: dict) -> str:
+        return str(job.get("job_id") or job.get("id") or "N/A")
+
+    @staticmethod
+    def _progress_snapshot(progress: dict | None) -> dict[str, float | int]:
+        progress = progress or {}
+        if "progress_percentage" in progress:
+            total_items = int(progress.get("total_items", 0) or 0)
+            processed_items = int(progress.get("processed_items", 0) or 0)
+            failed_items = int(progress.get("failed_items", 0) or 0)
+            return {
+                "total_items": total_items,
+                "processed_items": processed_items,
+                "failed_items": failed_items,
+                "progress_percentage": float(progress.get("progress_percentage", 0) or 0),
+                "current_batch": int(progress.get("current_batch", 0) or 0),
+            }
+        providers = progress.get("providers") or {}
+        total_items = sum(int((stats or {}).get("total_records", 0) or 0) for stats in providers.values())
+        indexed_items = sum(int((stats or {}).get("indexed_records", 0) or 0) for stats in providers.values())
+        deleted_items = sum(int((stats or {}).get("deleted_records", 0) or 0) for stats in providers.values())
+        failed_items = sum(int((stats or {}).get("failed_records", 0) or 0) for stats in providers.values())
+        processed_items = indexed_items + deleted_items + failed_items
+        progress_percentage = (processed_items / total_items * 100.0) if total_items else 0.0
+        return {
+            "total_items": total_items,
+            "processed_items": processed_items,
+            "failed_items": failed_items,
+            "progress_percentage": progress_percentage,
+            "current_batch": int(progress.get("current_batch", 0) or 0),
+        }
+
     async def start_reindex(self, tenant_id: str = None):
         """Start a new reindexing job"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=self._headers()) as session:
             data = {"tenant_id": tenant_id} if tenant_id else {}
-            
+
             try:
                 async with session.post(f"{self.api_url}/api/reindex", json=data) as response:
                     if response.status == 200:
                         result = await response.json()
-                        print(f"✅ Reindexing job started successfully!")
+                        if result.get("status") == "already_running":
+                            print("ℹ️ Reindex job already running for this tenant")
+                        else:
+                            print("✅ Reindexing job started successfully!")
                         print(f"   Job ID: {result['job_id']}")
                         print(f"   Status: {result['status']}")
-                        print(f"   Message: {result.get('status', 'started')}")
+                        print(f"   Message: {result.get('message') or result.get('status', 'started')}")
                         return result['job_id']
                     else:
                         error = await response.json()
-                        print(f"❌ Failed to start reindexing: {error.get('detail', 'Unknown error')}")
+                        print(f"❌ Failed to start reindexing: {self._extract_error_detail(error)}")
                         return None
             except Exception as e:
                 print(f"❌ Error connecting to API: {e}")
@@ -61,7 +108,7 @@ class ReindexManager:
 
     async def list_jobs(self, return_data: bool = False):
         """List all reindexing jobs"""
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=self._headers()) as session:
             try:
                 async with session.get(f"{self.api_url}/api/reindex/jobs") as response:
                     if response.status == 200:
@@ -76,7 +123,9 @@ class ReindexManager:
                         return result
                     else:
                         error = await response.json()
-                        print(f"❌ Failed to list jobs: {error.get('detail', 'Unknown error')}")
+                        print(f"❌ Failed to list jobs: {self._extract_error_detail(error)}")
+                        if response.status == 401 and not self.bearer_token:
+                            print("   Tip: pass --bearer-token <jwt> or set REINDEX_BEARER_TOKEN.")
                         return None
             except Exception as e:
                 print(f"❌ Error connecting to API: {e}")
@@ -109,9 +158,11 @@ class ReindexManager:
     def _print_status(self, status):
         """Print formatted status information"""
         print(f"📊 Reindexing Status")
-        print(f"   Job ID: {status.get('job_id', 'N/A')}")
+        print(f"   Job ID: {self._job_identifier(status)}")
         print(f"   Status: {self._format_status(status['status'])}")
         print(f"   Message: {status.get('error') or 'Running'}")
+        if status.get("tenant_name"):
+            print(f"   Tenant: {status['tenant_name']}")
         
         if status.get('started_at'):
             print(f"   Start Time: {status['started_at']}")
@@ -121,19 +172,20 @@ class ReindexManager:
         
         progress = status.get('meta', {}).get('progress')
         if progress:
+            snapshot = self._progress_snapshot(progress)
             print(f"\n📈 Progress Details:")
-            print(f"   Total Items: {progress['total_items']}")
-            print(f"   Processed: {progress['processed_items']}")
-            print(f"   Failed: {progress['failed_items']}")
-            print(f"   Progress: {progress['progress_percentage']:.1f}%")
-            print(f"   Current Batch: {progress['current_batch']}")
+            print(f"   Total Items: {snapshot['total_items']}")
+            print(f"   Processed: {snapshot['processed_items']}")
+            print(f"   Failed: {snapshot['failed_items']}")
+            print(f"   Progress: {snapshot['progress_percentage']:.1f}%")
+            print(f"   Current Batch: {snapshot['current_batch']}")
             
-            if progress['total_items'] > 0:
+            if snapshot['total_items'] > 0:
                 # Simple progress bar
                 bar_length = 40
-                filled_length = int(bar_length * progress['progress_percentage'] / 100)
+                filled_length = int(bar_length * float(snapshot['progress_percentage']) / 100)
                 bar = '█' * filled_length + '░' * (bar_length - filled_length)
-                print(f"   [{bar}] {progress['progress_percentage']:.1f}%")
+                print(f"   [{bar}] {float(snapshot['progress_percentage']):.1f}%")
 
     def _print_jobs_list(self, jobs_data):
         """Print formatted jobs list"""
@@ -147,13 +199,16 @@ class ReindexManager:
         
         for job in jobs:
             status_icon = self._get_status_icon(job['status'])
-            print(f"{status_icon} {job['job_id']}")
+            print(f"{status_icon} {self._job_identifier(job)}")
             print(f"   Status: {self._format_status(job['status'])}")
+            if job.get("tenant_name"):
+                print(f"   Tenant: {job['tenant_name']}")
             print(f"   Start: {job.get('started_at', 'N/A')}")
             
             progress = job.get("meta", {}).get("progress", {})
             if progress:
-                print(f"   Progress: {progress.get('progress_percentage', 0):.1f}%")
+                snapshot = self._progress_snapshot(progress)
+                print(f"   Progress: {float(snapshot['progress_percentage']):.1f}% ({snapshot['processed_items']}/{snapshot['total_items']})")
             print(f"   Message: {job.get('error') or 'Running'}")
             print()
 
@@ -195,7 +250,11 @@ class ReindexManager:
 async def main():
     parser = argparse.ArgumentParser(description="MRN Web Designs Reindexing Manager")
     parser.add_argument("--api-url", help="API URL (default: http://localhost:${BACKEND_PORT or API_PORT})")
-    
+    parser.add_argument(
+        "--bearer-token",
+        help="Bearer token for authenticated reindex endpoints (or set REINDEX_BEARER_TOKEN)",
+    )
+
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
     # Start command
@@ -224,7 +283,7 @@ async def main():
         parser.print_help()
         return
     
-    manager = ReindexManager(args.api_url)
+    manager = ReindexManager(args.api_url, bearer_token=args.bearer_token)
     
     if args.command == 'start':
         await manager.start_reindex(tenant_id=args.tenant_id)

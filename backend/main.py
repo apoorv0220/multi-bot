@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import openai
 from dotenv import load_dotenv
@@ -34,6 +34,7 @@ from embedder import Embedder, LEGACY_VECTOR_PRIMARY_SOURCE_LABEL, LEGACY_VECTOR
 from fuzzy_matcher import get_tenant_quick_reply, normalize_trigger_phrase, seed_quick_replies_for_tenant
 from integrations.openai_client import OpenAIClientAdapter
 from integrations.vector_store import VectorStoreAdapter
+from indexing.payloads import build_result_context_payload
 from models import (
     AuditLog,
     BlockWordMatchMode,
@@ -58,6 +59,14 @@ from models import (
     UserRole,
     UserTenant,
 )
+from retrieval.filters import extract_retrieval_directives, update_session_state
+from sources.config import (
+    normalize_source_provider,
+    normalize_source_static_urls_json as shared_normalize_source_static_urls_json,
+    parse_source_dsn as shared_parse_source_dsn,
+    plan_to_dict,
+    resolve_source_plan,
+)
 from url_utils import validate_and_fix_url, get_base_url
 from tenant_assets import ensure_tenant_assets_dir, next_avatar_filename, remove_local_avatar_files_for_tenant, tenant_assets_dir
 
@@ -80,6 +89,40 @@ qdrant_client = None
 openai_adapter = OpenAIClientAdapter()
 
 
+def _reindex_job_targets_tenant(job: ReindexJob, tenant_id: str) -> bool:
+    if job.tenant_id and str(job.tenant_id) == tenant_id:
+        return True
+    return (job.meta_json or {}).get("target_tenant_id") == tenant_id
+
+
+def _mark_interrupted_reindex_jobs_failed() -> int:
+    session = SessionLocal()
+    try:
+        running_jobs = session.execute(
+            select(ReindexJob).where(ReindexJob.status == "running").order_by(ReindexJob.created_at.desc())
+        ).scalars().all()
+        if not running_jobs:
+            return 0
+        now = datetime.now(timezone.utc)
+        for job in running_jobs:
+            meta = dict(job.meta_json or {})
+            meta["recovered_on_startup"] = True
+            job.status = "failed"
+            job.error = job.error or "Reindex job interrupted by backend restart before completion."
+            job.finished_at = now
+            job.meta_json = meta
+            session.add(job)
+        session.commit()
+        logger.warning("Marked %s interrupted reindex job(s) as failed during startup recovery", len(running_jobs))
+        return len(running_jobs)
+    except Exception:
+        session.rollback()
+        logger.exception("Failed to reconcile interrupted reindex jobs during startup")
+        return 0
+    finally:
+        session.close()
+
+
 @app.on_event("startup")
 async def startup_event():
     global qdrant_client
@@ -87,6 +130,7 @@ async def startup_event():
         qdrant_client = _initialize_qdrant_client_with_retries()
     except Exception:
         qdrant_client = None
+    _mark_interrupted_reindex_jobs_failed()
     geo_path = os.getenv("GEOIP_DB_PATH", "").strip()
     if not geo_path:
         logger.warning(
@@ -548,27 +592,7 @@ def _normalize_avatar_url_for_widget(value: Optional[str]) -> Optional[str]:
 
 
 def _parse_source_dsn(dsn: Optional[str], table_prefix: Optional[str], url_table: Optional[str]) -> Dict[str, Any]:
-    if not dsn:
-        return {
-            "table_prefix": table_prefix,
-            "url_table": url_table,
-        }
-    parsed = urlparse(dsn)
-    host = parsed.hostname or ""
-    port = parsed.port or 3306
-    db_name = (parsed.path or "").lstrip("/")
-    cfg = {
-        "host": host,
-        "port": int(port),
-        "database": db_name,
-        "table_prefix": table_prefix,
-        "url_table": url_table,
-    }
-    if parsed.username:
-        cfg["user"] = unquote(parsed.username)
-    if parsed.password:
-        cfg["password"] = unquote(parsed.password)
-    return cfg
+    return shared_parse_source_dsn(dsn, table_prefix, url_table)
 
 
 def _is_http_url(value: str) -> bool:
@@ -617,34 +641,53 @@ def _normalize_source_static_urls_json(
     domain_aliases: Optional[List[str]] = None,
     canonical_base: Optional[str] = None,
 ) -> Optional[str]:
-    if raw_value is None:
-        return None
-    text = raw_value.strip()
-    if not text:
-        return None
-    urls: List[str] = []
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, list):
-            urls = [str(v).strip() for v in parsed]
-    except Exception:
-        urls = [line.strip() for line in text.splitlines() if line.strip()]
-    if not urls:
-        return None
-    deny_fragments = ("/wp-admin", "/wp-login.php", "/xmlrpc.php")
-    normalized = []
-    seen = set()
-    for url in urls:
-        cu = _canonicalize_source_url(url, domain_aliases=domain_aliases, canonical_base=canonical_base)
-        if not cu:
-            continue
-        if any(fragment in cu for fragment in deny_fragments):
-            continue
-        if cu in seen:
-            continue
-        seen.add(cu)
-        normalized.append(cu)
-    return json.dumps(normalized)
+    return shared_normalize_source_static_urls_json(
+        raw_value,
+        domain_aliases=domain_aliases,
+        canonical_base=canonical_base,
+    )
+
+
+def _provider_aware_source_config(tenant: Optional[Tenant]) -> Dict[str, Any]:
+    source_cfg: Dict[str, Any] = {}
+    if tenant:
+        source_cfg = _parse_source_dsn(
+            tenant.source_db_url,
+            tenant.source_table_prefix,
+            tenant.source_url_table,
+        )
+        source_cfg["source_db_url"] = tenant.source_db_url
+        source_cfg["source_db_type"] = normalize_source_provider(
+            tenant.source_db_type,
+            source_mode=tenant.source_mode,
+            source_db_url=tenant.source_db_url,
+            source_static_urls_json=tenant.source_static_urls_json,
+        )
+        source_cfg["source_mode"] = (tenant.source_mode or "").strip() or "wordpress"
+        source_cfg["source_static_urls_json"] = tenant.source_static_urls_json
+        source_cfg["source_domain_aliases"] = tenant.source_domain_aliases
+        source_cfg["source_canonical_base_url"] = tenant.source_canonical_base_url
+    plan = resolve_source_plan(source_cfg)
+    source_cfg.update(plan_to_dict(plan))
+    return source_cfg
+
+
+def _get_chat_session_state(session: ChatSession) -> Dict[str, Any]:
+    return {
+        "conversation_summary": session.conversation_summary or "",
+        "active_filters": session.active_filters_json or {},
+        "user_preferences": session.user_preferences_json or {},
+        "last_result_context": session.last_result_context_json or [],
+        "conversation_intent": session.conversation_intent or "general",
+    }
+
+
+def _set_chat_session_state(session: ChatSession, state: Dict[str, Any]) -> None:
+    session.conversation_summary = state.get("conversation_summary") or None
+    session.active_filters_json = state.get("active_filters") or {}
+    session.user_preferences_json = state.get("user_preferences") or {}
+    session.last_result_context_json = state.get("last_result_context") or []
+    session.conversation_intent = state.get("conversation_intent") or None
 
 
 def _initialize_qdrant_client_with_retries(max_retries: int = 10, retry_delay: float = 2.0):
@@ -677,6 +720,24 @@ def ensure_collection_for_tenant(tenant_id: str):
             field_name="source_type",
             field_schema=models.PayloadSchemaType.KEYWORD,
         )
+    index_fields = [
+        ("source_provider", models.PayloadSchemaType.KEYWORD),
+        ("content_kind", models.PayloadSchemaType.KEYWORD),
+        ("content_bucket", models.PayloadSchemaType.KEYWORD),
+        ("entity_id", models.PayloadSchemaType.KEYWORD),
+        ("brand", models.PayloadSchemaType.KEYWORD),
+        ("stock_status", models.PayloadSchemaType.KEYWORD),
+        ("categories", models.PayloadSchemaType.KEYWORD),
+    ]
+    for field_name, field_schema in index_fields:
+        try:
+            qdrant_client.create_payload_index(
+                collection_name=collection_name,
+                field_name=field_name,
+                field_schema=field_schema,
+            )
+        except Exception:
+            continue
 
 # Helper function to generate embeddings
 async def generate_embedding(text: str) -> tuple[List[float], Dict[str, Any]]:
@@ -698,6 +759,8 @@ async def search_qdrant(
     embedding: List[float],
     limit: int = 5,
     primary_source_type: Optional[str] = None,
+    preferred_buckets: Optional[List[str]] = None,
+    metadata_filters: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
     if qdrant_client is None:
         raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
@@ -706,33 +769,45 @@ async def search_qdrant(
 
     try:
         vector_store = VectorStoreAdapter(qdrant_client)
-        # Primary bucket: tenant-configured Qdrant payload `source_type` (default legacy keyword).
-        # Do not set Qdrant score_threshold here: cosine scores for good hits are often ~0.5–0.6
-        # (see docs/migraine-reference/main.py search_qdrant). Chat still filters by score >= 0.3 below.
-        primary_bucket_results = vector_store.search(
-            collection_name=collection_name,
-            query_vector=embedding,
-            limit=limit,
-            source_type=primary_st,
-        )
-
-        logger.info("Found %s primary-source (%s) results", len(primary_bucket_results), primary_st)
-
-        # If we don't have enough high-confidence primary-bucket hits, blend external sources
-        if len(primary_bucket_results) < limit or max([r.score for r in primary_bucket_results] + [0]) < 0.7:
+        ordered_buckets = preferred_buckets or ["cms", "support", "catalog", "static"]
+        all_results = []
+        seen_ids = set()
+        for bucket in ordered_buckets:
+            bucket_results = vector_store.search(
+                collection_name=collection_name,
+                query_vector=embedding,
+                limit=limit,
+                source_type=primary_st,
+                content_bucket=bucket,
+                metadata_filters=metadata_filters,
+            )
+            for result in bucket_results:
+                result_id = result.payload.get("entity_id") or getattr(result, "id", None)
+                if result_id in seen_ids:
+                    continue
+                seen_ids.add(result_id)
+                all_results.append(result)
+                if len(all_results) >= limit:
+                    break
+            if len(all_results) >= limit:
+                break
+        if len(all_results) < limit:
             external_results = vector_store.search(
                 collection_name=collection_name,
                 query_vector=embedding,
                 source_type="external",
                 limit=limit,
             )
-
-            all_results = primary_bucket_results + external_results
-            all_results.sort(key=lambda x: x.score, reverse=True)
-            logger.info(f"Added {len(external_results)} external results, total: {len(all_results)}")
-            return all_results[:limit]
-
-        return primary_bucket_results
+            for result in external_results:
+                result_id = result.payload.get("entity_id") or getattr(result, "id", None)
+                if result_id in seen_ids:
+                    continue
+                seen_ids.add(result_id)
+                all_results.append(result)
+                if len(all_results) >= limit:
+                    break
+        all_results.sort(key=lambda x: x.score, reverse=True)
+        return all_results[:limit]
     except Exception as e:
         logger.error(f"Error searching Qdrant: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to search knowledge base: {e}")
@@ -991,6 +1066,7 @@ async def _run_chat_for_tenant(
             session.visitor_name = public_visitor.name
             session.visitor_email = public_visitor.email
             session.title = f"{public_visitor.name} ({public_visitor.email})"
+            _set_chat_session_state(session, _get_chat_session_state(session))
 
     db.add(
         ChatMessage(
@@ -1001,6 +1077,8 @@ async def _run_chat_for_tenant(
             model_name="",
         )
     )
+    session_state = _get_chat_session_state(session)
+    directives = extract_retrieval_directives(request.message, session_state)
 
     if is_public_chat:
         block_match = _find_block_word_match(db, tenant_id, request.message)
@@ -1074,10 +1152,13 @@ async def _run_chat_for_tenant(
             embedding,
             request.max_results,
             primary_source_type=vector_primary_source_type,
+            preferred_buckets=directives.preferred_buckets,
+            metadata_filters=directives.filters,
         )
         filtered_results = [result for result in search_results if result.score >= 0.3]
         context_texts: list[str] = []
         sources: list[SearchResult] = []
+        result_context_payloads: list[dict[str, Any]] = []
         for result in filtered_results:
             original_url = result.payload["url"]
             validated_url = validate_and_fix_url(original_url, fallback_base=url_fallback) or get_base_url(original_url)
@@ -1092,6 +1173,7 @@ async def _run_chat_for_tenant(
                     score=result.score,
                 )
             )
+            result_context_payloads.append(build_result_context_payload({**result.payload, "url": validated_url}))
         if not sources:
             answer = "I could not find high-confidence context for that request."
             confidence = 0.0
@@ -1104,6 +1186,12 @@ async def _run_chat_for_tenant(
             )
             confidence = filtered_results[0].score
         source_type = "vector_search"
+        session_state = update_session_state(
+            session_state=session_state,
+            user_message=request.message,
+            directives=directives,
+            result_context=result_context_payloads,
+        )
 
     assistant_message = ChatMessage(
         session_id=session.id,
@@ -1120,6 +1208,14 @@ async def _run_chat_for_tenant(
     )
     db.add(assistant_message)
     db.flush()
+    if fuzzy_response:
+        session_state = update_session_state(
+            session_state=session_state,
+            user_message=request.message,
+            directives=directives,
+            result_context=[],
+        )
+    _set_chat_session_state(session, session_state)
     _record_usage_event(
         db,
         tenant_id=session.tenant_id,
@@ -1958,13 +2054,19 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "slug": t.slug,
             "status": t.status,
             "source_db_url": t.source_db_url,
-            "source_db_type": t.source_db_type,
+            "source_db_type": normalize_source_provider(
+                t.source_db_type,
+                source_mode=t.source_mode,
+                source_db_url=t.source_db_url,
+                source_static_urls_json=t.source_static_urls_json,
+            ),
             "source_table_prefix": t.source_table_prefix,
             "source_url_table": t.source_url_table,
             "source_mode": t.source_mode,
             "source_static_urls_json": t.source_static_urls_json,
             "source_domain_aliases": t.source_domain_aliases,
             "source_canonical_base_url": t.source_canonical_base_url,
+            "source_plan": plan_to_dict(resolve_source_plan(_provider_aware_source_config(t))),
             "has_source_db_url": bool(t.source_db_url),
             "brand_name": t.brand_name,
             "widget_primary_color": t.widget_primary_color,
@@ -2029,39 +2131,68 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
     if user_ctx["role"] != UserRole.superadmin.value and str(tenant.id) not in get_accessible_tenant_ids(db, user_ctx):
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    source_mode = (payload.source_mode or "").strip().lower() if payload.source_mode is not None else None
-    if source_mode is not None and source_mode not in {"wordpress", "static", "mixed", ""}:
+    normalized_mode_input = (payload.source_mode or "").strip().lower() if payload.source_mode is not None else None
+    if normalized_mode_input is not None and normalized_mode_input not in {"wordpress", "static", "mixed", ""}:
         raise HTTPException(status_code=400, detail="source_mode must be one of: wordpress, static, mixed")
-    source_mode = source_mode or None
+    source_mode = normalized_mode_input or None
 
-    canonical_base = None
+    effective_source_db_url = payload.source_db_url if payload.source_db_url is not None else tenant.source_db_url
+    effective_source_mode = source_mode if payload.source_mode is not None else tenant.source_mode
+    effective_source_db_type = payload.source_db_type if payload.source_db_type is not None else tenant.source_db_type
+
+    source_static_raw = payload.source_static_urls_json if payload.source_static_urls_json is not None else tenant.source_static_urls_json
+
+    source_provider = normalize_source_provider(
+        effective_source_db_type,
+        source_mode=effective_source_mode,
+        source_db_url=effective_source_db_url,
+        source_static_urls_json=source_static_raw,
+    )
+    if source_provider == "static":
+        effective_source_mode = "static"
+        source_mode = "static"
+    if payload.source_db_type is not None:
+        raw_provider = (payload.source_db_type or "").strip().lower()
+        if raw_provider not in {"", "wordpress", "woocommerce", "static"}:
+            raise HTTPException(status_code=400, detail="source_db_type must be one of: wordpress, woocommerce, static")
+        if raw_provider == "woocommerce" and not (effective_source_db_url or ""):
+            raise HTTPException(status_code=400, detail="woocommerce provider requires source_db_url")
+        if raw_provider == "static" and not (source_static_raw or ""):
+            raise HTTPException(status_code=400, detail="static provider requires source_static_urls_json")
+
+    canonical_base = (tenant.source_canonical_base_url or "").strip() or None
     if payload.source_canonical_base_url is not None:
         canonical_base = (payload.source_canonical_base_url or "").strip() or None
-        if canonical_base and not _is_http_url(canonical_base):
-            raise HTTPException(status_code=400, detail="source_canonical_base_url must be a valid http(s) URL")
+    if canonical_base and not _is_http_url(canonical_base):
+        raise HTTPException(status_code=400, detail="source_canonical_base_url must be a valid http(s) URL")
 
-    domain_aliases_csv = None
+    domain_aliases_csv = tenant.source_domain_aliases
     alias_values: List[str] = []
+    existing_aliases = (tenant.source_domain_aliases or "").strip()
+    if existing_aliases:
+        alias_values = [a.strip() for a in existing_aliases.split(",") if a.strip()]
     if payload.source_domain_aliases is not None:
         raw_aliases = payload.source_domain_aliases.strip()
         if raw_aliases:
             alias_values = [a.strip() for a in re.split(r"[,\n]+", raw_aliases) if a.strip()]
-            invalid_aliases = [a for a in alias_values if not _is_http_url(a)]
-            if invalid_aliases:
-                raise HTTPException(status_code=400, detail="source_domain_aliases must be comma/newline separated http(s) URLs")
-            domain_aliases_csv = ",".join(alias_values)
+        else:
+            alias_values = []
+        invalid_aliases = [a for a in alias_values if not _is_http_url(a)]
+        if invalid_aliases:
+            raise HTTPException(status_code=400, detail="source_domain_aliases must be comma/newline separated http(s) URLs")
+        domain_aliases_csv = ",".join(alias_values) if alias_values else None
 
     source_static_urls_json = _normalize_source_static_urls_json(
-        payload.source_static_urls_json,
+        source_static_raw,
         domain_aliases=alias_values,
         canonical_base=canonical_base,
     )
 
-    tenant.source_db_url = payload.source_db_url
-    tenant.source_db_type = payload.source_db_type
-    tenant.source_table_prefix = payload.source_table_prefix
-    tenant.source_url_table = payload.source_url_table
-    tenant.source_mode = source_mode
+    tenant.source_db_url = effective_source_db_url
+    tenant.source_db_type = source_provider
+    tenant.source_table_prefix = payload.source_table_prefix if payload.source_table_prefix is not None else tenant.source_table_prefix
+    tenant.source_url_table = payload.source_url_table if payload.source_url_table is not None else tenant.source_url_table
+    tenant.source_mode = effective_source_mode
     tenant.source_static_urls_json = source_static_urls_json
     tenant.source_domain_aliases = domain_aliases_csv
     tenant.source_canonical_base_url = canonical_base
@@ -2075,7 +2206,7 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
             target_type="tenant",
             target_id=str(tenant.id),
             details_json={
-                "source_db_type": payload.source_db_type,
+                "source_db_type": source_provider,
                 "source_mode": source_mode,
                 "static_url_count": len(json.loads(source_static_urls_json or "[]")),
             },
@@ -3143,6 +3274,16 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
         raise HTTPException(status_code=400, detail="Tenant ID required")
     if user_ctx["role"] != UserRole.superadmin.value and target_tenant_id not in get_accessible_tenant_ids(db, user_ctx):
         raise HTTPException(status_code=403, detail="Admins can only reindex own tenant")
+    running_jobs = db.execute(
+        select(ReindexJob).where(ReindexJob.status == "running").order_by(ReindexJob.created_at.desc())
+    ).scalars().all()
+    existing_job = next((job for job in running_jobs if _reindex_job_targets_tenant(job, target_tenant_id)), None)
+    if existing_job:
+        return {
+            "job_id": str(existing_job.id),
+            "status": "already_running",
+            "message": "A reindex job is already running for this tenant.",
+        }
     ensure_collection_for_tenant(target_tenant_id)
     scope = ReindexScope.all if user_ctx["role"] == UserRole.superadmin.value and request.tenant_id is None else ReindexScope.tenant
     job = ReindexJob(
@@ -3193,15 +3334,7 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
 
             source_cfg = {}
             if tenant:
-                source_cfg = _parse_source_dsn(
-                    tenant.source_db_url,
-                    tenant.source_table_prefix,
-                    tenant.source_url_table,
-                )
-                source_cfg["source_mode"] = (tenant.source_mode or "").strip() or "wordpress"
-                source_cfg["source_static_urls_json"] = tenant.source_static_urls_json
-                source_cfg["source_domain_aliases"] = tenant.source_domain_aliases
-                source_cfg["source_canonical_base_url"] = tenant.source_canonical_base_url
+                source_cfg = _provider_aware_source_config(tenant)
             payload_st = LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
             payload_label = LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
             url_fb = None

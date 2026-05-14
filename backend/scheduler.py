@@ -87,15 +87,20 @@ class IndexingScheduler:
         db = SessionLocal()
         try:
             tenants = db.execute(
-                select(Tenant).where(Tenant.status == "active").where(Tenant.source_db_url.isnot(None)).where(Tenant.source_db_url != "")
+                select(Tenant).where(Tenant.status == "active")
             ).scalars().all()
+            tenants = [
+                tenant for tenant in tenants
+                if (tenant.source_db_url and tenant.source_db_url.strip())
+                or (tenant.source_static_urls_json and tenant.source_static_urls_json.strip())
+            ]
             if not tenants:
-                logger.info("No active tenants with source_db_url; nothing to reindex.")
+                logger.info("No active tenants with configured sources; nothing to reindex.")
                 return
             for tenant in tenants:
                 tid = str(tenant.id)
                 logger.info("Scheduled reindex for tenant %s (%s)", tid, tenant.name)
-                source_cfg = app_main._parse_source_dsn(tenant.source_db_url, tenant.source_table_prefix, tenant.source_url_table)
+                source_cfg = app_main._provider_aware_source_config(tenant)
                 payload_st = (tenant.widget_source_type or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
                 payload_label = (tenant.brand_name or tenant.name or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
                 url_fb = (tenant.widget_website_url or "").strip() or None

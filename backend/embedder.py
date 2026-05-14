@@ -11,11 +11,13 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 import uuid
 import logging
 import time
+import re
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 import json
 from pathlib import Path
 from urllib.parse import urlparse
+from datetime import datetime
 
 # Configure proper logging
 logging.basicConfig(
@@ -32,10 +34,22 @@ LEGACY_VECTOR_PRIMARY_SOURCE_LABEL = "MRN Web Designs"
 try:
     from .wordpress_fetcher import WordPressFetcher
     from .scraper import scrape_urls
+    from .indexing.pipeline import IndexingPipeline
+    from .sources.base import SourceContext, SyncBatch
+    from .sources.config import normalize_source_provider, resolve_source_plan
+    from .sources.static_adapter import StaticUrlAdapter
+    from .sources.wordpress_adapter import WordPressContentAdapter
+    from .sources.woocommerce_adapter import WooCommerceCatalogAdapter
 except ImportError:
     # Fallback for direct module execution
     from wordpress_fetcher import WordPressFetcher
     from scraper import scrape_urls
+    from indexing.pipeline import IndexingPipeline
+    from sources.base import SourceContext, SyncBatch
+    from sources.config import normalize_source_provider, resolve_source_plan
+    from sources.static_adapter import StaticUrlAdapter
+    from sources.wordpress_adapter import WordPressContentAdapter
+    from sources.woocommerce_adapter import WooCommerceCatalogAdapter
 
 # Load environment variables
 load_dotenv()
@@ -107,6 +121,13 @@ class Embedder:
         self.vector_payload_source_label = lb or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
         self.url_fallback_base = (url_fallback_base or "").strip() or None
         self.source_mode = (self.source_config.get("source_mode") or "wordpress").strip().lower()
+        self.source_provider = normalize_source_provider(
+            self.source_config.get("source_db_type"),
+            source_mode=self.source_mode,
+            source_db_url=self.source_config.get("source_db_url"),
+            source_static_urls_json=self.source_config.get("source_static_urls_json"),
+        )
+        self.source_plan = resolve_source_plan(self.source_config)
         self.source_static_urls_json = self.source_config.get("source_static_urls_json")
         raw_aliases = (self.source_config.get("source_domain_aliases") or "").strip()
         self.source_domain_aliases = [a.strip() for a in raw_aliases.split(",") if a.strip()]
@@ -126,7 +147,8 @@ class Embedder:
         self.rate_limit_delay = float(os.getenv("EMBEDDING_RATE_LIMIT_DELAY", "0.1"))  # 100ms between API calls
         
         # Progress tracking
-        self.progress_file = "indexing_progress.json"
+        safe_collection_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", self.collection_name or "default")
+        self.progress_file = f"indexing_progress_{safe_collection_name}.json"
         self.current_progress: Optional[ProcessingProgress] = None
         
         # Ensure collection exists
@@ -178,6 +200,15 @@ class Embedder:
                     field_name="source_type",
                     field_schema=models.PayloadSchemaType.KEYWORD
                 )
+                for field_name in ("source_provider", "content_kind", "content_bucket", "entity_id", "brand", "stock_status", "categories"):
+                    try:
+                        self.qdrant_client.create_payload_index(
+                            collection_name=self.collection_name,
+                            field_name=field_name,
+                            field_schema=models.PayloadSchemaType.KEYWORD,
+                        )
+                    except Exception:
+                        pass
                 
                 logger.info(f"Collection '{self.collection_name}' created successfully")
             else:
@@ -681,15 +712,38 @@ class Embedder:
         logger.info("Starting chunked full content reindexing...")
         
         try:
-            mode = self.source_mode if self.source_mode in {"wordpress", "static", "mixed"} else "wordpress"
-            wp_result = None
-            static_result = None
-            if mode in {"wordpress", "mixed"}:
-                wp_result = await self.embed_wordpress_content_chunked()
-            if mode == "wordpress":
-                await self.embed_external_urls()
-            if mode in {"static", "mixed"}:
-                static_result = await self.embed_static_urls()
+            batches = await self._build_source_batches()
+            def on_pipeline_progress(progress: Dict[str, Any]):
+                provider_stats = progress.get("providers", {})
+                total = sum(int(stats.get("total_records", 0)) for stats in provider_stats.values())
+                processed = sum(
+                    int(stats.get("indexed_records", 0))
+                    + int(stats.get("deleted_records", 0))
+                    + int(stats.get("failed_records", 0))
+                    for stats in provider_stats.values()
+                )
+                failed = sum(int(stats.get("failed_records", 0)) for stats in provider_stats.values())
+                if self.current_progress:
+                    self.current_progress.total_items = total
+                    self.current_progress.processed_items = processed
+                    self.current_progress.failed_items = failed
+                    self.current_progress.last_update_time = time.time()
+                    self.save_progress(self.current_progress)
+                if self.progress_callback:
+                    self.progress_callback(progress)
+            pipeline = IndexingPipeline(
+                qdrant_client=self.qdrant_client,
+                collection_name=self.collection_name,
+                embedding_func=self.generate_embedding_with_retry,
+                source_label=self.vector_payload_source_label,
+                source_type=self.vector_payload_source_type,
+                progress_callback=on_pipeline_progress,
+            )
+            pipeline_result = await pipeline.process_batches(batches)
+            if self.current_progress:
+                self.current_progress.status = "completed"
+                self.current_progress.last_update_time = time.time()
+                self.save_progress(self.current_progress)
             
             # Clear progress file on successful completion
             self.clear_progress()
@@ -697,9 +751,17 @@ class Embedder:
             logger.info("Chunked content reindexing completed successfully")
             return {
                 "status": "completed",
-                "wordpress_result": wp_result,
-                "static_result": static_result,
-                "source_mode": mode,
+                "pipeline_result": pipeline_result,
+                "source_mode": self.source_mode,
+                "source_provider": self.source_provider,
+                "source_plan": {
+                    "provider": self.source_plan.provider,
+                    "source_mode": self.source_plan.source_mode,
+                    "include_wordpress_content": self.source_plan.include_wordpress_content,
+                    "include_legacy_external": self.source_plan.include_legacy_external,
+                    "include_woocommerce_catalog": self.source_plan.include_woocommerce_catalog,
+                    "include_static_urls": self.source_plan.include_static_urls,
+                },
                 "message": "All content reindexed successfully"
             }
             
@@ -724,6 +786,44 @@ class Embedder:
             "progress": progress.to_dict(),
             "message": f"Processing {progress.processed_items}/{progress.total_items} items"
         }
+
+    async def _build_source_batches(self) -> List[SyncBatch]:
+        started_at = datetime.utcnow().isoformat() if 'datetime' in globals() else ""
+        ctx = SourceContext(
+            tenant_id=self.collection_name.replace("tenant_", "").replace("_docs", ""),
+            provider=self.source_plan.provider,
+            mode="full",
+            source_config={
+                **self.source_config,
+                "source_db_type": self.source_provider,
+                "source_mode": self.source_mode,
+                "include_wordpress_content": self.source_plan.include_wordpress_content,
+                "include_legacy_external": self.source_plan.include_legacy_external,
+                "include_woocommerce_catalog": self.source_plan.include_woocommerce_catalog,
+                "include_static_urls": self.source_plan.include_static_urls,
+                "url_fallback_base": self.url_fallback_base,
+            },
+            started_at=started_at,
+        )
+        batches: List[SyncBatch] = []
+        if self.source_plan.include_wordpress_content or self.source_plan.include_legacy_external:
+            batches.extend(await WordPressContentAdapter().discover(ctx))
+        if self.source_plan.include_woocommerce_catalog:
+            batches.extend(await WooCommerceCatalogAdapter().discover(ctx))
+        if self.source_plan.include_static_urls:
+            batches.extend(await StaticUrlAdapter().discover(ctx))
+        total_items = sum(len(batch.records) for batch in batches)
+        self.current_progress = ProcessingProgress(
+            total_items=total_items,
+            processed_items=0,
+            failed_items=0,
+            current_batch=0,
+            start_time=time.time(),
+            last_update_time=time.time(),
+            status="processing",
+        )
+        self.save_progress(self.current_progress)
+        return batches
 
 # Test function if this module is run directly
 async def test_embedder():
