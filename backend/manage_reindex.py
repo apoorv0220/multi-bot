@@ -11,6 +11,8 @@ import aiohttp
 import os
 from dotenv import load_dotenv
 
+from indexing.progress import normalize_reindex_progress
+
 # Load environment variables
 load_dotenv()
 
@@ -37,33 +39,8 @@ class ReindexManager:
         return str(job.get("job_id") or job.get("id") or "N/A")
 
     @staticmethod
-    def _progress_snapshot(progress: dict | None) -> dict[str, float | int]:
-        progress = progress or {}
-        if "progress_percentage" in progress:
-            total_items = int(progress.get("total_items", 0) or 0)
-            processed_items = int(progress.get("processed_items", 0) or 0)
-            failed_items = int(progress.get("failed_items", 0) or 0)
-            return {
-                "total_items": total_items,
-                "processed_items": processed_items,
-                "failed_items": failed_items,
-                "progress_percentage": float(progress.get("progress_percentage", 0) or 0),
-                "current_batch": int(progress.get("current_batch", 0) or 0),
-            }
-        providers = progress.get("providers") or {}
-        total_items = sum(int((stats or {}).get("total_records", 0) or 0) for stats in providers.values())
-        indexed_items = sum(int((stats or {}).get("indexed_records", 0) or 0) for stats in providers.values())
-        deleted_items = sum(int((stats or {}).get("deleted_records", 0) or 0) for stats in providers.values())
-        failed_items = sum(int((stats or {}).get("failed_records", 0) or 0) for stats in providers.values())
-        processed_items = indexed_items + deleted_items + failed_items
-        progress_percentage = (processed_items / total_items * 100.0) if total_items else 0.0
-        return {
-            "total_items": total_items,
-            "processed_items": processed_items,
-            "failed_items": failed_items,
-            "progress_percentage": progress_percentage,
-            "current_batch": int(progress.get("current_batch", 0) or 0),
-        }
+    def _progress_snapshot(progress: dict | None, *, job_status: str | None = None) -> dict[str, float | int]:
+        return normalize_reindex_progress(progress, job_status=job_status)
 
     async def start_reindex(self, tenant_id: str = None):
         """Start a new reindexing job"""
@@ -172,20 +149,32 @@ class ReindexManager:
         
         progress = status.get('meta', {}).get('progress')
         if progress:
-            snapshot = self._progress_snapshot(progress)
+            snapshot = self._progress_snapshot(progress, job_status=status.get("status"))
             print(f"\n📈 Progress Details:")
-            print(f"   Total Items: {snapshot['total_items']}")
+            print(f"   Planned Total: {snapshot['total_items']}")
             print(f"   Processed: {snapshot['processed_items']}")
+            print(f"   Remaining: {snapshot['remaining_items']}")
             print(f"   Failed: {snapshot['failed_items']}")
             print(f"   Progress: {snapshot['progress_percentage']:.1f}%")
             print(f"   Current Batch: {snapshot['current_batch']}")
             
             if snapshot['total_items'] > 0:
-                # Simple progress bar
                 bar_length = 40
                 filled_length = int(bar_length * float(snapshot['progress_percentage']) / 100)
                 bar = '█' * filled_length + '░' * (bar_length - filled_length)
                 print(f"   [{bar}] {float(snapshot['progress_percentage']):.1f}%")
+
+            providers = snapshot.get("providers") or {}
+            if providers:
+                print(f"\n   By provider:")
+                for name, stats in providers.items():
+                    total = int(stats.get("total_records", 0) or 0)
+                    done = (
+                        int(stats.get("indexed_records", 0) or 0)
+                        + int(stats.get("deleted_records", 0) or 0)
+                        + int(stats.get("failed_records", 0) or 0)
+                    )
+                    print(f"     - {name}: {done}/{total} records")
 
     def _print_jobs_list(self, jobs_data):
         """Print formatted jobs list"""
@@ -207,8 +196,12 @@ class ReindexManager:
             
             progress = job.get("meta", {}).get("progress", {})
             if progress:
-                snapshot = self._progress_snapshot(progress)
-                print(f"   Progress: {float(snapshot['progress_percentage']):.1f}% ({snapshot['processed_items']}/{snapshot['total_items']})")
+                snapshot = self._progress_snapshot(progress, job_status=job.get("status"))
+                print(
+                    f"   Progress: {float(snapshot['progress_percentage']):.1f}% "
+                    f"({snapshot['processed_items']}/{snapshot['total_items']}, "
+                    f"{snapshot['remaining_items']} remaining)"
+                )
             print(f"   Message: {job.get('error') or 'Running'}")
             print()
 
@@ -236,17 +229,6 @@ class ReindexManager:
         }
         return icons.get(status, '❓')
 
-    def _format_duration(self, seconds):
-        """Format duration in human-readable format"""
-        if seconds < 60:
-            return f"{seconds:.1f}s"
-        elif seconds < 3600:
-            minutes = seconds / 60
-            return f"{minutes:.1f}m"
-        else:
-            hours = seconds / 3600
-            return f"{hours:.1f}h"
-
 async def main():
     parser = argparse.ArgumentParser(description="MRN Web Designs Reindexing Manager")
     parser.add_argument("--api-url", help="API URL (default: http://localhost:${BACKEND_PORT or API_PORT})")
@@ -257,22 +239,17 @@ async def main():
 
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
-    # Start command
     start_parser = subparsers.add_parser('start', help='Start reindexing')
     start_parser.add_argument('--tenant-id', help='Target tenant id (superadmin only)')
     
-    # Status command
     status_parser = subparsers.add_parser('status', help='Get reindexing status')
     status_parser.add_argument('--job-id', help='Specific job ID to check')
     
-    # List command
     subparsers.add_parser('list', help='List all reindexing jobs')
     
-    # Cancel command
     cancel_parser = subparsers.add_parser('cancel', help='Cancel reindexing job')
     cancel_parser.add_argument('job_id', help='Job ID to cancel')
     
-    # Monitor command
     monitor_parser = subparsers.add_parser('monitor', help='Monitor reindexing progress')
     monitor_parser.add_argument('--job-id', help='Specific job ID to monitor')
     monitor_parser.add_argument('--interval', type=int, default=5, help='Update interval in seconds (default: 5)')
@@ -301,4 +278,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
-        sys.exit(0) 
+        sys.exit(0)

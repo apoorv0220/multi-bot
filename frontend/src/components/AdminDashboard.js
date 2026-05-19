@@ -39,6 +39,24 @@ const DASHBOARD_SELECTED_TENANT_KEY = "admin_dashboard_selected_tenant_id";
 
 const adminApiBase = () => String(client.defaults.baseURL || "").replace(/\/+$/, "");
 
+/** Normalized reindex progress from API (planned total vs processed). */
+const reindexJobProgress = (job) => {
+  const p = job?.meta?.progress;
+  if (!p) return null;
+  const total = Number(p.total_items ?? p.planned_total_records ?? 0);
+  const processed = Number(p.processed_items ?? 0);
+  const pct = Number(
+    p.progress_percentage ?? (total > 0 ? Math.min(100, (processed / total) * 100) : 0),
+  );
+  return {
+    total,
+    processed,
+    remaining: Number(p.remaining_items ?? Math.max(0, total - processed)),
+    failed: Number(p.failed_items ?? 0),
+    percentage: pct,
+  };
+};
+
 /** Same rule as widget: API base + `/api/assets/...` (or legacy URL containing that path). */
 const adminBrandingAvatarSrc = (raw) => {
   if (!raw) return "";
@@ -106,6 +124,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [widgetBotMessageTextColor, setWidgetBotMessageTextColor] = useState("#1a1a1a");
   const [widgetHeaderTitle, setWidgetHeaderTitle] = useState("");
   const [widgetWelcomeMessage, setWidgetWelcomeMessage] = useState("");
+  const [chatMaxResults, setChatMaxResults] = useState("");
+  const [chatMaxResultsCatalog, setChatMaxResultsCatalog] = useState("");
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [corsAllowedOrigins, setCorsAllowedOrigins] = useState("");
   const [avatarUpload, setAvatarUpload] = useState(null);
@@ -372,6 +392,10 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     setWidgetBotMessageTextColor(t.widget_bot_message_text_color || "#1a1a1a");
     setWidgetHeaderTitle(t.widget_header_title || "");
     setWidgetWelcomeMessage(t.widget_welcome_message || "");
+    setChatMaxResults(t.chat_max_results != null && t.chat_max_results !== "" ? String(t.chat_max_results) : "");
+    setChatMaxResultsCatalog(
+      t.chat_max_results_catalog != null && t.chat_max_results_catalog !== "" ? String(t.chat_max_results_catalog) : "",
+    );
     setPrivacyPolicyUrl(t.privacy_policy_url || "");
     setCorsAllowedOrigins(t.cors_allowed_origins || "");
     setClearBrandingAvatar(false);
@@ -639,6 +663,28 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   };
 
   const saveBrandingConfig = async () => {
+    const parseTenantMaxResults = (raw, label) => {
+      const trimmed = String(raw ?? "").trim();
+      if (trimmed === "") return { value: null };
+      if (!/^\d+$/.test(trimmed)) {
+        return { error: `${label} must be a whole number (or leave empty for defaults).` };
+      }
+      const n = parseInt(trimmed, 10);
+      if (n < 1 || n > 50) {
+        return { error: `${label} must be between 1 and 50 (matches admin API limits).` };
+      }
+      return { value: n };
+    };
+    const generalParsed = parseTenantMaxResults(chatMaxResults, "General chat max results");
+    if (generalParsed.error) {
+      setError(generalParsed.error);
+      return;
+    }
+    const catalogParsed = parseTenantMaxResults(chatMaxResultsCatalog, "Catalog chat max results");
+    if (catalogParsed.error) {
+      setError(catalogParsed.error);
+      return;
+    }
     try {
       const brandingPayload = {
         brand_name: brandName || null,
@@ -652,6 +698,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
         widget_header_title: widgetHeaderTitle || null,
         widget_welcome_message: widgetWelcomeMessage || null,
         privacy_policy_url: privacyPolicyUrl || null,
+        chat_max_results: generalParsed.value,
+        chat_max_results_catalog: catalogParsed.value,
       };
       if (clearBrandingAvatar && !avatarUpload) {
         brandingPayload.avatar_url = "";
@@ -1126,19 +1174,23 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                       <Chip size="small" label={j.scope} />
                       <Chip size="small" color={j.status === "completed" ? "success" : j.status === "failed" ? "error" : "default"} label={j.status} />
                     </Stack>
-                    {!!j.meta?.progress && j.status !== "completed" && j.status !== "failed" && (
+                    {(() => {
+                      const prog = reindexJobProgress(j);
+                      if (!prog || j.status === "completed" || j.status === "failed") return null;
+                      return (
                       <Box sx={{ mb: 1 }}>
                         <LinearProgress
                           variant="determinate"
-                          value={Number(j.meta.progress.progress_percentage || 0)}
+                          value={prog.percentage}
                           sx={{ height: 8, borderRadius: 10, mb: 0.5 }}
                         />
                         <Typography variant="caption" color="text.secondary">
-                          {j.meta.progress.processed_items || 0}/{j.meta.progress.total_items || 0} processed
-                          ({Number(j.meta.progress.progress_percentage || 0).toFixed(1)}%)
+                          {prog.processed}/{prog.total} processed ({prog.percentage.toFixed(1)}%)
+                          {prog.remaining > 0 ? ` · ${prog.remaining} remaining` : ""}
                         </Typography>
                       </Box>
-                    )}
+                      );
+                    })()}
                     <Typography variant="caption" color="text.secondary" display="block">
                       Started: {j.started_at || "N/A"} {j.finished_at ? `| Finished: ${j.finished_at}` : ""}
                     </Typography>
@@ -1455,6 +1507,22 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 fullWidth
               />
               <TextField label="Widget Header Title" value={widgetHeaderTitle} onChange={(e) => setWidgetHeaderTitle(e.target.value)} fullWidth />
+              <TextField
+                label="Chat max results (general sites)"
+                value={chatMaxResults}
+                onChange={(e) => setChatMaxResults(e.target.value)}
+                placeholder="empty = env default"
+                helperText="Cap for Qdrant hits per message when the tenant is not WooCommerce-first (1–50, or leave empty)."
+                fullWidth
+              />
+              <TextField
+                label="Chat max results (WooCommerce catalog)"
+                value={chatMaxResultsCatalog}
+                onChange={(e) => setChatMaxResultsCatalog(e.target.value)}
+                placeholder="empty = use general value or env catalog default"
+                helperText="Optional override for WooCommerce tenants (1–50). Empty falls back to general max or server default."
+                fullWidth
+              />
               <TextField
                 label="Welcome Message"
                 value={widgetWelcomeMessage}

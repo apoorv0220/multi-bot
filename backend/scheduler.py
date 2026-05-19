@@ -112,7 +112,16 @@ class IndexingScheduler:
                     vector_payload_source_label=payload_label,
                     url_fallback_base=url_fb,
                 )
-                await embedder.reindex_all_content()
+                from retrieval.profile import apply_retrieval_profile_to_tenant
+
+                reindex_result = await embedder.reindex_all_content(
+                    previous_profile_version=tenant.retrieval_profile_version,
+                )
+                profile = reindex_result.get("retrieval_profile")
+                if profile:
+                    apply_retrieval_profile_to_tenant(tenant, profile)
+                    db.add(tenant)
+                    db.commit()
             logger.info("Scheduled multi-tenant reindexing completed successfully.")
         except Exception as e:
             logger.error("Error during scheduled reindexing: %s", e)

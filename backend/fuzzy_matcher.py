@@ -134,6 +134,16 @@ def get_tenant_quick_reply(db, tenant_id: str, query: str, tenant: Optional["Ten
     if not clean_q:
         return None
 
+    if clean_q in rule_map:
+        template, _, priority = rule_map[clean_q]
+        rendered = substitute_quick_reply_template(tenant, template)
+        return {
+            "response": rendered,
+            "confidence": 1.0,
+            "source": "fuzzy_match",
+            "sources": [],
+        }
+
     best_template: Optional[str] = None
     best_score = -1
     best_priority = -10_000
@@ -143,6 +153,8 @@ def get_tenant_quick_reply(db, tenant_id: str, query: str, tenant: Optional["Ten
         if clean_q == trigger:
             score = 100
         else:
+            if len(clean_q) <= 4 and len(trigger) > len(clean_q) + 6:
+                continue
             score = fuzz.ratio(clean_q, trigger)
         if score < th:
             continue

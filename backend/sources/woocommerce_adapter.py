@@ -15,6 +15,26 @@ def _parse_float(value):
         return None
 
 
+def resolve_product_image_url(
+    site_url: str,
+    *,
+    image_attached_file: str | None,
+    image_guid: str | None,
+) -> str | None:
+    """Build a public image URL from Woo featured image metadata.
+
+    Prefer ``_wp_attached_file`` (stable path under uploads/) over attachment
+  ``guid``, which can be stale — same policy as woocommerce-chatbot embed script.
+    """
+    site = (site_url or "").rstrip("/")
+    attached = (image_attached_file or "").strip()
+    if attached:
+        path = attached.lstrip("/")
+        return f"{site}/wp-content/uploads/{path}"
+    guid = (image_guid or "").strip()
+    return guid or None
+
+
 class WooCommerceCatalogAdapter(SourceAdapter):
     provider = "woocommerce"
 
@@ -52,7 +72,18 @@ class WooCommerceCatalogAdapter(SourceAdapter):
                     MAX(CASE WHEN pm.meta_key = '_sale_price' THEN pm.meta_value END) AS sale_price,
                     MAX(CASE WHEN pm.meta_key = '_stock_status' THEN pm.meta_value END) AS stock_status,
                     GROUP_CONCAT(DISTINCT CASE WHEN tt.taxonomy = 'product_cat' THEN t.name END SEPARATOR '|||') AS categories,
-                    GROUP_CONCAT(DISTINCT CASE WHEN tt.taxonomy LIKE 'pa_%%' THEN CONCAT(REPLACE(tt.taxonomy, 'pa_', ''), ':', t.name) END SEPARATOR '|||') AS attributes
+                    GROUP_CONCAT(DISTINCT CASE WHEN tt.taxonomy LIKE 'pa_%%' THEN CONCAT(REPLACE(tt.taxonomy, 'pa_', ''), ':', t.name) END SEPARATOR '|||') AS attributes,
+                    (SELECT att.guid
+                     FROM {fetcher.table_prefix}postmeta pm_thumb
+                     JOIN {fetcher.table_prefix}posts att ON att.ID = pm_thumb.meta_value
+                     WHERE pm_thumb.post_id = p.ID AND pm_thumb.meta_key = '_thumbnail_id'
+                     LIMIT 1) AS image_guid,
+                    (SELECT pm_att.meta_value
+                     FROM {fetcher.table_prefix}postmeta pm_thumb
+                     JOIN {fetcher.table_prefix}postmeta pm_att
+                       ON pm_att.post_id = pm_thumb.meta_value AND pm_att.meta_key = '_wp_attached_file'
+                     WHERE pm_thumb.post_id = p.ID AND pm_thumb.meta_key = '_thumbnail_id'
+                     LIMIT 1) AS image_attached_file
                 FROM {fetcher.table_prefix}posts p
                 LEFT JOIN {fetcher.table_prefix}postmeta pm ON p.ID = pm.post_id
                 LEFT JOIN {fetcher.table_prefix}term_relationships tr ON p.ID = tr.object_id
@@ -112,6 +143,11 @@ class WooCommerceCatalogAdapter(SourceAdapter):
                 if key in {"brand", "manufacturer"} and not brand:
                     brand = value
             categories = [item.strip() for item in (product.get("categories") or "").split("|||") if item and item.strip()]
+            image_url = resolve_product_image_url(
+                site_url,
+                image_attached_file=product.get("image_attached_file"),
+                image_guid=product.get("image_guid"),
+            )
             records.append(
                 SourceRecord(
                     source_provider="woocommerce",
@@ -130,6 +166,7 @@ class WooCommerceCatalogAdapter(SourceAdapter):
                         "brand": brand,
                         "categories": categories,
                         "attributes": dict(attributes),
+                        "image_url": image_url,
                     },
                 )
             )

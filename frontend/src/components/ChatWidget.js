@@ -72,6 +72,7 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [quotaBlocked, setQuotaBlocked] = useState(false);
   const [quotaMessage, setQuotaMessage] = useState("");
   const [idleRatingWaitSeconds, setIdleRatingWaitSeconds] = useState(120);
+  const [maxResultsDefault, setMaxResultsDefault] = useState(null);
   const [showRatingPrompt, setShowRatingPrompt] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
@@ -178,6 +179,9 @@ const ChatWidget = ({ mode = "admin" }) => {
         setPublicAvatarRaw(data?.avatar_url || "");
         setPrivacyPolicyUrl(data?.privacy_policy_url || "");
         setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
+        if (data?.max_results_default != null) {
+          setMaxResultsDefault(Number(data.max_results_default));
+        }
       } catch (err) {
         console.error("Error loading widget config:", err);
       }
@@ -315,11 +319,14 @@ const ChatWidget = ({ mode = "admin" }) => {
     try {
       const endpoint = mode === "public" ? "/api/public/chat" : "/api/chat";
       const requestUrl = mode === "public" ? `${apiUrl}${endpoint}` : endpoint;
-      const response = await client.post(requestUrl, {
+      const chatPayload = {
         message: input,
         session_id: sessionId,
-        max_results: 3,
-      }, {
+      };
+      if (maxResultsDefault != null && maxResultsDefault > 0) {
+        chatPayload.max_results = maxResultsDefault;
+      }
+      const response = await client.post(requestUrl, chatPayload, {
         headers: mode === "public" ? { "X-Widget-Key": widgetKey, "X-Visitor-Id": visitorId } : undefined,
       });
       if (response.data.session_id) {
@@ -338,8 +345,10 @@ const ChatWidget = ({ mode = "admin" }) => {
         text: response.data.response,
         timestamp: new Date(),
         sources: response.data.sources || [],
+        products: response.data.products || [],
         confidence: response.data.confidence,
         source: response.data.source,
+        matchMode: response.data.match_mode || null,
         messageId: response.data.message_id,
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
@@ -390,6 +399,8 @@ const ChatWidget = ({ mode = "admin" }) => {
             text={message.text}
             timestamp={message.timestamp}
             sources={message.sources}
+            products={message.products}
+            matchMode={message.matchMode}
             isError={message.isError}
             confidence={message.confidence}
             source={message.source}

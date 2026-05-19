@@ -23,11 +23,11 @@ else:
     raise SystemExit("Database unavailable")
 PY
 
-if [ "${ENVIRONMENT:-development}" != "development" ]; then
-  if [ "${RUN_MIGRATIONS_ON_STARTUP:-false}" = "true" ]; then
-    alembic upgrade head
-  fi
-  alembic current
+# Apply migrations by default so ORM columns (e.g. chat_sessions context) stay in sync with code.
+# Set SKIP_DB_MIGRATIONS=1 to skip (e.g. external migration control).
+if [ "${SKIP_DB_MIGRATIONS:-0}" != "1" ]; then
+  alembic upgrade head
 fi
+alembic current || true
 
 exec gunicorn -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${API_PORT:-8043} --timeout 3600 --graceful-timeout 300 app:app

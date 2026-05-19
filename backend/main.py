@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams
@@ -59,7 +59,36 @@ from models import (
     UserRole,
     UserTenant,
 )
-from retrieval.filters import extract_retrieval_directives, update_session_state
+from retrieval.max_results import effective_chat_max_results
+from retrieval.planner import RetrievalPlan, build_retrieval_plan
+from retrieval.post_filter import (
+    apply_score_threshold,
+    catalog_match_mode_instruction,
+    effective_score_threshold,
+    filters_for_bucket,
+)
+from retrieval.hybrid import hybrid_search
+from retrieval.tiered_search import execute_tiered_search
+from indexing.collections import DENSE_VECTOR_NAME, collection_uses_hybrid_vectors
+from retrieval.query_validator import validate_structured_query
+from retrieval.catalog_response import (
+    build_catalog_grounded_system_prompt,
+    build_price_relaxed_deterministic_answer,
+    format_products_for_prompt,
+    should_use_price_relaxed_template,
+)
+from retrieval.query_understanding import QueryUnderstandingResult, run_query_understanding
+from retrieval.catalog_cards import filter_results_for_catalog_cards, filter_results_for_response_sources
+from retrieval.session_query import (
+    is_session_reset_turn,
+    load_structured_query_from_session,
+    merge_session_query,
+    SESSION_RESET_MESSAGE,
+    structured_query_to_session_state,
+)
+from retrieval.structured_query import StructuredQuery, empty_structured_query
+from indexing.progress import normalize_reindex_progress
+from retrieval.profile import apply_retrieval_profile_to_tenant, retrieval_profile_summary
 from sources.config import (
     normalize_source_provider,
     normalize_source_static_urls_json as shared_normalize_source_static_urls_json,
@@ -170,10 +199,19 @@ class SearchResult(BaseModel):
     score: float
 
 
+class ChatProduct(BaseModel):
+    title: str
+    url: str
+    price: Optional[float] = None
+    brand: Optional[str] = None
+    image_url: Optional[str] = None
+    score: Optional[float] = None
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
-    max_results: int = 5
+    max_results: Optional[int] = Field(default=None, ge=1, le=100)
 
 
 class ChatResponse(BaseModel):
@@ -183,6 +221,9 @@ class ChatResponse(BaseModel):
     source: Optional[str] = None
     confidence: Optional[float] = None
     sources: Optional[List[SearchResult]] = None
+    products: Optional[List[ChatProduct]] = None
+    retrieval_tier: Optional[str] = None
+    match_mode: Optional[str] = None
 
 
 class PublicVisitorProfileRequest(BaseModel):
@@ -268,6 +309,8 @@ class TenantBrandingConfigRequest(BaseModel):
     privacy_policy_url: Optional[str] = None
     avatar_url: Optional[str] = None
     cors_allowed_origins: Optional[str] = None
+    chat_max_results: Optional[int] = Field(default=None, ge=1, le=50)
+    chat_max_results_catalog: Optional[int] = Field(default=None, ge=1, le=50)
 
 
 class BlockWordCategoryRequest(BaseModel):
@@ -673,18 +716,27 @@ def _provider_aware_source_config(tenant: Optional[Tenant]) -> Dict[str, Any]:
 
 
 def _get_chat_session_state(session: ChatSession) -> Dict[str, Any]:
+    filters_blob = session.active_filters_json or {}
+    structured = None
+    if isinstance(filters_blob, dict) and filters_blob.get("intent") and "free_text" in filters_blob:
+        structured = filters_blob
     return {
         "conversation_summary": session.conversation_summary or "",
-        "active_filters": session.active_filters_json or {},
+        "active_filters": filters_blob if not structured else {},
+        "structured_query": structured,
         "user_preferences": session.user_preferences_json or {},
         "last_result_context": session.last_result_context_json or [],
         "conversation_intent": session.conversation_intent or "general",
+        "recent_requests": [],
     }
 
 
 def _set_chat_session_state(session: ChatSession, state: Dict[str, Any]) -> None:
     session.conversation_summary = state.get("conversation_summary") or None
-    session.active_filters_json = state.get("active_filters") or {}
+    if state.get("structured_query") is not None:
+        session.active_filters_json = state.get("structured_query") or {}
+    else:
+        session.active_filters_json = state.get("active_filters") or {}
     session.user_preferences_json = state.get("user_preferences") or {}
     session.last_result_context_json = state.get("last_result_context") or []
     session.conversation_intent = state.get("conversation_intent") or None
@@ -709,17 +761,16 @@ def ensure_collection_for_tenant(tenant_id: str):
     if qdrant_client is None:
         return
     collection_name = _tenant_collection(tenant_id)
-    collection_names = [c.name for c in qdrant_client.get_collections().collections]
-    if collection_name not in collection_names:
-        qdrant_client.create_collection(
-            collection_name=collection_name,
-            vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
-        )
-        qdrant_client.create_payload_index(
-            collection_name=collection_name,
-            field_name="source_type",
-            field_schema=models.PayloadSchemaType.KEYWORD,
-        )
+    from indexing.collections import ensure_hybrid_collection, ensure_legacy_dense_collection
+    from indexing.sparse import sparse_indexing_enabled
+
+    if sparse_indexing_enabled():
+        if not ensure_hybrid_collection(qdrant_client, collection_name, recreate=False):
+            ensure_legacy_dense_collection(qdrant_client, collection_name)
+    else:
+        collection_names = [c.name for c in qdrant_client.get_collections().collections]
+        if collection_name not in collection_names:
+            ensure_legacy_dense_collection(qdrant_client, collection_name)
     index_fields = [
         ("source_provider", models.PayloadSchemaType.KEYWORD),
         ("content_kind", models.PayloadSchemaType.KEYWORD),
@@ -728,6 +779,7 @@ def ensure_collection_for_tenant(tenant_id: str):
         ("brand", models.PayloadSchemaType.KEYWORD),
         ("stock_status", models.PayloadSchemaType.KEYWORD),
         ("categories", models.PayloadSchemaType.KEYWORD),
+        ("price", models.PayloadSchemaType.FLOAT),
     ]
     for field_name, field_schema in index_fields:
         try:
@@ -761,6 +813,9 @@ async def search_qdrant(
     primary_source_type: Optional[str] = None,
     preferred_buckets: Optional[List[str]] = None,
     metadata_filters: Optional[Dict[str, Any]] = None,
+    content_kind: Optional[str] = None,
+    use_hybrid: bool = False,
+    lexical_text: Optional[str] = None,
 ) -> List[Any]:
     if qdrant_client is None:
         raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
@@ -769,18 +824,35 @@ async def search_qdrant(
 
     try:
         vector_store = VectorStoreAdapter(qdrant_client)
+        named_dense = collection_uses_hybrid_vectors(qdrant_client, collection_name)
         ordered_buckets = preferred_buckets or ["cms", "support", "catalog", "static"]
         all_results = []
         seen_ids = set()
         for bucket in ordered_buckets:
-            bucket_results = vector_store.search(
-                collection_name=collection_name,
-                query_vector=embedding,
-                limit=limit,
-                source_type=primary_st,
-                content_bucket=bucket,
-                metadata_filters=metadata_filters,
-            )
+            bucket_filters = filters_for_bucket(metadata_filters, bucket)
+            if use_hybrid and bucket == "catalog":
+                bucket_results = hybrid_search(
+                    qdrant_client,
+                    collection_name=collection_name,
+                    dense_vector=embedding,
+                    lexical_text=lexical_text or "",
+                    limit=limit,
+                    source_type=primary_st,
+                    content_bucket=bucket,
+                    content_kind=content_kind,
+                    metadata_filters=bucket_filters or None,
+                )
+            else:
+                bucket_results = vector_store.search(
+                    collection_name=collection_name,
+                    query_vector=embedding,
+                    limit=limit,
+                    source_type=primary_st,
+                    content_bucket=bucket,
+                    content_kind=content_kind if bucket == "catalog" else None,
+                    metadata_filters=bucket_filters or None,
+                    vector_name=DENSE_VECTOR_NAME if named_dense else None,
+                )
             for result in bucket_results:
                 result_id = result.payload.get("entity_id") or getattr(result, "id", None)
                 if result_id in seen_ids:
@@ -797,6 +869,7 @@ async def search_qdrant(
                 query_vector=embedding,
                 source_type="external",
                 limit=limit,
+                vector_name=DENSE_VECTOR_NAME if named_dense else None,
             )
             for result in external_results:
                 result_id = result.payload.get("entity_id") or getattr(result, "id", None)
@@ -830,8 +903,20 @@ def _tenant_chat_brand_label(tenant_row: Optional[Tenant]) -> str:
     return name or "this organisation"
 
 
-def _build_chat_system_prompt(tenant_row: Optional[Tenant]) -> str:
-    """Tenant-aware system prompt for final answer generation (replaces single-tenant MRN-only copy)."""
+def _tenant_retrieval_profile(tenant_row: Optional[Tenant]) -> Optional[dict[str, Any]]:
+    if not tenant_row or not tenant_row.retrieval_profile_json:
+        return None
+    profile = tenant_row.retrieval_profile_json
+    return profile if isinstance(profile, dict) else None
+
+
+def _build_chat_system_prompt(
+    tenant_row: Optional[Tenant],
+    *,
+    intent: str = "general",
+    match_mode: Optional[str] = None,
+) -> str:
+    """Tenant-aware system prompt for final answer generation."""
     brand = _tenant_chat_brand_label(tenant_row)
     site = (tenant_row.widget_website_url or "").strip() if tenant_row else ""
     site_clause = (
@@ -839,12 +924,96 @@ def _build_chat_system_prompt(tenant_row: Optional[Tenant]) -> str:
         if site
         else ""
     )
+    if intent == "catalog":
+        mode_note = catalog_match_mode_instruction(match_mode) if match_mode and match_mode != "exact" else ""
+        mode_clause = f" {mode_note}" if mode_note else ""
+        return (
+            f"You are a shopping assistant for {brand}. The context lists products from the catalog. "
+            "Recommend specific products from the context with name, price when available, and mention they can open the link. "
+            "Do not tell the user to search the website when matching products are already in the context."
+            f"{mode_clause}"
+            f"{site_clause} "
+            "Keep responses concise and under 300 characters."
+        )
     return (
         f"You are a helpful assistant for {brand}. Use only the provided context snippets to answer; "
         f"if the context does not contain the answer, say so briefly and suggest checking the website or contacting the team."
         f"{site_clause} "
         "Keep responses concise and under 250 characters when a short reply suffices."
     )
+
+
+def _build_chat_products(filtered_results: list[Any]) -> list[ChatProduct]:
+    from retrieval.catalog_cards import is_product_card_eligible
+
+    products: list[ChatProduct] = []
+    seen_entities: set[str] = set()
+    for result in filtered_results:
+        payload = result.payload or {}
+        if not is_product_card_eligible(payload):
+            continue
+        entity_id = str(payload.get("entity_id") or "")
+        if entity_id and entity_id in seen_entities:
+            continue
+        if entity_id:
+            seen_entities.add(entity_id)
+        title = (payload.get("title") or "").strip() or "Product"
+        url = (payload.get("url") or "").strip()
+        if not url:
+            continue
+        price_raw = payload.get("price")
+        price_val = float(price_raw) if price_raw not in (None, "") else None
+        products.append(
+            ChatProduct(
+                title=title,
+                url=url,
+                price=price_val,
+                brand=(payload.get("brand") or None),
+                image_url=payload.get("image_url"),
+                score=result.score,
+            )
+        )
+    return products
+
+
+async def _resolve_structured_query(
+    message: str,
+    session_state: Dict[str, Any],
+    profile: Optional[dict[str, Any]],
+) -> tuple[StructuredQuery, RetrievalPlan, QueryUnderstandingResult]:
+    session_query = load_structured_query_from_session(session_state)
+    conversation_summary = (session_state.get("conversation_summary") or "").strip() or None
+    understanding = await run_query_understanding(
+        message,
+        profile,
+        session_query,
+        llm_call=openai_adapter.create_structured_completion,
+        conversation_summary=conversation_summary,
+    )
+    validation_started = time.perf_counter()
+    turn_validated = validate_structured_query(understanding.query, profile=profile)
+    merged = merge_session_query(session_query, turn_validated, user_message=message)
+    merged = validate_structured_query(merged, profile=profile)
+    understanding.validation_ms = (time.perf_counter() - validation_started) * 1000.0
+    plan = build_retrieval_plan(merged, profile=profile, tenant_profile=profile)
+    return merged, plan, understanding
+
+
+def _catalog_skip_preprocess() -> bool:
+    return os.getenv("RETRIEVAL_CATALOG_SKIP_PREPROCESS", "true").strip().lower() in ("1", "true", "yes")
+
+
+def _search_limit_for_plan(max_hits: int, plan: RetrievalPlan) -> int:
+    multiplier = max(1, int(os.getenv("RETRIEVAL_SEARCH_LIMIT_MULTIPLIER", "5")))
+    cap = max(1, int(os.getenv("CHAT_MAX_RESULTS_ABSOLUTE_CEILING", "50")))
+    if (
+        plan.price_min is not None
+        or plan.price_max is not None
+        or plan.metadata_filters
+        or plan.category_hint_terms
+    ):
+        return min(max(max_hits * multiplier, max_hits), cap)
+    return max_hits
 
 
 async def preprocess_query(
@@ -910,44 +1079,49 @@ async def generate_answer(
     context_texts: List[str],
     *,
     system_prompt: Optional[str] = None,
+    catalog_products_json: Optional[str] = None,
 ) -> tuple[str, Dict[str, Any]]:
     try:
-        # Set a maximum total context length (in chars) to prevent errors
-        max_total_context = 14000  # Safe limit for gpt-3.5-turbo (16k tokens)
-
-        # Truncate each context text
-        truncated_texts = []
-        total_chars = 0
-        max_chars_per_source = max_total_context // max(len(context_texts), 1)
-
-        for text in context_texts:
-            # Limit each source text proportionally
-            truncated = truncate_text_for_context(text, max_chars_per_source)
-            truncated_texts.append(truncated)
-            total_chars += len(truncated)
-
-        # If still too large, reduce even more
-        if total_chars > max_total_context:
-            # Calculate reduction factor
-            reduction_factor = max_total_context / total_chars
-
-            truncated_texts = []
-            for text in context_texts:
-                # Adjust max chars based on reduction factor
-                adjusted_max = int(max_chars_per_source * reduction_factor)
-                truncated = truncate_text_for_context(text, max(adjusted_max, 500))
-                truncated_texts.append(truncated)
-
-        # Join the truncated texts
-        context = "\n\n---\n\n".join(truncated_texts)
-        logger.info(f"Total context length (chars): {len(context)}")
-
         sys_msg = system_prompt or _DEFAULT_GENERATE_ANSWER_SYSTEM_PROMPT
+        if catalog_products_json:
+            user_content = f"Question: {query}\n\nproducts:\n{catalog_products_json}"
+        else:
+            # Set a maximum total context length (in chars) to prevent errors
+            max_total_context = 14000  # Safe limit for gpt-3.5-turbo (16k tokens)
+
+            # Truncate each context text
+            truncated_texts = []
+            total_chars = 0
+            max_chars_per_source = max_total_context // max(len(context_texts), 1)
+
+            for text in context_texts:
+                # Limit each source text proportionally
+                truncated = truncate_text_for_context(text, max_chars_per_source)
+                truncated_texts.append(truncated)
+                total_chars += len(truncated)
+
+            # If still too large, reduce even more
+            if total_chars > max_total_context:
+                # Calculate reduction factor
+                reduction_factor = max_total_context / total_chars
+
+                truncated_texts = []
+                for text in context_texts:
+                    # Adjust max chars based on reduction factor
+                    adjusted_max = int(max_chars_per_source * reduction_factor)
+                    truncated = truncate_text_for_context(text, max(adjusted_max, 500))
+                    truncated_texts.append(truncated)
+
+            # Join the truncated texts
+            context = "\n\n---\n\n".join(truncated_texts)
+            logger.info(f"Total context length (chars): {len(context)}")
+            user_content = f"Question: {query}\n\nContext: {context}"
+
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": sys_msg},
-                {"role": "user", "content": f"Question: {query}\n\nContext: {context}"},
+                {"role": "user", "content": user_content},
             ],
         )
         
@@ -1050,6 +1224,7 @@ async def _run_chat_for_tenant(
     tenant_row = db.get(Tenant, uuid.UUID(tenant_id))
     vector_primary_source_type = tenant_row.widget_source_type if tenant_row else None
     url_fallback = ((tenant_row.widget_website_url or "").strip() or None) if tenant_row else None
+    max_hits = effective_chat_max_results(tenant=tenant_row, request_max=request.max_results)
 
     if request.session_id:
         session = db.get(ChatSession, uuid.UUID(request.session_id))
@@ -1078,7 +1253,78 @@ async def _run_chat_for_tenant(
         )
     )
     session_state = _get_chat_session_state(session)
-    directives = extract_retrieval_directives(request.message, session_state)
+    retrieval_profile = _tenant_retrieval_profile(tenant_row)
+
+    fuzzy_response = get_tenant_quick_reply(db, tenant_id, request.message, tenant_row)
+    if fuzzy_response:
+        session_query = load_structured_query_from_session(session_state)
+        session_state = structured_query_to_session_state(
+            structured_query=session_query,
+            user_message=request.message,
+            result_context=[],
+            recent_requests=list(session_state.get("recent_requests") or []),
+        )
+        _set_chat_session_state(session, session_state)
+        assistant_message = ChatMessage(
+            session_id=session.id,
+            tenant_id=session.tenant_id,
+            sender_type=SenderType.assistant,
+            content=fuzzy_response["response"],
+            model_name="fuzzy-match",
+            token_usage_json={"model_name": "fuzzy-match"},
+        )
+        db.add(assistant_message)
+        session.last_message_at = datetime.now(timezone.utc)
+        db.commit()
+        return ChatResponse(
+            response=fuzzy_response["response"],
+            session_id=str(session.id),
+            message_id=str(assistant_message.id),
+            source="fuzzy",
+            confidence=fuzzy_response.get("confidence", 1.0),
+            sources=[],
+            products=None,
+            retrieval_tier=None,
+            match_mode=None,
+        )
+
+    structured_query, retrieval_plan, query_understanding = await _resolve_structured_query(
+        request.message,
+        session_state,
+        retrieval_profile,
+    )
+
+    if is_session_reset_turn(request.message, structured_query):
+        cleared = empty_structured_query(intent="general")
+        session_state = structured_query_to_session_state(
+            structured_query=cleared,
+            user_message=request.message,
+            result_context=[],
+            recent_requests=[],
+        )
+        _set_chat_session_state(session, session_state)
+        assistant_message = ChatMessage(
+            session_id=session.id,
+            tenant_id=session.tenant_id,
+            sender_type=SenderType.assistant,
+            content=SESSION_RESET_MESSAGE,
+            model_name="session-reset",
+            token_usage_json={"model_name": "session-reset"},
+        )
+        db.add(assistant_message)
+        session.last_message_at = datetime.now(timezone.utc)
+        db.commit()
+        return ChatResponse(
+            response=SESSION_RESET_MESSAGE,
+            session_id=str(session.id),
+            message_id=str(assistant_message.id),
+            source="session_reset",
+            confidence=1.0,
+            sources=[],
+            products=None,
+            retrieval_tier=None,
+            match_mode=None,
+        )
 
     if is_public_chat:
         block_match = _find_block_word_match(db, tenant_id, request.message)
@@ -1120,78 +1366,184 @@ async def _run_chat_for_tenant(
                 "sources": [],
             }
 
-    fuzzy_response = get_tenant_quick_reply(db, tenant_id, request.message, tenant_row)
-    if fuzzy_response:
-        answer = fuzzy_response["response"]
-        sources = fuzzy_response.get("sources", [])
-        confidence = fuzzy_response.get("confidence", 1.0)
-        source_type = "fuzzy"
-        completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "fuzzy-match"}
+    products: list[ChatProduct] = []
+    retrieval_tier: Optional[str] = None
+    match_mode: Optional[str] = None
+    if qdrant_client is None:
+        raise HTTPException(status_code=503, detail="Qdrant unavailable")
+    query_for_embedding = retrieval_plan.dense_query_text or request.message
+    if structured_query.intent == "catalog" and _catalog_skip_preprocess():
+        enhanced_query = query_for_embedding
     else:
-        if qdrant_client is None:
-            raise HTTPException(status_code=503, detail="Qdrant unavailable")
         enhanced_query = await preprocess_query(
-            request.message,
+            query_for_embedding,
             tenant_brand_name=_tenant_chat_brand_label(tenant_row),
             tenant_website_url=((tenant_row.widget_website_url or "").strip() or None) if tenant_row else None,
         )
-        embedding, embedding_usage = await generate_embedding(enhanced_query)
-        _record_usage_event(
-            db,
-            tenant_id=session.tenant_id,
-            usage_type=UsageType.chat_embedding,
-            model_name=embedding_usage.get("model_name", ""),
-            prompt_tokens=embedding_usage.get("prompt_tokens", 0),
-            completion_tokens=embedding_usage.get("completion_tokens", 0),
-            total_tokens=embedding_usage.get("total_tokens", 0),
-            session_id=session.id,
-            meta_json={"source": "chat_query"},
-        )
-        search_results = await search_qdrant(
+    embedding, embedding_usage = await generate_embedding(enhanced_query)
+    search_limit = _search_limit_for_plan(max_hits, retrieval_plan)
+
+    async def _tier_search_fn(filters: dict[str, Any]) -> list[Any]:
+        return await search_qdrant(
             tenant_id,
             embedding,
-            request.max_results,
+            search_limit,
             primary_source_type=vector_primary_source_type,
-            preferred_buckets=directives.preferred_buckets,
-            metadata_filters=directives.filters,
+            preferred_buckets=retrieval_plan.preferred_buckets,
+            metadata_filters=filters or None,
+            content_kind=retrieval_plan.content_kind,
+            use_hybrid=retrieval_plan.use_retrieval_hybrid,
+            lexical_text=retrieval_plan.lexical_query_text,
         )
-        filtered_results = [result for result in search_results if result.score >= 0.3]
-        context_texts: list[str] = []
-        sources: list[SearchResult] = []
-        result_context_payloads: list[dict[str, Any]] = []
-        for result in filtered_results:
-            original_url = result.payload["url"]
-            validated_url = validate_and_fix_url(original_url, fallback_base=url_fallback) or get_base_url(original_url)
-            if not validated_url:
-                continue
-            context_texts.append(f"Source: {result.payload['source']}\nURL: {validated_url}\n{result.payload['content']}")
-            sources.append(
-                SearchResult(
-                    content=result.payload["content"][:200] + "...",
-                    source=result.payload["source"],
-                    url=validated_url,
-                    score=result.score,
-                )
+
+    tiered = await execute_tiered_search(
+        _tier_search_fn,
+        plan=retrieval_plan,
+        profile=retrieval_profile,
+        intent=structured_query.intent,
+    )
+    search_results = tiered.hits
+    retrieval_tier = tiered.tier
+    match_mode = tiered.match_mode
+    score_threshold = effective_score_threshold(
+        plan=retrieval_plan,
+        structured_query=structured_query,
+        tier=tiered.tier,
+    )
+    filtered_results = apply_score_threshold(
+        search_results,
+        threshold=score_threshold,
+        max_hits=max_hits,
+    )
+    card_results = (
+        filter_results_for_catalog_cards(filtered_results)
+        if structured_query.intent == "catalog"
+        else []
+    )
+    if structured_query.intent == "catalog" and card_results:
+        response_results = card_results
+    else:
+        response_results = filter_results_for_response_sources(
+            filtered_results,
+            structured_query.intent,
+        )
+    _record_usage_event(
+        db,
+        tenant_id=session.tenant_id,
+        usage_type=UsageType.chat_embedding,
+        model_name=embedding_usage.get("model_name", ""),
+        prompt_tokens=embedding_usage.get("prompt_tokens", 0),
+        completion_tokens=embedding_usage.get("completion_tokens", 0),
+        total_tokens=embedding_usage.get("total_tokens", 0),
+        session_id=session.id,
+        meta_json={
+            "source": "chat_query",
+            "intent": structured_query.intent,
+            "retrieval_tier": retrieval_tier,
+            "match_mode": match_mode,
+            "dropped_filters": tiered.dropped_filters,
+            "query_understanding_mode": query_understanding.mode,
+            "rules_prepass_ms": query_understanding.prepass_ms,
+            "llm_ms": query_understanding.llm_ms,
+            "validation_ms": query_understanding.validation_ms,
+            "llm_used": query_understanding.llm_used,
+            "llm_fallback": query_understanding.llm_fallback,
+            **(
+                {"structured_query": structured_query.to_dict()}
+                if os.getenv("RETRIEVAL_DEBUG_QUERY", "false").strip().lower() in ("1", "true", "yes")
+                else {}
+            ),
+        },
+    )
+    context_texts: list[str] = []
+    sources: list[SearchResult] = []
+    result_context_payloads: list[dict[str, Any]] = []
+    for result in response_results:
+        original_url = result.payload["url"]
+        validated_url = validate_and_fix_url(original_url, fallback_base=url_fallback) or get_base_url(original_url)
+        if not validated_url:
+            continue
+        context_texts.append(f"Source: {result.payload['source']}\nURL: {validated_url}\n{result.payload['content']}")
+        sources.append(
+            SearchResult(
+                content=result.payload["content"][:200] + "...",
+                source=result.payload["source"],
+                url=validated_url,
+                score=result.score,
             )
-            result_context_payloads.append(build_result_context_payload({**result.payload, "url": validated_url}))
-        if not sources:
-            answer = "I could not find high-confidence context for that request."
-            confidence = 0.0
-            completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "gpt-3.5-turbo"}
+        )
+        result_context_payloads.append(build_result_context_payload({**result.payload, "url": validated_url}))
+    price_relaxed = tiered.price_relaxed
+    if structured_query.intent == "catalog":
+        products = _build_chat_products(card_results)
+    if not sources:
+        answer = "I could not find high-confidence context for that request."
+        confidence = 0.0
+        completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "gpt-3.5-turbo"}
+    elif structured_query.intent == "catalog" and products:
+        brand = _tenant_chat_brand_label(tenant_row)
+        site = (tenant_row.widget_website_url or "").strip() if tenant_row else ""
+        site_clause = (
+            f" Official website (for grounding references only): {site}."
+            if site
+            else ""
+        )
+        price_min = retrieval_plan.price_min
+        price_max = retrieval_plan.price_max
+        if should_use_price_relaxed_template(
+            price_relaxed=price_relaxed,
+            products=products,
+            price_min=price_min,
+            price_max=price_max,
+        ):
+            template_answer = build_price_relaxed_deterministic_answer(
+                brand=brand,
+                products=products,
+                price_min=price_min,
+                price_max=price_max,
+            )
+            answer = template_answer or "I could not find products matching your price and filters."
+            completion_usage = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "model_name": "catalog-template",
+            }
         else:
+            catalog_prompt = build_catalog_grounded_system_prompt(
+                brand,
+                match_mode=match_mode,
+                retrieval_tier=retrieval_tier,
+                price_min=price_min,
+                price_max=price_max,
+                price_relaxed=price_relaxed,
+                site_clause=site_clause,
+            )
             answer, completion_usage = await generate_answer(
                 request.message,
                 context_texts,
-                system_prompt=_build_chat_system_prompt(tenant_row),
+                system_prompt=catalog_prompt,
+                catalog_products_json=format_products_for_prompt(products),
             )
-            confidence = filtered_results[0].score
-        source_type = "vector_search"
-        session_state = update_session_state(
-            session_state=session_state,
-            user_message=request.message,
-            directives=directives,
-            result_context=result_context_payloads,
+        confidence = response_results[0].score if response_results else 0.0
+    else:
+        answer, completion_usage = await generate_answer(
+            request.message,
+            context_texts,
+            system_prompt=_build_chat_system_prompt(
+                tenant_row,
+                intent=structured_query.intent,
+                match_mode=match_mode,
+            ),
         )
+        confidence = response_results[0].score if response_results else 0.0
+    source_type = "vector_search"
+    session_state = structured_query_to_session_state(
+        structured_query=structured_query,
+        user_message=request.message,
+        result_context=result_context_payloads,
+        recent_requests=list(session_state.get("recent_requests") or []),
+    )
 
     assistant_message = ChatMessage(
         session_id=session.id,
@@ -1204,17 +1556,16 @@ async def _run_chat_for_tenant(
             "prompt_tokens": completion_usage.get("prompt_tokens", 0),
             "total_tokens": completion_usage.get("total_tokens", 0),
             "model_name": completion_usage.get("model_name", "gpt-3.5-turbo"),
+            "retrieval_tier": retrieval_tier,
+            "match_mode": match_mode,
+            "query_understanding_mode": query_understanding.mode,
+            "rules_prepass_ms": query_understanding.prepass_ms,
+            "llm_ms": query_understanding.llm_ms,
+            "validation_ms": query_understanding.validation_ms,
         },
     )
     db.add(assistant_message)
     db.flush()
-    if fuzzy_response:
-        session_state = update_session_state(
-            session_state=session_state,
-            user_message=request.message,
-            directives=directives,
-            result_context=[],
-        )
     _set_chat_session_state(session, session_state)
     _record_usage_event(
         db,
@@ -1237,6 +1588,9 @@ async def _run_chat_for_tenant(
         source=source_type,
         confidence=confidence,
         sources=sources,
+        products=products or None,
+        retrieval_tier=retrieval_tier,
+        match_mode=match_mode,
     )
 
 @app.post("/api/auth/register", response_model=AuthResponse)
@@ -1368,6 +1722,8 @@ async def get_public_widget_config(
         "avatar_url": _normalize_avatar_url_for_widget(tenant.avatar_url),
         "privacy_policy_url": tenant.privacy_policy_url,
         "idle_rating_wait_seconds": tenant.idle_rating_wait_seconds,
+        "max_results_default": effective_chat_max_results(tenant=tenant, request_max=None),
+        "max_results_absolute_ceiling": max(1, int(os.getenv("CHAT_MAX_RESULTS_ABSOLUTE_CEILING", "50"))),
     }
 
 
@@ -2082,9 +2438,38 @@ async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_sessio
             "avatar_url": _normalize_avatar_url_for_widget(t.avatar_url),
             "cors_allowed_origins": t.cors_allowed_origins,
             "idle_rating_wait_seconds": t.idle_rating_wait_seconds,
+            "chat_max_results": t.chat_max_results,
+            "chat_max_results_catalog": t.chat_max_results_catalog,
+            "retrieval_profile_version": t.retrieval_profile_version,
+            "retrieval_profile_summary": retrieval_profile_summary(t.retrieval_profile_json),
         }
         for t in tenants
     ]
+
+
+@app.get("/api/admin/tenants/{tenant_id}/retrieval-profile")
+async def get_tenant_retrieval_profile(
+    tenant_id: str,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    if not tenant.retrieval_profile_json:
+        return {
+            "tenant_id": tenant_id,
+            "retrieval_profile_version": tenant.retrieval_profile_version,
+            "profile": None,
+            "summary": None,
+        }
+    return {
+        "tenant_id": tenant_id,
+        "retrieval_profile_version": tenant.retrieval_profile_version,
+        "profile": tenant.retrieval_profile_json,
+        "summary": retrieval_profile_summary(tenant.retrieval_profile_json),
+    }
 
 
 @app.post("/api/admin/tenants")
@@ -2283,6 +2668,12 @@ async def update_tenant_branding(
         tenant.avatar_url = new_val
     if payload.cors_allowed_origins is not None:
         tenant.cors_allowed_origins = payload.cors_allowed_origins.strip() or None
+
+    branding_updates = payload.model_dump(exclude_unset=True)
+    if "chat_max_results" in branding_updates:
+        tenant.chat_max_results = branding_updates["chat_max_results"]
+    if "chat_max_results_catalog" in branding_updates:
+        tenant.chat_max_results_catalog = branding_updates["chat_max_results_catalog"]
 
     db.add(
         AuditLog(
@@ -3314,10 +3705,31 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
         try:
             tenant = local_db.get(Tenant, uuid.UUID(target_tenant_id))
 
+            planned_total_records: int | None = None
+            last_progress_commit_at = 0.0
+            progress_commit_interval_s = max(
+                1.0,
+                float(os.getenv("REINDEX_PROGRESS_COMMIT_INTERVAL_SECONDS", "2")),
+            )
+
             def on_progress(progress: Dict[str, Any]):
-                local_job.meta_json = {"target_tenant_id": target_tenant_id, "progress": progress}
+                nonlocal planned_total_records, last_progress_commit_at
+                if planned_total_records is None and progress.get("planned_total_records"):
+                    planned_total_records = int(progress["planned_total_records"])
+                normalized = normalize_reindex_progress(
+                    progress,
+                    planned_total_records=planned_total_records,
+                    job_status="running",
+                )
+                local_job.meta_json = {
+                    "target_tenant_id": target_tenant_id,
+                    "progress": normalized,
+                }
                 local_db.add(local_job)
-                local_db.commit()
+                now = time.time()
+                if now - last_progress_commit_at >= progress_commit_interval_s:
+                    local_db.commit()
+                    last_progress_commit_at = now
 
             def on_embedding_usage(usage: Dict[str, Any]):
                 _record_usage_event(
@@ -3352,12 +3764,27 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
                 vector_payload_source_label=payload_label,
                 url_fallback_base=url_fb,
             )
-            await embedder.reindex_all_content()
+            reindex_result = await embedder.reindex_all_content(
+                source_job_id=str(job_id),
+                previous_profile_version=tenant.retrieval_profile_version if tenant else None,
+            )
+            local_db.commit()
+            profile = reindex_result.get("retrieval_profile")
+            if tenant and profile:
+                apply_retrieval_profile_to_tenant(tenant, profile)
+                local_db.add(tenant)
             local_job.status = "completed"
             local_job.finished_at = datetime.now(timezone.utc)
+            final_progress = normalize_reindex_progress(
+                embedder.get_indexing_status().get("progress", {}),
+                planned_total_records=planned_total_records,
+                job_status="completed",
+            )
             local_job.meta_json = {
                 "target_tenant_id": target_tenant_id,
-                "progress": embedder.get_indexing_status().get("progress", {}),
+                "progress": final_progress,
+                "retrieval_profile_version": profile.get("profile_version") if profile else None,
+                "retrieval_profile_facet_count": len((profile or {}).get("facets") or {}),
             }
             local_db.commit()
         except Exception as exc:
@@ -3405,23 +3832,32 @@ async def list_reindex_jobs(
     if tenant_ids:
         tenant_rows = db.execute(select(Tenant).where(Tenant.id.in_([uuid.UUID(tid) for tid in tenant_ids]))).scalars().all()
         tenant_name_by_id = {str(t.id): t.name for t in tenant_rows}
-    return [
-        {
-            "id": str(j.id),
-            "tenant_id": str(j.tenant_id) if j.tenant_id else None,
-            "tenant_name": tenant_name_by_id.get(
-                str(j.tenant_id) if j.tenant_id else (j.meta_json or {}).get("target_tenant_id")
-            ),
-            "status": j.status,
-            "scope": j.scope.value,
-            "created_at": j.created_at.isoformat() if j.created_at else None,
-            "started_at": j.started_at.isoformat() if j.started_at else None,
-            "finished_at": j.finished_at.isoformat() if j.finished_at else None,
-            "error": j.error,
-            "meta": j.meta_json or {},
-        }
-        for j in jobs
-    ]
+    items = []
+    for j in jobs:
+        meta = dict(j.meta_json or {})
+        raw_progress = (meta.get("progress") or {}) if isinstance(meta.get("progress"), dict) else {}
+        meta["progress"] = normalize_reindex_progress(
+            raw_progress,
+            planned_total_records=int(raw_progress.get("planned_total_records") or raw_progress.get("total_items") or 0) or None,
+            job_status=j.status,
+        )
+        items.append(
+            {
+                "id": str(j.id),
+                "tenant_id": str(j.tenant_id) if j.tenant_id else None,
+                "tenant_name": tenant_name_by_id.get(
+                    str(j.tenant_id) if j.tenant_id else (j.meta_json or {}).get("target_tenant_id")
+                ),
+                "status": j.status,
+                "scope": j.scope.value,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "started_at": j.started_at.isoformat() if j.started_at else None,
+                "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+                "error": j.error,
+                "meta": meta,
+            }
+        )
+    return items
 
 # Add global exception handler middleware
 @app.middleware("http")

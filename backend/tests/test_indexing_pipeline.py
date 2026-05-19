@@ -20,7 +20,8 @@ async def _fake_embedding(_text):
     return [0.1, 0.2, 0.3]
 
 
-def test_indexing_pipeline_clears_provider_once_and_upserts_records():
+def test_indexing_pipeline_clears_provider_once_and_upserts_records(monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_HYBRID_ENABLED", "false")
     client = FakeQdrantClient()
     pipeline = IndexingPipeline(
         qdrant_client=client,
@@ -41,7 +42,11 @@ def test_indexing_pipeline_clears_provider_once_and_upserts_records():
                 title="Widget",
                 body="Widget body",
                 canonical_url="https://shop.example.com/product/widget/",
-                metadata={"categories": ["Widgets"], "brand": "Acme"},
+                metadata={
+                    "categories": ["Widgets"],
+                    "brand": "Acme",
+                    "image_url": "https://shop.example.com/wp-content/uploads/widget.jpg",
+                },
             ),
             SourceRecord(
                 source_provider="woocommerce",
@@ -57,9 +62,13 @@ def test_indexing_pipeline_clears_provider_once_and_upserts_records():
     assert len(client.deleted) == 1
     assert len(client.upserts) == 2
     assert result["woocommerce"]["indexed_records"] == 2
+    payloads = [upsert["points"][0].payload for upsert in client.upserts]
+    product_payload = next(p for p in payloads if p.get("content_kind") == "product")
+    assert product_payload.get("image_url") == "https://shop.example.com/wp-content/uploads/widget.jpg"
 
 
-def test_indexing_pipeline_honors_deleted_records():
+def test_indexing_pipeline_honors_deleted_records(monkeypatch):
+    monkeypatch.setenv("RETRIEVAL_HYBRID_ENABLED", "false")
     client = FakeQdrantClient()
     pipeline = IndexingPipeline(
         qdrant_client=client,

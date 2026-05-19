@@ -1,0 +1,153 @@
+{
+  "tenant_id": "6d46d90e-696d-4831-810f-bf124071b554",
+  "category_strategy": {
+    "field": "categories",
+    "confidence_threshold": 0.75,
+    "gazetteer": [
+      {
+        "id": "basins",
+        "labels": [
+          "Basins"
+        ],
+        "normalized": [
+          "basins"
+        ],
+        "aliases": {
+          "basin": "basins",
+          "sink": "basins",
+          "sinks": "basins"
+        }
+      },
+      {
+        "id": "showers",
+        "labels": [
+          "Showers"
+        ],
+        "normalized": [
+          "showers"
+        ],
+        "aliases": {
+          "shower": "showers"
+        }
+      },
+      {
+        "id": "taps",
+        "labels": [
+          "Taps"
+        ],
+        "normalized": [
+          "taps"
+        ],
+        "aliases": {
+          "tap": "taps",
+          "faucet": "taps",
+          "faucets": "taps"
+        }
+      }
+    ]
+  },
+  "facets": {
+    "colour": {
+      "qdrant_path": "attributes.colour",
+      "indexed": true,
+      "within_facet_combine_default": "OR",
+      "coverage_pct": 62.03,
+      "product_count": 4961,
+      "sample_values": [
+        "Chrome",
+        "White",
+        "Matt Black",
+        "Ocean Blue Matt",
+        "Anthracite",
+        "Cashmere Pink Matt",
+        "RAL",
+        "Morning Sky Blue Matt",
+        "Brushed Brass",
+        "Brushed Nickel",
+        "Midnight Grey Matt",
+        "White Gloss",
+        "Khaki Matt",
+        "Black Matt",
+        "Black",
+        "Brushed Gold",
+        "Arctic Grey Matt",
+        "Gunmetal",
+        "Night Sky Blue Matt",
+        "Coral Green Matt"
+      ],
+      "value_aliases": {
+        "chromes": "Chrome",
+        "whites": "White",
+        "matt blacks": "Matt Black",
+        "ocean blue matts": "Ocean Blue Matt",
+        "anthracites": "Anthracite",
+        "cashmere pink matts": "Cashmere Pink Matt",
+        "rals": "RAL",
+        "morning sky blue matts": "Morning Sky Blue Matt",
+        "brushed nickels": "Brushed Nickel",
+        "midnight grey matts": "Midnight Grey Matt",
+        "khaki matts": "Khaki Matt",
+        "black matts": "Black Matt",
+        "blacks": "Black",
+        "brushed golds": "Brushed Gold",
+        "arctic grey matts": "Arctic Grey Matt",
+        "gunmetals": "Gunmetal",
+        "night sky blue matts": "Night Sky Blue Matt",
+        "coral green matts": "Coral Green Matt",
+        "gray": "grey",
+        "matte": "matt",
+        "chrome plated": "Chrome"
+      }
+    },
+    "finish": {
+      "qdrant_path": "attributes.finish",
+      "indexed": true,
+      "within_facet_combine_default": "OR",
+      "coverage_pct": 18.17,
+      "product_count": 1453,
+      "sample_values": [
+        "Matt",
+        "Glossy",
+        "Chrome",
+        "Brushed Gold",
+        "Matt Black"
+      ],
+      "value_aliases": {
+        "matts": "Matt",
+        "glossies": "Glossy",
+        "chromes": "Chrome",
+        "brushed golds": "Brushed Gold",
+        "matt blacks": "Matt Black",
+        "matte": "Matt",
+        "chrome plated": "Chrome"
+      }
+    },
+    "brand": {
+      "qdrant_path": "attributes.brand",
+      "indexed": true,
+      "within_facet_combine_default": "OR",
+      "coverage_pct": 67.64,
+      "product_count": 5410,
+      "sample_values": [
+        "SONAS",
+        "Image Showers",
+        "Hilltop Radiators",
+        "RT Large",
+        "Tavistock",
+        "RAK"
+      ],
+      "value_aliases": {
+        "sona": "SONAS",
+        "image shower": "Image Showers",
+        "hilltop radiator": "Hilltop Radiators",
+        "rt larges": "RT Large",
+        "tavistocks": "Tavistock",
+        "raks": "RAK"
+      }
+    }
+  },
+  "stats": {
+    "product_count": 7998,
+    "facet_count": 11
+  }
+}

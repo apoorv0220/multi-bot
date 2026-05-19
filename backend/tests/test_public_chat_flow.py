@@ -17,6 +17,25 @@ def test_public_visitor_profile_contract(monkeypatch):
     assert response.json() == {"profile_exists": True}
 
 
+def test_public_config_exposes_max_results_default(monkeypatch):
+    async def fake_get_widget_config(*, db, x_widget_key, origin, request_obj):
+        assert x_widget_key == "k1"
+        return {
+            "brand_name": "Shop",
+            "max_results_default": 20,
+            "max_results_absolute_ceiling": 50,
+        }
+
+    monkeypatch.setattr(public_service, "get_widget_config", fake_get_widget_config)
+    client = TestClient(app)
+    response = client.get(
+        "/api/public/config",
+        headers={"X-Widget-Key": "k1"},
+    )
+    assert response.status_code == 200
+    assert response.json()["max_results_default"] == 20
+
+
 def test_public_chat_contract(monkeypatch):
     async def fake_chat(*, request, db, x_widget_key, x_visitor_id, origin, request_obj=None):
         assert request.message == "hello"

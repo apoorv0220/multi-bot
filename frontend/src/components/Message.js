@@ -2,12 +2,15 @@ import React, { useMemo, useState } from 'react';
 import styled from 'styled-components';
 import ReactMarkdown from 'react-markdown';
 import { client } from '../api';
+import ProductCard from './ProductCard';
 
 const Message = ({
   type,
   text,
   timestamp,
   sources = [],
+  products = [],
+  matchMode = null,
   isError,
   source,
   messageId,
@@ -62,6 +65,20 @@ const Message = ({
         $userText={userBubbleTextColor}
         $botText={botBubbleTextColor}
       >
+        {type === 'bot' && !isError && matchMode && matchMode !== 'exact' && (
+          <MatchModeNote>
+            {matchMode === 'semantic_fallback'
+              ? 'Showing similar products — not every filter matched.'
+              : 'Showing close matches — not every filter matched exactly.'}
+          </MatchModeNote>
+        )}
+        {type === 'bot' && !isError && products?.length > 0 && (
+          <ProductList>
+            {products.map((product, index) => (
+              <ProductCard key={product.url || index} product={product} />
+            ))}
+          </ProductList>
+        )}
         <ReactMarkdown>{text}</ReactMarkdown>
         {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
           <>
@@ -122,6 +139,22 @@ const MessageContent = styled.div`
     margin-bottom: 8px;
     padding-left: 20px;
   }
+`;
+
+const MatchModeNote = styled.div`
+  font-size: 11px;
+  opacity: 0.85;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.05);
+`;
+
+const ProductList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
 `;
 
 const ReadMoreButton = styled.a`

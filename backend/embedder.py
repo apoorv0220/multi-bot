@@ -35,6 +35,8 @@ try:
     from .wordpress_fetcher import WordPressFetcher
     from .scraper import scrape_urls
     from .indexing.pipeline import IndexingPipeline
+    from .indexing.progress import normalize_reindex_progress
+    from .retrieval.profile import build_retrieval_profile
     from .sources.base import SourceContext, SyncBatch
     from .sources.config import normalize_source_provider, resolve_source_plan
     from .sources.static_adapter import StaticUrlAdapter
@@ -45,6 +47,8 @@ except ImportError:
     from wordpress_fetcher import WordPressFetcher
     from scraper import scrape_urls
     from indexing.pipeline import IndexingPipeline
+    from indexing.progress import normalize_reindex_progress
+    from retrieval.profile import build_retrieval_profile
     from sources.base import SourceContext, SyncBatch
     from sources.config import normalize_source_provider, resolve_source_plan
     from sources.static_adapter import StaticUrlAdapter
@@ -185,31 +189,23 @@ class Embedder:
             collection_names = [collection.name for collection in collections]
             
             if self.collection_name not in collection_names:
+                from indexing.collections import ensure_hybrid_collection, ensure_legacy_dense_collection
+                from indexing.sparse import sparse_indexing_enabled
+
                 logger.info(f"Creating collection '{self.collection_name}'")
-                self.qdrant_client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=VectorParams(
-                        size=self.embedding_dim,
-                        distance=Distance.COSINE
+                if sparse_indexing_enabled():
+                    ensure_hybrid_collection(
+                        self.qdrant_client,
+                        self.collection_name,
+                        dense_size=self.embedding_dim,
+                        recreate=False,
                     )
-                )
-                
-                # Create index for source_type field
-                self.qdrant_client.create_payload_index(
-                    collection_name=self.collection_name,
-                    field_name="source_type",
-                    field_schema=models.PayloadSchemaType.KEYWORD
-                )
-                for field_name in ("source_provider", "content_kind", "content_bucket", "entity_id", "brand", "stock_status", "categories"):
-                    try:
-                        self.qdrant_client.create_payload_index(
-                            collection_name=self.collection_name,
-                            field_name=field_name,
-                            field_schema=models.PayloadSchemaType.KEYWORD,
-                        )
-                    except Exception:
-                        pass
-                
+                else:
+                    ensure_legacy_dense_collection(
+                        self.qdrant_client,
+                        self.collection_name,
+                        dense_size=self.embedding_dim,
+                    )
                 logger.info(f"Collection '{self.collection_name}' created successfully")
             else:
                 logger.info(f"Collection '{self.collection_name}' already exists")
@@ -707,30 +703,41 @@ class Embedder:
         logger.info(f"Successfully embedded {len(points)} static URLs")
         return {"status": "completed", "total_urls": len(static_urls), "successful_embeddings": len(points)}
     
-    async def reindex_all_content(self):
+    async def reindex_all_content(
+        self,
+        *,
+        source_job_id: str | None = None,
+        previous_profile_version: int | None = None,
+    ):
         """Reindex all content with chunked processing to prevent timeouts"""
         logger.info("Starting chunked full content reindexing...")
         
         try:
             batches = await self._build_source_batches()
+            tenant_id = self.collection_name.replace("tenant_", "").replace("_docs", "")
+            catalog_records = [
+                record
+                for batch in batches
+                for record in batch.records
+                if record.content_kind in ("product", "category") and not record.deleted
+            ]
+
+            planned_total_records = sum(len(batch.records) for batch in batches)
+
             def on_pipeline_progress(progress: Dict[str, Any]):
-                provider_stats = progress.get("providers", {})
-                total = sum(int(stats.get("total_records", 0)) for stats in provider_stats.values())
-                processed = sum(
-                    int(stats.get("indexed_records", 0))
-                    + int(stats.get("deleted_records", 0))
-                    + int(stats.get("failed_records", 0))
-                    for stats in provider_stats.values()
+                normalized = normalize_reindex_progress(
+                    progress,
+                    planned_total_records=planned_total_records,
                 )
-                failed = sum(int(stats.get("failed_records", 0)) for stats in provider_stats.values())
                 if self.current_progress:
-                    self.current_progress.total_items = total
-                    self.current_progress.processed_items = processed
-                    self.current_progress.failed_items = failed
+                    self.current_progress.total_items = normalized["total_items"]
+                    self.current_progress.processed_items = normalized["processed_items"]
+                    self.current_progress.failed_items = normalized["failed_items"]
                     self.current_progress.last_update_time = time.time()
                     self.save_progress(self.current_progress)
                 if self.progress_callback:
-                    self.progress_callback(progress)
+                    self.progress_callback(normalized)
+
             pipeline = IndexingPipeline(
                 qdrant_client=self.qdrant_client,
                 collection_name=self.collection_name,
@@ -738,8 +745,16 @@ class Embedder:
                 source_label=self.vector_payload_source_label,
                 source_type=self.vector_payload_source_type,
                 progress_callback=on_pipeline_progress,
+                embedding_concurrency=self.batch_size,
+                record_concurrency=max(1, int(os.getenv("INDEXING_RECORD_CONCURRENCY", "5"))),
             )
             pipeline_result = await pipeline.process_batches(batches)
+            retrieval_profile = build_retrieval_profile(
+                catalog_records,
+                tenant_id=tenant_id,
+                source_job_id=source_job_id,
+                previous_version=previous_profile_version,
+            )
             if self.current_progress:
                 self.current_progress.status = "completed"
                 self.current_progress.last_update_time = time.time()
@@ -752,6 +767,7 @@ class Embedder:
             return {
                 "status": "completed",
                 "pipeline_result": pipeline_result,
+                "retrieval_profile": retrieval_profile,
                 "source_mode": self.source_mode,
                 "source_provider": self.source_provider,
                 "source_plan": {
@@ -812,9 +828,9 @@ class Embedder:
             batches.extend(await WooCommerceCatalogAdapter().discover(ctx))
         if self.source_plan.include_static_urls:
             batches.extend(await StaticUrlAdapter().discover(ctx))
-        total_items = sum(len(batch.records) for batch in batches)
+        planned_total_records = sum(len(batch.records) for batch in batches)
         self.current_progress = ProcessingProgress(
-            total_items=total_items,
+            total_items=planned_total_records,
             processed_items=0,
             failed_items=0,
             current_batch=0,

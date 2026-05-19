@@ -103,8 +103,20 @@ def chunk_record_text(record: SourceRecord, *, max_chars: int = 2200) -> list[di
 def _normalized_metadata(record: SourceRecord) -> dict[str, Any]:
     metadata = dict(record.metadata or {})
     metadata["content_bucket"] = metadata.get("content_bucket") or infer_content_bucket(record)
-    metadata.setdefault("categories", [])
-    metadata.setdefault("attributes", {})
+    raw_categories = metadata.get("categories") or []
+    metadata["categories"] = [str(c).strip().lower() for c in raw_categories if str(c).strip()]
+    attrs = metadata.get("attributes") or {}
+    if isinstance(attrs, dict):
+        normalized_attrs: dict[str, Any] = {}
+        for key, raw_value in attrs.items():
+            facet_key = str(key).strip().lower()
+            if isinstance(raw_value, list):
+                normalized_attrs[facet_key] = [str(v).strip().lower() for v in raw_value if str(v).strip()]
+            elif raw_value not in (None, "", []):
+                normalized_attrs[facet_key] = str(raw_value).strip().lower()
+        metadata["attributes"] = normalized_attrs
+    else:
+        metadata["attributes"] = {}
     return metadata
 
 
@@ -164,7 +176,7 @@ def default_bucket_priority(intent: str) -> list[str]:
     if intent == "catalog":
         return ["catalog", "support", "cms", "static"]
     if intent == "support":
-        return ["support", "cms", "catalog", "static"]
+        return ["support", "cms", "static"]
     return ["cms", "support", "catalog", "static"]
 
 

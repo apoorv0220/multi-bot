@@ -3,7 +3,7 @@ import asyncio
 from sources.base import SourceContext
 from sources.config import normalize_source_provider, parse_source_dsn, resolve_source_plan
 from sources.static_adapter import StaticUrlAdapter
-from sources.woocommerce_adapter import WooCommerceCatalogAdapter
+from sources.woocommerce_adapter import WooCommerceCatalogAdapter, resolve_product_image_url
 
 
 def test_normalize_source_provider_prefers_explicit_provider():
@@ -54,6 +54,28 @@ def test_static_url_adapter_normalizes_and_dedupes(monkeypatch):
     assert batches[0].records[0].content_kind == "support_page"
 
 
+def test_resolve_product_image_url_prefers_attached_file_over_guid():
+    url = resolve_product_image_url(
+        "https://shop.example.com",
+        image_attached_file="2024/01/basin.jpg",
+        image_guid="https://shop.example.com/wp-content/uploads/stale.jpg",
+    )
+    assert url == "https://shop.example.com/wp-content/uploads/2024/01/basin.jpg"
+
+
+def test_resolve_product_image_url_falls_back_to_guid():
+    url = resolve_product_image_url(
+        "https://shop.example.com/",
+        image_attached_file=None,
+        image_guid="https://cdn.example.com/media/basin.jpg",
+    )
+    assert url == "https://cdn.example.com/media/basin.jpg"
+
+
+def test_resolve_product_image_url_returns_none_when_missing():
+    assert resolve_product_image_url("https://shop.example.com", image_attached_file="", image_guid="") is None
+
+
 def test_woocommerce_adapter_emits_products_and_categories(monkeypatch):
     monkeypatch.setattr("sources.woocommerce_adapter.WordPressFetcher._get_site_url", lambda self: "https://shop.example.com/")
     monkeypatch.setattr("sources.woocommerce_adapter.WordPressFetcher._clean_html_content", lambda self, text: text.replace("<p>", "").replace("</p>", ""))
@@ -74,6 +96,8 @@ def test_woocommerce_adapter_emits_products_and_categories(monkeypatch):
                 "stock_status": "instock",
                 "categories": "Widgets|||Featured",
                 "attributes": "brand:Acme|||color:Black",
+                "image_attached_file": "2024/05/widget.jpg",
+                "image_guid": "https://shop.example.com/wp-content/uploads/2024/05/widget-old.jpg",
             }
         ],
     )
@@ -99,4 +123,5 @@ def test_woocommerce_adapter_emits_products_and_categories(monkeypatch):
     assert product.canonical_url == "https://shop.example.com/product/widget/"
     assert product.metadata["brand"] == "Acme"
     assert product.metadata["categories"] == ["Widgets", "Featured"]
+    assert product.metadata["image_url"] == "https://shop.example.com/wp-content/uploads/2024/05/widget.jpg"
     assert category.canonical_url == "https://shop.example.com/product-category/widgets/"

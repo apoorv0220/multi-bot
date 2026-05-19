@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -81,6 +81,10 @@ class Tenant(Base):
         default="Monthly message limit reached. Please try again next month.",
         nullable=False,
     )
+    chat_max_results: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    chat_max_results_catalog: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retrieval_profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    retrieval_profile_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 

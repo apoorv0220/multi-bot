@@ -48,6 +48,10 @@ async def upload_tenant_avatar(*, tenant_id, file, user_ctx, db):
     return await legacy_main.upload_tenant_avatar(tenant_id=tenant_id, file=file, user_ctx=user_ctx, db=db)
 
 
+async def get_tenant_retrieval_profile(*, tenant_id, user_ctx, db):
+    return await legacy_main.get_tenant_retrieval_profile(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
+
+
 async def get_tenant_security_settings(*, tenant_id, user_ctx, db):
     return await legacy_main.get_tenant_security_settings(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
