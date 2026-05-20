@@ -42,6 +42,7 @@ try:
     from .sources.static_adapter import StaticUrlAdapter
     from .sources.wordpress_adapter import WordPressContentAdapter
     from .sources.woocommerce_adapter import WooCommerceCatalogAdapter
+    from .sources.magento_adapter import MagentoCatalogAdapter
 except ImportError:
     # Fallback for direct module execution
     from wordpress_fetcher import WordPressFetcher
@@ -54,6 +55,7 @@ except ImportError:
     from sources.static_adapter import StaticUrlAdapter
     from sources.wordpress_adapter import WordPressContentAdapter
     from sources.woocommerce_adapter import WooCommerceCatalogAdapter
+    from sources.magento_adapter import MagentoCatalogAdapter
 
 # Load environment variables
 load_dotenv()
@@ -776,6 +778,7 @@ class Embedder:
                     "include_wordpress_content": self.source_plan.include_wordpress_content,
                     "include_legacy_external": self.source_plan.include_legacy_external,
                     "include_woocommerce_catalog": self.source_plan.include_woocommerce_catalog,
+                    "include_magento_catalog": self.source_plan.include_magento_catalog,
                     "include_static_urls": self.source_plan.include_static_urls,
                 },
                 "message": "All content reindexed successfully"
@@ -816,6 +819,7 @@ class Embedder:
                 "include_wordpress_content": self.source_plan.include_wordpress_content,
                 "include_legacy_external": self.source_plan.include_legacy_external,
                 "include_woocommerce_catalog": self.source_plan.include_woocommerce_catalog,
+                "include_magento_catalog": self.source_plan.include_magento_catalog,
                 "include_static_urls": self.source_plan.include_static_urls,
                 "url_fallback_base": self.url_fallback_base,
             },
@@ -826,6 +830,8 @@ class Embedder:
             batches.extend(await WordPressContentAdapter().discover(ctx))
         if self.source_plan.include_woocommerce_catalog:
             batches.extend(await WooCommerceCatalogAdapter().discover(ctx))
+        if self.source_plan.include_magento_catalog:
+            batches.extend(await MagentoCatalogAdapter().discover(ctx))
         if self.source_plan.include_static_urls:
             batches.extend(await StaticUrlAdapter().discover(ctx))
         planned_total_records = sum(len(batch.records) for batch in batches)

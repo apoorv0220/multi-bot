@@ -43,7 +43,7 @@ def normalize_source_provider(
     source_static_urls_json: str | None = None,
 ) -> SourceProvider:
     raw = (source_db_type or "").strip().lower()
-    if raw in {"wordpress", "woocommerce", "static"}:
+    if raw in {"wordpress", "woocommerce", "magento", "static"}:
         return raw  # type: ignore[return-value]
     mode = (source_mode or "").strip().lower()
     if mode == "static" and not (source_db_url or "").strip():
@@ -55,7 +55,7 @@ def normalize_source_provider(
 
 def normalize_source_mode(source_mode: str | None) -> str:
     raw = (source_mode or "").strip().lower()
-    if raw in {"wordpress", "static", "mixed"}:
+    if raw in {"wordpress", "static", "mixed", "magento"}:
         return raw
     return "wordpress"
 
@@ -148,6 +148,7 @@ def resolve_source_plan(source_config: dict[str, Any]) -> SourcePlan:
             include_wordpress_content=False,
             include_legacy_external=False,
             include_woocommerce_catalog=False,
+            include_magento_catalog=False,
             include_static_urls=True,
         )
     if provider == "woocommerce":
@@ -157,6 +158,17 @@ def resolve_source_plan(source_config: dict[str, Any]) -> SourcePlan:
             include_wordpress_content=mode in {"wordpress", "mixed"},
             include_legacy_external=False,
             include_woocommerce_catalog=mode in {"wordpress", "mixed"},
+            include_magento_catalog=False,
+            include_static_urls=mode in {"static", "mixed"},
+        )
+    if provider == "magento":
+        return SourcePlan(
+            provider="magento",
+            source_mode=mode,
+            include_wordpress_content=False,
+            include_legacy_external=False,
+            include_woocommerce_catalog=False,
+            include_magento_catalog=mode in {"magento", "wordpress", "mixed"},
             include_static_urls=mode in {"static", "mixed"},
         )
     return SourcePlan(
@@ -165,6 +177,7 @@ def resolve_source_plan(source_config: dict[str, Any]) -> SourcePlan:
         include_wordpress_content=mode in {"wordpress", "mixed"},
         include_legacy_external=mode == "wordpress",
         include_woocommerce_catalog=False,
+        include_magento_catalog=False,
         include_static_urls=mode in {"static", "mixed"},
     )
 

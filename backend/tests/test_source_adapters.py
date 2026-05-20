@@ -8,7 +8,23 @@ from sources.woocommerce_adapter import WooCommerceCatalogAdapter, resolve_produ
 
 def test_normalize_source_provider_prefers_explicit_provider():
     assert normalize_source_provider("woocommerce", source_mode="wordpress", source_db_url="mysql://db") == "woocommerce"
+    assert normalize_source_provider("magento", source_mode="magento", source_db_url="mysql://db") == "magento"
     assert normalize_source_provider("static", source_static_urls_json='["https://example.com"]') == "static"
+
+
+def test_resolve_source_plan_for_magento_mixed():
+    plan = resolve_source_plan(
+        {
+            "source_db_type": "magento",
+            "source_mode": "mixed",
+            "source_db_url": "mysql://db",
+            "source_static_urls_json": '["https://example.com/help"]',
+        }
+    )
+    assert plan.provider == "magento"
+    assert plan.include_magento_catalog is True
+    assert plan.include_static_urls is True
+    assert plan.include_woocommerce_catalog is False
 
 
 def test_resolve_source_plan_for_woocommerce_mixed():

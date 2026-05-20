@@ -37,6 +37,54 @@ import {
 
 const DASHBOARD_SELECTED_TENANT_KEY = "admin_dashboard_selected_tenant_id";
 
+/** Valid source_mode values per source_db_type (must match backend resolve_source_plan). */
+const SOURCE_MODE_BY_DB_TYPE = {
+  wordpress: [
+    { value: "wordpress", label: "WordPress only" },
+    { value: "static", label: "Static URLs only" },
+    { value: "mixed", label: "WordPress + Static URLs" },
+  ],
+  woocommerce: [
+    { value: "wordpress", label: "Catalog + WordPress content" },
+    { value: "static", label: "Static URLs only" },
+    { value: "mixed", label: "Catalog + Static URLs" },
+  ],
+  magento: [
+    { value: "magento", label: "Magento catalog only" },
+    { value: "mixed", label: "Magento + Static URLs" },
+    { value: "static", label: "Static URLs only" },
+  ],
+  static: [{ value: "static", label: "Static URLs only" }],
+};
+
+const normalizeSourceModeForDbType = (dbType, mode) => {
+  const options = SOURCE_MODE_BY_DB_TYPE[dbType] || SOURCE_MODE_BY_DB_TYPE.wordpress;
+  const allowed = options.map((o) => o.value);
+  const raw = (mode || "").trim().toLowerCase();
+  if (allowed.includes(raw)) return raw;
+  return allowed[0];
+};
+
+const defaultTablePrefixForDbType = (dbType) => {
+  if (dbType === "magento" || dbType === "static") return "";
+  return "wp_";
+};
+
+const defaultUrlTableForDbType = (dbType) => {
+  if (dbType === "magento") return "1";
+  if (dbType === "static") return "";
+  return "wp_custom_urls";
+};
+
+const applySourceDefaultsForDbType = (dbType, { tablePrefix, urlTable }) => {
+  const nextPrefix = tablePrefix ?? defaultTablePrefixForDbType(dbType);
+  const nextUrlTable = urlTable ?? defaultUrlTableForDbType(dbType);
+  return {
+    tablePrefix: dbType === "magento" && (nextPrefix === "wp_" || nextPrefix === "wp") ? "" : nextPrefix,
+    urlTable: dbType === "magento" && nextUrlTable === "wp_custom_urls" ? "1" : nextUrlTable,
+  };
+};
+
 const adminApiBase = () => String(client.defaults.baseURL || "").replace(/\/+$/, "");
 
 /** Normalized reindex progress from API (planned total vs processed). */
@@ -108,7 +156,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   );
   const [sourceDbUrl, setSourceDbUrl] = useState("");
   const [sourceDbType, setSourceDbType] = useState("wordpress");
-  const [sourceTablePrefix, setSourceTablePrefix] = useState("wp_");
+  const [sourceTablePrefix, setSourceTablePrefix] = useState("");
   const [sourceUrlTable, setSourceUrlTable] = useState("wp_custom_urls");
   const [sourceMode, setSourceMode] = useState("wordpress");
   const [sourceStaticUrlsJson, setSourceStaticUrlsJson] = useState("");
@@ -163,6 +211,9 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
   const [newQrPriority, setNewQrPriority] = useState("0");
   const [newQrThreshold, setNewQrThreshold] = useState("");
   const [quickReplyDrafts, setQuickReplyDrafts] = useState({});
+  const [retrievalProfile, setRetrievalProfile] = useState(null);
+  const [retrievalProfileLoading, setRetrievalProfileLoading] = useState(false);
+  const [expandedFacetAliases, setExpandedFacetAliases] = useState({});
   const [success, setSuccess] = useState("");
   const sessionRequestRef = useRef(0);
   const countriesLoadedRef = useRef(false);
@@ -257,6 +308,21 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       setQuickReplies(data || []);
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed loading quick replies");
+    }
+  }, [effectiveTenantId]);
+
+  const loadRetrievalProfile = useCallback(async () => {
+    if (!effectiveTenantId) return;
+    setRetrievalProfileLoading(true);
+    try {
+      const { data } = await client.get(`/api/admin/tenants/${effectiveTenantId}/retrieval-profile`);
+      setRetrievalProfile(data);
+      setError("");
+    } catch (err) {
+      setRetrievalProfile(null);
+      setError(err?.response?.data?.detail || "Failed loading retrieval profile");
+    } finally {
+      setRetrievalProfileLoading(false);
     }
   }, [effectiveTenantId]);
 
@@ -376,9 +442,14 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     if (!t) return;
     setSourceDbUrl(t.source_db_url || "");
     setSourceDbType(t.source_db_type || "wordpress");
-    setSourceTablePrefix(t.source_table_prefix || "wp_");
-    setSourceUrlTable(t.source_url_table || "wp_custom_urls");
-    setSourceMode(t.source_mode || "wordpress");
+    const dbType = t.source_db_type || "wordpress";
+    const prefixDefaults = applySourceDefaultsForDbType(dbType, {
+      tablePrefix: t.source_table_prefix != null ? t.source_table_prefix : undefined,
+      urlTable: t.source_url_table != null ? t.source_url_table : undefined,
+    });
+    setSourceTablePrefix(prefixDefaults.tablePrefix);
+    setSourceUrlTable(prefixDefaults.urlTable);
+    setSourceMode(normalizeSourceModeForDbType(t.source_db_type || "wordpress", t.source_mode || "wordpress"));
     setSourceStaticUrlsJson(t.source_static_urls_json || "");
     setSourceDomainAliases(t.source_domain_aliases || "");
     setSourceCanonicalBaseUrl(t.source_canonical_base_url || "");
@@ -453,7 +524,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       navigate("/admin/dashboard/users/admins", { replace: true });
       return;
     }
-    if (section === "settings" && !["security", "branding", "moderation", "db-settings"].includes(settingsSubsection)) {
+    if (section === "settings" && !["security", "branding", "moderation", "db-settings", "retrieval-profile"].includes(settingsSubsection)) {
       navigate("/admin/dashboard/settings/security", { replace: true });
     }
   }, [navigate, section, usersSubsection, settingsSubsection]);
@@ -486,6 +557,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       } else if (settingsSubsection === "moderation") {
         loadBlockWordSettings();
         loadQuickReplies();
+      } else if (settingsSubsection === "retrieval-profile") {
+        loadRetrievalProfile();
       }
     }
   }, [
@@ -505,6 +578,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     loadSecuritySettings,
     loadBlockWordSettings,
     loadQuickReplies,
+    loadRetrievalProfile,
   ]);
 
   const loadSession = async (id) => {
@@ -648,8 +722,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
       await client.patch(`/api/admin/tenants/${sourceTenantId}/source-config`, {
         source_db_url: sourceDbUrl || null,
         source_db_type: sourceDbType || null,
-        source_table_prefix: sourceTablePrefix || null,
-        source_url_table: sourceUrlTable || null,
+        source_table_prefix: sourceTablePrefix.trim(),
+        source_url_table: sourceUrlTable.trim() || null,
         source_mode: sourceMode || null,
         source_static_urls_json: sourceStaticUrlsJson || null,
         source_domain_aliases: sourceDomainAliases || null,
@@ -991,6 +1065,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                     <Button size="small" variant={settingsSubsection === "branding" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("branding")}>Branding</Button>
                     <Button size="small" variant={settingsSubsection === "moderation" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("moderation")}>Automated Replies</Button>
                     <Button size="small" variant={settingsSubsection === "db-settings" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("db-settings")}>DB Settings</Button>
+                    <Button size="small" variant={settingsSubsection === "retrieval-profile" ? "contained" : "text"} onClick={() => navigateSettingsSubsection("retrieval-profile")}>Retrieval profile</Button>
                   </Stack>
                 )}
               </Stack>
@@ -1802,39 +1877,57 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 fullWidth
               />
               <FormControl fullWidth>
-                <InputLabel>Source DB Type</InputLabel>
+                <InputLabel id="source-db-type-label">Source DB Type</InputLabel>
                 <Select
+                  labelId="source-db-type-label"
                   label="Source DB Type"
                   value={sourceDbType}
-                  onChange={(e) => setSourceDbType(e.target.value)}
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    setSourceDbType(nextType);
+                    setSourceMode((prev) => normalizeSourceModeForDbType(nextType, prev));
+                    const nextDefaults = applySourceDefaultsForDbType(nextType, {
+                      tablePrefix: sourceTablePrefix,
+                      urlTable: sourceUrlTable,
+                    });
+                    setSourceTablePrefix(nextDefaults.tablePrefix);
+                    setSourceUrlTable(nextDefaults.urlTable);
+                  }}
                 >
                   <MenuItem value="wordpress">WordPress</MenuItem>
                   <MenuItem value="woocommerce">WooCommerce</MenuItem>
+                  <MenuItem value="magento">Magento</MenuItem>
                   <MenuItem value="static">Static-only</MenuItem>
                 </Select>
               </FormControl>
               <FormControl fullWidth>
-                <InputLabel>Source Mode</InputLabel>
+                <InputLabel id="source-mode-label">Source Mode</InputLabel>
                 <Select
+                  labelId="source-mode-label"
                   label="Source Mode"
-                  value={sourceMode}
+                  value={normalizeSourceModeForDbType(sourceDbType, sourceMode)}
                   onChange={(e) => setSourceMode(e.target.value)}
+                  disabled={sourceDbType === "static"}
                 >
-                  <MenuItem value="wordpress">WordPress only</MenuItem>
-                  <MenuItem value="static">Static URLs only</MenuItem>
-                  <MenuItem value="mixed">WordPress + Static URLs</MenuItem>
+                  {(SOURCE_MODE_BY_DB_TYPE[sourceDbType] || SOURCE_MODE_BY_DB_TYPE.wordpress).map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
                 </Select>
               </FormControl>
               <TextField
-                label="Table Prefix"
+                label={sourceDbType === "magento" ? "Table prefix (optional)" : "Table Prefix"}
                 value={sourceTablePrefix}
                 onChange={(e) => setSourceTablePrefix(e.target.value)}
+                helperText={sourceDbType === "magento" ? "Leave empty for standard Magento 2 table names" : undefined}
                 fullWidth
               />
               <TextField
-                label="URL Table"
+                label={sourceDbType === "magento" ? "Magento store ID" : "URL Table"}
                 value={sourceUrlTable}
                 onChange={(e) => setSourceUrlTable(e.target.value)}
+                helperText={sourceDbType === "magento" ? "Default store view ID (usually 1)" : undefined}
                 fullWidth
               />
               <TextField
@@ -1869,6 +1962,144 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                   <Chip variant="outlined" label={`Tenant ID: ${selectedTenant.id}`} />
                 )}
               </Stack>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
+
+      {section === "settings" && settingsSubsection === "retrieval-profile" && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" mb={1}>Retrieval profile</Typography>
+            <Typography color="text.secondary" mb={2}>
+              Read-only view of facet coverage and category gazetteer built at the last catalog reindex.
+            </Typography>
+            <Stack spacing={2}>
+              {canSelectTenant && (
+                <FormControl size="small" sx={{ maxWidth: 420 }}>
+                  <InputLabel>Tenant</InputLabel>
+                  <Select
+                    label="Tenant"
+                    value={sourceTenantId}
+                    onChange={(e) => persistSourceTenantId(e.target.value)}
+                  >
+                    {tenants.map((t) => (
+                      <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              )}
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Button variant="outlined" onClick={loadRetrievalProfile} disabled={!effectiveTenantId || retrievalProfileLoading}>
+                  Refresh
+                </Button>
+                {selectedTenant && <Chip label={selectedTenant.name} />}
+              </Stack>
+              {retrievalProfileLoading && <LinearProgress />}
+              {!retrievalProfileLoading && retrievalProfile && !retrievalProfile.profile && (
+                <Alert severity="info">
+                  No profile — run a catalog reindex for this tenant.
+                </Alert>
+              )}
+              {!retrievalProfileLoading && retrievalProfile?.profile && (() => {
+                const profile = retrievalProfile.profile;
+                const stats = profile.stats || {};
+                const facets = Object.entries(profile.facets || {}).sort(([a], [b]) => a.localeCompare(b));
+                const gazetteer = profile.category_strategy?.gazetteer || [];
+                const coreFields = profile.core_fields || {};
+                return (
+                  <>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Chip label={`Version ${retrievalProfile.retrieval_profile_version ?? profile.profile_version ?? "—"}`} />
+                      <Chip label={`${stats.product_count ?? 0} products`} />
+                      <Chip label={`${stats.facet_count ?? facets.length} facets`} />
+                      {profile.generated_at && <Chip label={`Generated ${profile.generated_at}`} variant="outlined" />}
+                    </Stack>
+                    {Object.keys(coreFields).length > 0 && (
+                      <Box>
+                        <Typography variant="subtitle2" gutterBottom>Core fields</Typography>
+                        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                          {Object.entries(coreFields).map(([key, meta]) => (
+                            <Chip
+                              key={key}
+                              label={`${key}: ${meta.coverage_pct ?? 0}%${meta.indexed ? "" : " (not indexed)"}`}
+                              size="small"
+                              variant="outlined"
+                            />
+                          ))}
+                        </Stack>
+                      </Box>
+                    )}
+                    <Box>
+                      <Typography variant="subtitle2" gutterBottom>Facets</Typography>
+                      {facets.length === 0 ? (
+                        <Typography color="text.secondary">No facets above coverage threshold.</Typography>
+                      ) : (
+                        <Stack spacing={2}>
+                          {facets.map(([facetId, facet]) => (
+                            <Box key={facetId} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}>
+                              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                                <Typography fontWeight={600}>{facetId}</Typography>
+                                <Chip size="small" label={`${facet.coverage_pct ?? 0}% coverage`} />
+                                <Chip size="small" label={`${facet.product_count ?? 0} products`} variant="outlined" />
+                                {facet.indexed && <Chip size="small" label="indexed" color="success" variant="outlined" />}
+                              </Stack>
+                              {(facet.sample_values || []).length > 0 && (
+                                <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+                                  {(facet.sample_values || []).map((v) => (
+                                    <Chip key={`${facetId}-${v}`} size="small" label={v} />
+                                  ))}
+                                </Stack>
+                              )}
+                              {facet.value_aliases && Object.keys(facet.value_aliases).length > 0 && (
+                                <Box sx={{ mt: 1 }}>
+                                  <Button
+                                    size="small"
+                                    onClick={() => setExpandedFacetAliases((prev) => ({ ...prev, [facetId]: !prev[facetId] }))}
+                                  >
+                                    {expandedFacetAliases[facetId] ? "Hide" : "Show"} value aliases ({Object.keys(facet.value_aliases).length})
+                                  </Button>
+                                  {expandedFacetAliases[facetId] && (
+                                    <Stack spacing={0.25} sx={{ mt: 0.5 }}>
+                                      {Object.entries(facet.value_aliases).map(([alias, canonical]) => (
+                                        <Typography key={`${facetId}-${alias}`} variant="body2" color="text.secondary">
+                                          {alias} → {canonical}
+                                        </Typography>
+                                      ))}
+                                    </Stack>
+                                  )}
+                                </Box>
+                              )}
+                            </Box>
+                          ))}
+                        </Stack>
+                      )}
+                    </Box>
+                    <Box>
+                      <Typography variant="subtitle2" gutterBottom>Category gazetteer</Typography>
+                      {gazetteer.length === 0 ? (
+                        <Typography color="text.secondary">No category entries.</Typography>
+                      ) : (
+                        <Stack spacing={1}>
+                          {gazetteer.map((entry) => (
+                            <Box key={entry.id} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1 }}>
+                              <Typography fontWeight={600}>{entry.id}</Typography>
+                              <Typography variant="body2" color="text.secondary">
+                                Labels: {(entry.labels || []).join(", ") || "—"}
+                              </Typography>
+                              {(entry.aliases && Object.keys(entry.aliases).length > 0) && (
+                                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                                  Aliases: {Object.entries(entry.aliases).map(([k, v]) => `${k}→${v}`).join(", ")}
+                                </Typography>
+                              )}
+                            </Box>
+                          ))}
+                        </Stack>
+                      )}
+                    </Box>
+                  </>
+                );
+              })()}
             </Stack>
           </CardContent>
         </Card>

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
 
-SourceProvider = Literal["wordpress", "woocommerce", "static"]
+SourceProvider = Literal["wordpress", "woocommerce", "magento", "static"]
 ContentKind = Literal[
     "cms_page",
     "blog_post",
@@ -58,6 +58,7 @@ class SourcePlan:
     include_wordpress_content: bool
     include_legacy_external: bool
     include_woocommerce_catalog: bool
+    include_magento_catalog: bool
     include_static_urls: bool
 
 

@@ -710,6 +710,11 @@ def _provider_aware_source_config(tenant: Optional[Tenant]) -> Dict[str, Any]:
         source_cfg["source_static_urls_json"] = tenant.source_static_urls_json
         source_cfg["source_domain_aliases"] = tenant.source_domain_aliases
         source_cfg["source_canonical_base_url"] = tenant.source_canonical_base_url
+        if source_cfg.get("source_db_type") == "magento":
+            try:
+                source_cfg["magento_store_id"] = int((tenant.source_url_table or "1").strip() or "1")
+            except ValueError:
+                source_cfg["magento_store_id"] = 1
     plan = resolve_source_plan(source_cfg)
     source_cfg.update(plan_to_dict(plan))
     return source_cfg
@@ -2517,8 +2522,8 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
         raise HTTPException(status_code=403, detail="Forbidden")
 
     normalized_mode_input = (payload.source_mode or "").strip().lower() if payload.source_mode is not None else None
-    if normalized_mode_input is not None and normalized_mode_input not in {"wordpress", "static", "mixed", ""}:
-        raise HTTPException(status_code=400, detail="source_mode must be one of: wordpress, static, mixed")
+    if normalized_mode_input is not None and normalized_mode_input not in {"wordpress", "static", "mixed", "magento", ""}:
+        raise HTTPException(status_code=400, detail="source_mode must be one of: wordpress, static, mixed, magento")
     source_mode = normalized_mode_input or None
 
     effective_source_db_url = payload.source_db_url if payload.source_db_url is not None else tenant.source_db_url
@@ -2538,10 +2543,10 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
         source_mode = "static"
     if payload.source_db_type is not None:
         raw_provider = (payload.source_db_type or "").strip().lower()
-        if raw_provider not in {"", "wordpress", "woocommerce", "static"}:
-            raise HTTPException(status_code=400, detail="source_db_type must be one of: wordpress, woocommerce, static")
-        if raw_provider == "woocommerce" and not (effective_source_db_url or ""):
-            raise HTTPException(status_code=400, detail="woocommerce provider requires source_db_url")
+        if raw_provider not in {"", "wordpress", "woocommerce", "magento", "static"}:
+            raise HTTPException(status_code=400, detail="source_db_type must be one of: wordpress, woocommerce, magento, static")
+        if raw_provider in {"woocommerce", "magento"} and not (effective_source_db_url or ""):
+            raise HTTPException(status_code=400, detail=f"{raw_provider} provider requires source_db_url")
         if raw_provider == "static" and not (source_static_raw or ""):
             raise HTTPException(status_code=400, detail="static provider requires source_static_urls_json")
 
@@ -2575,8 +2580,10 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
 
     tenant.source_db_url = effective_source_db_url
     tenant.source_db_type = source_provider
-    tenant.source_table_prefix = payload.source_table_prefix if payload.source_table_prefix is not None else tenant.source_table_prefix
-    tenant.source_url_table = payload.source_url_table if payload.source_url_table is not None else tenant.source_url_table
+    if payload.source_table_prefix is not None:
+        tenant.source_table_prefix = (payload.source_table_prefix or "").strip() or None
+    if payload.source_url_table is not None:
+        tenant.source_url_table = (payload.source_url_table or "").strip() or None
     tenant.source_mode = effective_source_mode
     tenant.source_static_urls_json = source_static_urls_json
     tenant.source_domain_aliases = domain_aliases_csv
