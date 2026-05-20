@@ -60,7 +60,7 @@ from models import (
     UserTenant,
 )
 from retrieval.max_results import effective_chat_max_results
-from retrieval.planner import RetrievalPlan, build_retrieval_plan
+from retrieval.planner import RetrievalPlan, apply_retrieval_rewrite, build_retrieval_plan
 from retrieval.post_filter import (
     apply_score_threshold,
     catalog_match_mode_instruction,
@@ -999,6 +999,7 @@ async def _resolve_structured_query(
     turn_validated = validate_structured_query(understanding.query, profile=profile)
     merged = merge_session_query(session_query, turn_validated, user_message=message)
     merged = validate_structured_query(merged, profile=profile)
+    merged = apply_retrieval_rewrite(merged)
     understanding.validation_ms = (time.perf_counter() - validation_started) * 1000.0
     plan = build_retrieval_plan(merged, profile=profile, tenant_profile=profile)
     return merged, plan, understanding
@@ -1268,6 +1269,7 @@ async def _run_chat_for_tenant(
             user_message=request.message,
             result_context=[],
             recent_requests=list(session_state.get("recent_requests") or []),
+            user_preferences=session_state.get("user_preferences"),
         )
         _set_chat_session_state(session, session_state)
         assistant_message = ChatMessage(
@@ -1306,6 +1308,7 @@ async def _run_chat_for_tenant(
             user_message=request.message,
             result_context=[],
             recent_requests=[],
+            user_preferences={},
         )
         _set_chat_session_state(session, session_state)
         assistant_message = ChatMessage(
@@ -1548,6 +1551,7 @@ async def _run_chat_for_tenant(
         user_message=request.message,
         result_context=result_context_payloads,
         recent_requests=list(session_state.get("recent_requests") or []),
+        user_preferences=session_state.get("user_preferences"),
     )
 
     assistant_message = ChatMessage(

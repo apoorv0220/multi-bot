@@ -14,6 +14,20 @@ from retrieval.structured_query import (
 
 SESSION_RESET_MESSAGE = "Filters cleared. What would you like to search for?"
 
+_AFFIRMATION_PATTERN = re.compile(
+    r"^\s*(?:yes|yeah|yep|sure|ok|okay|those|these|same|that|them|the same|"
+    r"cheaper|less expensive|more expensive|go ahead)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+_PREFERENCE_PATTERN = re.compile(
+    r"\b(?:i prefer|i usually|i always|always want|my preference|preferably)\b",
+    re.IGNORECASE,
+)
+_PRICE_ONLY_PATTERN = re.compile(
+    r"^\s*(?:under|below|over|above|max|min)?\s*(?:£|\$|€)?\s*\d+(?:\.\d+)?\s*$",
+    re.IGNORECASE,
+)
+
 
 def is_legacy_filters_blob(blob: dict[str, Any]) -> bool:
     if not blob:
@@ -80,12 +94,85 @@ def is_category_refinement_turn(user_message: str, turn_query: StructuredQuery) 
     return bool(turn_query.category.values)
 
 
+def is_affirmation_follow_up(user_message: str) -> bool:
+    return bool(_AFFIRMATION_PATTERN.match((user_message or "").strip()))
+
+
+def is_price_only_follow_up(user_message: str, turn_query: StructuredQuery) -> bool:
+    if turn_query.facets or turn_query.category.values:
+        return False
+    if turn_query.price.min is None and turn_query.price.max is None:
+        return False
+    return bool(_PRICE_ONLY_PATTERN.match((user_message or "").strip()))
+
+
+def is_preference_turn(user_message: str) -> bool:
+    return bool(_PREFERENCE_PATTERN.search((user_message or "").strip()))
+
+
+def _normalize_category_token(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _category_sets_overlap(session_values: list[str], turn_values: list[str]) -> bool:
+    if not session_values or not turn_values:
+        return True
+    session_norm = {_normalize_category_token(v) for v in session_values if v}
+    turn_norm = {_normalize_category_token(v) for v in turn_values if v}
+    for turn_val in turn_norm:
+        for session_val in session_norm:
+            if turn_val == session_val:
+                return True
+            if turn_val in session_val or session_val in turn_val:
+                return True
+            turn_stem = turn_val.rstrip("s")
+            session_stem = session_val.rstrip("s")
+            if turn_stem and session_stem and turn_stem == session_stem:
+                return True
+    return False
+
+
+def is_context_switch_turn(
+    session_query: StructuredQuery,
+    turn_query: StructuredQuery,
+    *,
+    user_message: str = "",
+) -> bool:
+    """New product context (e.g. bathroom taps -> kitchen basins) clears stale filters."""
+    if not turn_query.category.values or not session_query.category.values:
+        return False
+    if is_category_refinement_turn(user_message, turn_query):
+        return False
+    if is_price_only_follow_up(user_message, turn_query):
+        return False
+    if is_affirmation_follow_up(user_message):
+        return False
+    return not _category_sets_overlap(session_query.category.values, turn_query.category.values)
+
+
 def merge_session_query(
     session_query: StructuredQuery,
     turn_query: StructuredQuery,
     *,
     user_message: str = "",
 ) -> StructuredQuery:
+    if is_context_switch_turn(session_query, turn_query, user_message=user_message):
+        switched = turn_query.copy()
+        switched.session.inherit = False
+        return switched
+
+    if is_affirmation_follow_up(user_message):
+        merged = session_query.copy()
+        if turn_query.price.min is not None:
+            merged.price.min = turn_query.price.min
+        if turn_query.price.max is not None:
+            merged.price.max = turn_query.price.max
+        if turn_query.stock_status:
+            merged.stock_status = turn_query.stock_status
+        if turn_query.intent in ("catalog", "support", "general"):
+            merged.intent = turn_query.intent
+        return merged
+
     merged = turn_query.copy()
     if not turn_query.session.inherit:
         return merged
@@ -132,7 +219,59 @@ def merge_session_query(
     if merged.intent == "general" and session_query.intent != "general":
         merged.intent = session_query.intent
 
+    if is_price_only_follow_up(user_message, turn_query) and session_query.retrieval_rewrite.strip():
+        merged.retrieval_rewrite = session_query.retrieval_rewrite.strip()
+
     return merged
+
+
+def _facet_summary(facets: dict[str, FacetSpec]) -> str:
+    parts: list[str] = []
+    for facet_id in sorted(facets.keys()):
+        spec = facets[facet_id]
+        if not spec.values:
+            continue
+        vals = ", ".join(str(v) for v in spec.values[:4])
+        parts.append(f"{facet_id}={vals}")
+    return "; ".join(parts)
+
+
+def _build_conversation_summary(
+    structured_query: StructuredQuery,
+    *,
+    recent_requests: list[str],
+) -> str:
+    chunks: list[str] = [f"Intent={structured_query.intent}"]
+    if structured_query.category.values:
+        cats = ", ".join(structured_query.category.values[:4])
+        chunks.append(f"category={cats}")
+    facet_blob = _facet_summary(structured_query.facets)
+    if facet_blob:
+        chunks.append(facet_blob)
+    if structured_query.price.max is not None:
+        chunks.append(f"price_max={structured_query.price.max:g}")
+    if structured_query.price.min is not None:
+        chunks.append(f"price_min={structured_query.price.min:g}")
+    if structured_query.retrieval_rewrite.strip():
+        chunks.append(f"search={structured_query.retrieval_rewrite.strip()[:120]}")
+    if recent_requests:
+        chunks.append(f"Recent={' | '.join(recent_requests[-3:])}")
+    return "; ".join(chunks)
+
+
+def _merge_user_preferences(
+    existing: dict[str, Any],
+    structured_query: StructuredQuery,
+) -> dict[str, Any]:
+    prefs = dict(existing or {})
+    facet_prefs = dict(prefs.get("facets") or {})
+    for facet_id, spec in structured_query.facets.items():
+        if not spec.values:
+            continue
+        facet_prefs[str(facet_id)] = list(spec.values)
+    if facet_prefs:
+        prefs["facets"] = facet_prefs
+    return prefs
 
 
 def structured_query_to_session_state(
@@ -141,15 +280,17 @@ def structured_query_to_session_state(
     user_message: str,
     result_context: list[dict[str, Any]],
     recent_requests: list[str] | None = None,
+    user_preferences: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     recent = list(recent_requests or [])
     recent.append(user_message.strip())
     recent = [item for item in recent if item][-3:]
-    summary = (
-        f"Intent={structured_query.intent}; Recent requests={' | '.join(recent)}"
-        if recent
-        else f"Intent={structured_query.intent}"
-    )
+
+    prefs = dict(user_preferences or {})
+    if is_preference_turn(user_message):
+        prefs = _merge_user_preferences(prefs, structured_query)
+
+    summary = _build_conversation_summary(structured_query, recent_requests=recent)
     return {
         "conversation_summary": summary,
         "structured_query": structured_query.to_dict(),
@@ -157,4 +298,5 @@ def structured_query_to_session_state(
         "conversation_intent": structured_query.intent,
         "last_result_context": result_context[:5],
         "recent_requests": recent,
+        "user_preferences": prefs,
     }

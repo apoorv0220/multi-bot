@@ -101,6 +101,7 @@ class SessionSpec:
 class StructuredQuery:
     intent: IntentType = "general"
     free_text: str = ""
+    retrieval_rewrite: str = ""
     category: CategorySpec = field(default_factory=CategorySpec)
     facets: dict[str, FacetSpec] = field(default_factory=dict)
     price: PriceSpec = field(default_factory=PriceSpec)
@@ -111,6 +112,7 @@ class StructuredQuery:
         return {
             "intent": self.intent,
             "free_text": self.free_text,
+            "retrieval_rewrite": self.retrieval_rewrite,
             "category": self.category.to_dict(),
             "facets": {k: v.to_dict() for k, v in self.facets.items()},
             "price": self.price.to_dict(),
@@ -130,6 +132,7 @@ class StructuredQuery:
         return cls(
             intent=intent,  # type: ignore[arg-type]
             free_text=str(data.get("free_text") or "").strip(),
+            retrieval_rewrite=str(data.get("retrieval_rewrite") or "").strip(),
             category=CategorySpec.from_dict(data.get("category")),
             facets=facets,
             price=PriceSpec.from_dict(data.get("price")),

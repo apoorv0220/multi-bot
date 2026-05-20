@@ -1,7 +1,12 @@
 from retrieval.profile import build_retrieval_profile
+from retrieval.planner import apply_retrieval_rewrite, build_retrieval_plan
 from retrieval.query_understanding import should_skip_llm
 from retrieval.rules_prepass import rules_prepass
-from retrieval.session_query import merge_session_query
+from retrieval.session_query import (
+    is_context_switch_turn,
+    merge_session_query,
+    structured_query_to_session_state,
+)
 from retrieval.query_validator import validate_structured_query
 from sources.base import SourceRecord
 from tests.test_facet_profile import _product
@@ -88,3 +93,83 @@ def test_profile_builds_value_aliases():
     taps_entry = next((e for e in gazetteer if e.get("id") == "taps"), None)
     assert taps_entry is not None
     assert taps_entry.get("aliases")
+
+
+def test_context_switch_clears_stale_facets():
+    profile = _bathconnect_profile()
+    first = validate_structured_query(
+        rules_prepass("category:taps finish:chrome", profile=profile),
+        profile=profile,
+    )
+    second = validate_structured_query(
+        rules_prepass("category:showers", profile=profile),
+        profile=profile,
+    )
+    merged = merge_session_query(first, second, user_message="category:showers")
+    assert not merged.facets.get("finish")
+    assert any("shower" in v.lower() for v in merged.category.values)
+
+
+def test_short_category_refinement_replaces_facets():
+    profile = _bathconnect_profile()
+    first = validate_structured_query(
+        rules_prepass("show me chrome taps", profile=profile),
+        profile=profile,
+    )
+    second = validate_structured_query(
+        rules_prepass("showers", profile=profile),
+        profile=profile,
+    )
+    merged = merge_session_query(first, second, user_message="showers")
+    assert not merged.facets.get("finish")
+    assert any("shower" in v.lower() for v in merged.category.values)
+
+
+def test_apply_retrieval_rewrite_for_price_follow_up():
+    profile = _bathconnect_profile()
+    first = apply_retrieval_rewrite(
+        validate_structured_query(
+            rules_prepass("show me chrome taps", profile=profile),
+            profile=profile,
+        )
+    )
+    second = validate_structured_query(
+        rules_prepass("under 50", profile=profile, session_query=first),
+        profile=profile,
+    )
+    merged = apply_retrieval_rewrite(
+        merge_session_query(first, second, user_message="under 50")
+    )
+    assert merged.price.max == 50.0
+    assert merged.facets
+    assert "tap" in merged.retrieval_rewrite.lower() or "chrome" in merged.retrieval_rewrite.lower()
+    plan = build_retrieval_plan(merged, profile=profile)
+    assert plan.price_max == 50.0
+    assert "50" in plan.dense_query_text or "tap" in plan.dense_query_text.lower()
+
+
+def test_session_write_back_enriched_summary():
+    profile = _bathconnect_profile()
+    query = apply_retrieval_rewrite(
+        validate_structured_query(
+            rules_prepass("show me chrome taps", profile=profile),
+            profile=profile,
+        )
+    )
+    state = structured_query_to_session_state(
+        structured_query=query,
+        user_message="show me chrome taps",
+        result_context=[],
+        recent_requests=[],
+    )
+    summary = state["conversation_summary"]
+    assert "Intent=catalog" in summary
+    assert "category=" in summary or "finish=" in summary or "colour=" in summary
+    assert state["user_preferences"] == {}
+    pref_state = structured_query_to_session_state(
+        structured_query=query,
+        user_message="I prefer chrome finish",
+        result_context=[],
+        user_preferences=state.get("user_preferences"),
+    )
+    assert pref_state["user_preferences"].get("facets")

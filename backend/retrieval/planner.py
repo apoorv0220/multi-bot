@@ -207,6 +207,18 @@ def _hybrid_enabled_for_query(query: StructuredQuery, profile: dict[str, Any] | 
     return product_count >= min_products
 
 
+def apply_retrieval_rewrite(query: StructuredQuery) -> StructuredQuery:
+    """Fill retrieval_rewrite when the LLM omitted it (catalog dense phrase)."""
+    updated = query.copy()
+    if updated.retrieval_rewrite.strip():
+        return updated
+    if updated.intent == "catalog":
+        updated.retrieval_rewrite = _catalog_dense_query_text(updated)
+    elif updated.free_text.strip():
+        updated.retrieval_rewrite = updated.free_text.strip()
+    return updated
+
+
 def build_retrieval_plan(
     query: StructuredQuery,
     *,
@@ -250,7 +262,9 @@ def build_retrieval_plan(
     if query.intent == "catalog":
         content_kind = "product"
 
-    if query.intent == "catalog" and (
+    if query.retrieval_rewrite.strip():
+        dense_text = query.retrieval_rewrite.strip()
+    elif query.intent == "catalog" and (
         query.category.values or query.facets or query.price.min is not None or query.price.max is not None
     ):
         dense_text = _catalog_dense_query_text(query)

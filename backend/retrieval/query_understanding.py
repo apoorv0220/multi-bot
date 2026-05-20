@@ -84,6 +84,7 @@ def build_llm_prompt(
         "{\n"
         '  "intent": "catalog" | "support" | "general",\n'
         '  "free_text": "remaining semantic query after extracting filters",\n'
+        '  "retrieval_rewrite": "single dense search phrase combining category, facets, and product type (no filler)",\n'
         '  "category": {"values": ["..."], "confidence": 0.0-1.0},\n'
         '  "facets": {"facet_id": {"values": ["..."], "combine": "OR" | "AND"}},\n'
         '  "price": {"min": number|null, "max": number|null},\n'
@@ -93,7 +94,9 @@ def build_llm_prompt(
         "Rules: AND across different facet keys; OR within one facet when user says or/either/slash lists. "
         "Use only facet_ids from the tenant profile. "
         "Do not invent categories or facets not supported by the profile. "
-        "Prefer catalog intent for product shopping language."
+        "Prefer catalog intent for product shopping language. "
+        "For catalog turns, always populate retrieval_rewrite with a compact product search phrase "
+        "(e.g. chrome taps under 50) even when free_text is only a price refinement."
     )
     summary_block = ""
     if conversation_summary and len((message or "").strip()) < 20:
@@ -134,6 +137,9 @@ def merge_prepass_and_llm(prepass: StructuredQuery, llm: StructuredQuery) -> Str
 
     if llm.free_text.strip():
         merged.free_text = llm.free_text.strip()
+
+    if llm.retrieval_rewrite.strip():
+        merged.retrieval_rewrite = llm.retrieval_rewrite.strip()
 
     prepass_explicit_category = prepass.category.confidence >= _EXPLICIT_PREPASSES_CONFIDENCE
     if not prepass_explicit_category and llm.category.values:
