@@ -717,18 +717,31 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
     }
   };
 
+  const applySourceDbTypeChange = (nextType) => {
+    setSourceDbType(nextType);
+    const nextDefaults = applySourceDefaultsForDbType(nextType, {
+      tablePrefix: sourceTablePrefix,
+      urlTable: sourceUrlTable,
+    });
+    setSourceTablePrefix(nextDefaults.tablePrefix);
+    setSourceUrlTable(nextDefaults.urlTable);
+    setSourceMode((prev) => normalizeSourceModeForDbType(nextType, prev));
+  };
+
   const saveSourceConfig = async () => {
+    const effectiveMode = normalizeSourceModeForDbType(sourceDbType, sourceMode);
     try {
       await client.patch(`/api/admin/tenants/${sourceTenantId}/source-config`, {
         source_db_url: sourceDbUrl || null,
         source_db_type: sourceDbType || null,
         source_table_prefix: sourceTablePrefix.trim(),
         source_url_table: sourceUrlTable.trim() || null,
-        source_mode: sourceMode || null,
+        source_mode: effectiveMode || null,
         source_static_urls_json: sourceStaticUrlsJson || null,
         source_domain_aliases: sourceDomainAliases || null,
         source_canonical_base_url: sourceCanonicalBaseUrl || null,
       });
+      setSourceMode(effectiveMode);
       setSuccess("Tenant source settings updated");
       await loadTenants();
     } catch (err) {
@@ -1882,17 +1895,7 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                   labelId="source-db-type-label"
                   label="Source DB Type"
                   value={sourceDbType}
-                  onChange={(e) => {
-                    const nextType = e.target.value;
-                    setSourceDbType(nextType);
-                    setSourceMode((prev) => normalizeSourceModeForDbType(nextType, prev));
-                    const nextDefaults = applySourceDefaultsForDbType(nextType, {
-                      tablePrefix: sourceTablePrefix,
-                      urlTable: sourceUrlTable,
-                    });
-                    setSourceTablePrefix(nextDefaults.tablePrefix);
-                    setSourceUrlTable(nextDefaults.urlTable);
-                  }}
+                  onChange={(e) => applySourceDbTypeChange(e.target.value)}
                 >
                   <MenuItem value="wordpress">WordPress</MenuItem>
                   <MenuItem value="woocommerce">WooCommerce</MenuItem>

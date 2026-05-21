@@ -1,5 +1,6 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 
 import AdminDashboard from "./AdminDashboard";
@@ -18,6 +19,7 @@ const { client } = require("../api");
 
 describe("AdminDashboard source config", () => {
   beforeEach(() => {
+    client.patch.mockClear();
     client.get.mockImplementation((url) => {
       if (url === "/api/admin/tenants") {
         return Promise.resolve({
@@ -42,6 +44,7 @@ describe("AdminDashboard source config", () => {
     client.post.mockResolvedValue({ data: {} });
     client.delete.mockResolvedValue({ data: {} });
     window.localStorage.clear();
+    window.localStorage.setItem("admin_dashboard_selected_tenant_id", "tenant-a");
   });
 
   it("updates source mode when a menu option is selected", async () => {
@@ -74,12 +77,36 @@ describe("AdminDashboard source config", () => {
 
     const select = await screen.findByLabelText("Source DB Type");
     fireEvent.mouseDown(select);
+    const listbox = await screen.findByRole("listbox");
 
     await waitFor(() => {
-      expect(screen.getByText("WooCommerce")).toBeInTheDocument();
-      expect(screen.getByText("WordPress")).toBeInTheDocument();
-      expect(screen.getByText("Magento")).toBeInTheDocument();
-      expect(screen.getByText("Static-only")).toBeInTheDocument();
+      expect(within(listbox).getByRole("option", { name: "WooCommerce" })).toBeInTheDocument();
+      expect(within(listbox).getByRole("option", { name: "WordPress" })).toBeInTheDocument();
+      expect(within(listbox).getByRole("option", { name: "Magento" })).toBeInTheDocument();
+      expect(within(listbox).getByRole("option", { name: "Static-only" })).toBeInTheDocument();
+    });
+  });
+
+  it("saves coerced source_mode when db type is Magento", async () => {
+    render(
+      <MemoryRouter initialEntries={["/admin/dashboard/settings/db-settings"]}>
+        <AdminDashboard role="superadmin" tenantId="tenant-a" tenantIds={["tenant-a"]} />
+      </MemoryRouter>
+    );
+
+    const typeSelect = await screen.findByLabelText("Source DB Type");
+    await userEvent.click(typeSelect);
+    await userEvent.click(await screen.findByRole("option", { name: "Magento" }));
+    await waitFor(() => expect(typeSelect).toHaveTextContent("Magento"));
+
+    fireEvent.click(await screen.findByRole("button", { name: /save source settings/i }));
+
+    await waitFor(() => {
+      const call = client.patch.mock.calls.find((c) =>
+        String(c[0]).includes("/source-config"),
+      );
+      expect(call).toBeTruthy();
+      expect(call[1]).toMatchObject({ source_db_type: "magento", source_mode: "magento" });
     });
   });
 
@@ -91,16 +118,16 @@ describe("AdminDashboard source config", () => {
     );
 
     const typeSelect = await screen.findByLabelText("Source DB Type");
-    fireEvent.mouseDown(typeSelect);
-    fireEvent.click(await screen.findByRole("option", { name: "Magento" }));
+    await userEvent.click(typeSelect);
+    await userEvent.click(await screen.findByRole("option", { name: "Magento" }));
+    await waitFor(() => expect(typeSelect).toHaveTextContent("Magento"));
 
     const modeSelect = await screen.findByLabelText("Source Mode");
-    fireEvent.mouseDown(modeSelect);
+    await userEvent.click(modeSelect);
     await waitFor(() => {
       expect(screen.getByRole("option", { name: "Magento catalog only" })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("option", { name: "Magento catalog only" }));
-
+    await userEvent.click(screen.getByRole("option", { name: "Magento catalog only" }));
     await waitFor(() => {
       expect(modeSelect).toHaveTextContent("Magento catalog only");
     });

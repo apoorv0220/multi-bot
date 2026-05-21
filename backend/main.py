@@ -90,6 +90,8 @@ from retrieval.structured_query import StructuredQuery, empty_structured_query
 from indexing.progress import normalize_reindex_progress
 from retrieval.profile import apply_retrieval_profile_to_tenant, retrieval_profile_summary
 from sources.config import (
+    coerce_source_mode_for_provider,
+    default_source_mode_for_provider,
     normalize_source_provider,
     normalize_source_static_urls_json as shared_normalize_source_static_urls_json,
     parse_source_dsn as shared_parse_source_dsn,
@@ -2528,20 +2530,23 @@ async def update_tenant_source_config(tenant_id: str, payload: TenantSourceConfi
     normalized_mode_input = (payload.source_mode or "").strip().lower() if payload.source_mode is not None else None
     if normalized_mode_input is not None and normalized_mode_input not in {"wordpress", "static", "mixed", "magento", ""}:
         raise HTTPException(status_code=400, detail="source_mode must be one of: wordpress, static, mixed, magento")
-    source_mode = normalized_mode_input or None
 
     effective_source_db_url = payload.source_db_url if payload.source_db_url is not None else tenant.source_db_url
-    effective_source_mode = source_mode if payload.source_mode is not None else tenant.source_mode
-    effective_source_db_type = payload.source_db_type if payload.source_db_type is not None else tenant.source_db_type
+    effective_source_db_type_raw = payload.source_db_type if payload.source_db_type is not None else tenant.source_db_type
+    effective_source_mode_raw = (
+        normalized_mode_input if payload.source_mode is not None else tenant.source_mode
+    )
 
     source_static_raw = payload.source_static_urls_json if payload.source_static_urls_json is not None else tenant.source_static_urls_json
 
     source_provider = normalize_source_provider(
-        effective_source_db_type,
-        source_mode=effective_source_mode,
+        effective_source_db_type_raw,
+        source_mode=effective_source_mode_raw,
         source_db_url=effective_source_db_url,
         source_static_urls_json=source_static_raw,
     )
+    effective_source_mode = coerce_source_mode_for_provider(source_provider, effective_source_mode_raw)
+    source_mode = effective_source_mode
     if source_provider == "static":
         effective_source_mode = "static"
         source_mode = "static"

@@ -60,6 +60,37 @@ def normalize_source_mode(source_mode: str | None) -> str:
     return "wordpress"
 
 
+SOURCE_MODES_BY_PROVIDER: dict[str, tuple[str, ...]] = {
+    "wordpress": ("wordpress", "static", "mixed"),
+    "woocommerce": ("wordpress", "static", "mixed"),
+    "magento": ("magento", "mixed", "static"),
+    "static": ("static",),
+}
+
+
+def default_source_mode_for_provider(provider: str | None) -> str:
+    """First valid source_mode for a provider (matches admin UI defaults)."""
+    key = (provider or "").strip().lower()
+    if key not in SOURCE_MODES_BY_PROVIDER:
+        key = "wordpress"
+    return SOURCE_MODES_BY_PROVIDER[key][0]
+
+
+def coerce_source_mode_for_provider(
+    provider: str | None,
+    source_mode: str | None,
+) -> str:
+    """Return source_mode if allowed for provider, else provider default."""
+    key = (provider or "").strip().lower()
+    if key not in SOURCE_MODES_BY_PROVIDER:
+        key = "wordpress"
+    allowed = SOURCE_MODES_BY_PROVIDER[key]
+    raw = normalize_source_mode(source_mode)
+    if raw in allowed:
+        return raw
+    return allowed[0]
+
+
 def canonicalize_source_url(
     url: str,
     *,

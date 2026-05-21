@@ -1,9 +1,23 @@
 import asyncio
 
 from sources.base import SourceContext
-from sources.config import normalize_source_provider, parse_source_dsn, resolve_source_plan
+from sources.config import (
+    coerce_source_mode_for_provider,
+    default_source_mode_for_provider,
+    normalize_source_provider,
+    parse_source_dsn,
+    resolve_source_plan,
+)
 from sources.static_adapter import StaticUrlAdapter
 from sources.woocommerce_adapter import WooCommerceCatalogAdapter, resolve_product_image_url
+
+
+def test_coerce_source_mode_for_provider():
+    assert coerce_source_mode_for_provider("magento", "wordpress") == "magento"
+    assert coerce_source_mode_for_provider("magento", "mixed") == "mixed"
+    assert coerce_source_mode_for_provider("woocommerce", "magento") == "wordpress"
+    assert default_source_mode_for_provider("magento") == "magento"
+    assert default_source_mode_for_provider("woocommerce") == "wordpress"
 
 
 def test_normalize_source_provider_prefers_explicit_provider():
