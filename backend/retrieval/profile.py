@@ -46,6 +46,26 @@ def _max_sample_values() -> int:
         return 20
 
 
+# Natural-language apparel size words → letter codes (only applied when sample exists).
+_SIZE_LETTER_ALIASES: dict[str, str] = {
+    "extra small": "xs",
+    "x-small": "xs",
+    "xsmall": "xs",
+    "small": "s",
+    "sm": "s",
+    "medium": "m",
+    "med": "m",
+    "large": "l",
+    "lg": "l",
+    "extra large": "xl",
+    "x-large": "xl",
+    "xlarge": "xl",
+    "xx-large": "xxl",
+    "xxlarge": "xxl",
+    "2xl": "xxl",
+    "3xl": "xxxl",
+}
+
 _STATIC_FACET_ALIASES: dict[str, dict[str, str]] = {
     "colour": {
         "gray": "grey",
@@ -60,6 +80,7 @@ _STATIC_FACET_ALIASES: dict[str, dict[str, str]] = {
         "matte": "matt",
         "chrome plated": "chrome",
     },
+    "size": dict(_SIZE_LETTER_ALIASES),
 }
 
 _STATIC_CATEGORY_ALIASES: dict[str, list[str]] = {
@@ -109,6 +130,31 @@ def _aliases_for_category_label(label: str) -> dict[str, str]:
     return aliases
 
 
+def resolve_facet_value_to_sample(
+    facet_id: str,
+    value: str,
+    facet_meta: dict[str, Any] | None,
+) -> str:
+    """Map user/LLM facet token to a normalized value present in profile samples."""
+    norm = _normalize_label(value)
+    if not norm:
+        return norm
+    meta = facet_meta or {}
+    samples_norm = {_normalize_label(s) for s in (meta.get("sample_values") or []) if s}
+    if norm in samples_norm:
+        return norm
+    aliases = meta.get("value_aliases") or {}
+    if isinstance(aliases, dict):
+        for alias, canonical in aliases.items():
+            if norm == _normalize_label(alias):
+                return _normalize_label(str(canonical))
+    if facet_id == "size":
+        static_target = _SIZE_LETTER_ALIASES.get(norm)
+        if static_target and static_target in samples_norm:
+            return static_target
+    return norm
+
+
 def _aliases_for_facet_samples(facet_id: str, samples: list[str]) -> dict[str, str]:
     aliases: dict[str, str] = {}
     canonical_by_norm = {_normalize_label(sample): sample for sample in samples if sample}
@@ -124,9 +170,10 @@ def _aliases_for_facet_samples(facet_id: str, samples: list[str]) -> dict[str, s
                 aliases[variant] = canonical
     for alias, canonical in (_STATIC_FACET_ALIASES.get(facet_id) or {}).items():
         alias_norm = _normalize_label(alias)
-        target = canonical_by_norm.get(_normalize_label(canonical), canonical)
-        if alias_norm:
-            aliases[alias_norm] = target
+        canon_norm = _normalize_label(canonical)
+        if not alias_norm or canon_norm not in canonical_by_norm:
+            continue
+        aliases[alias_norm] = canonical_by_norm[canon_norm]
     return aliases
 
 

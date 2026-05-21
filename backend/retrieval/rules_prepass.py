@@ -48,8 +48,36 @@ def _normalize_label(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().lower())
 
 
+# ASCII and typographic apostrophe (widget/input often sends U+2019).
+_POSSESSIVE_PATTERN = re.compile(r"\b(\w+)['\u2019]s\b", re.IGNORECASE)
+_SIZE_PHRASE_PATTERN = re.compile(
+    r"\b(?:in\s+)?size\s+(?P<value>[a-z][a-z0-9]*)\b",
+    re.IGNORECASE,
+)
+
+
 def _tokenize(query: str) -> list[str]:
-    return [t for t in re.findall(r"[a-z0-9]+", (query or "").lower()) if t]
+    """Tokenize for facet matching; fold possessives so men's does not yield a lone ``s`` token."""
+    normalized = _POSSESSIVE_PATTERN.sub(r"\1", query or "")
+    return [t for t in re.findall(r"[a-z0-9]+", normalized.lower()) if t]
+
+
+def term_present_as_word(term: str, text: str) -> bool:
+    """True when ``term`` appears as a whole word/phrase in ``text`` (avoids men ⊂ women)."""
+    term = _normalize_label(term)
+    text = _normalize_label(text)
+    if not term or not text:
+        return False
+    if " " in term:
+        return term in text
+    return bool(re.search(rf"\b{re.escape(term)}\b", text))
+
+
+def _extract_explicit_size_phrase(message: str) -> str | None:
+    match = _SIZE_PHRASE_PATTERN.search(message or "")
+    if not match:
+        return None
+    return _normalize_label(match.group("value"))
 
 
 def _match_gazetteer(query: str, profile: dict[str, Any] | None) -> tuple[list[str], float]:
@@ -72,29 +100,31 @@ def _match_gazetteer(query: str, profile: dict[str, Any] | None) -> tuple[list[s
             if not label_norm:
                 continue
             conf = 0.0
-            if label_norm in q_norm:
+            if term_present_as_word(label_norm, q_norm):
                 conf = 0.88 if len(label_norm.split()) > 1 else 0.85
-            elif label_norm.rstrip("s") in q_norm or f"{label_norm}s" in q_norm:
-                conf = 0.82
-            elif label_norm in q_tokens or label_norm.rstrip("s") in q_tokens:
-                conf = 0.80
             else:
-                for token in q_tokens:
-                    if len(token) < 3:
-                        continue
-                    stem = token.rstrip("s")
-                    label_stem = label_norm.rstrip("s")
-                    if stem in label_norm or label_stem in token or token in label_norm:
-                        conf = max(conf, 0.78)
+                label_stem = label_norm.rstrip("s")
+                if label_stem != label_norm and term_present_as_word(label_stem, q_norm):
+                    conf = 0.82
+                elif label_norm in q_tokens or label_stem in q_tokens:
+                    conf = 0.80
+                else:
+                    for token in q_tokens:
+                        if len(token) < 3:
+                            continue
+                        if token == label_norm or token == label_stem:
+                            conf = max(conf, 0.78)
             entry_conf = max(entry_conf, conf)
+        if cat_id and entry_conf == 0:
+            cat_phrase = cat_id.replace("_", " ")
+            if term_present_as_word(cat_id, q_norm) or term_present_as_word(cat_phrase, q_norm):
+                entry_conf = 0.80
+            elif cat_id in q_tokens or cat_phrase in q_tokens:
+                entry_conf = 0.78
         if entry_conf > 0:
             best_conf = max(best_conf, entry_conf)
             if cat_id:
                 matched_values.append(cat_id)
-            for label in labels:
-                label_norm = _normalize_label(label)
-                if label_norm:
-                    matched_values.append(label_norm)
     return list(dict.fromkeys(v for v in matched_values if v)), best_conf
 
 
@@ -270,7 +300,8 @@ def _boost_category_over_colour_only_facets(
 
 
 def _strip_matched_tokens(free_text: str, category_values: list[str], facets: dict[str, FacetSpec]) -> str:
-    remaining = free_text
+    remaining = _POSSESSIVE_PATTERN.sub(r"\1", free_text or "")
+    remaining = re.sub(r"\b's\b", " ", remaining, flags=re.IGNORECASE)
     for cat in category_values:
         remaining = re.sub(re.escape(cat), " ", remaining, flags=re.IGNORECASE)
     for spec in facets.values():
@@ -343,6 +374,10 @@ def rules_prepass(
         else:
             merged = list(dict.fromkeys(result.facets[facet_id].values + spec.values))
             result.facets[facet_id] = FacetSpec(values=merged, combine=result.facets[facet_id].combine)
+
+    explicit_size = _extract_explicit_size_phrase(message)
+    if explicit_size:
+        result.facets["size"] = FacetSpec(values=[explicit_size], combine="OR")
 
     for facet_id, spec in _detect_colour_phrases(message).items():
         if facet_id not in result.facets:

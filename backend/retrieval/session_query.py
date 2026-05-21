@@ -150,6 +150,41 @@ def is_context_switch_turn(
     return not _category_sets_overlap(session_query.category.values, turn_query.category.values)
 
 
+def _turn_explicitly_set_facet(turn_query: StructuredQuery, facet_id: str) -> bool:
+    spec = turn_query.facets.get(facet_id)
+    return bool(spec and spec.values)
+
+
+def _facet_replace_turn(session_query: StructuredQuery, turn_query: StructuredQuery) -> bool:
+    """True when this turn sets facet value(s) that should replace session slots, not union."""
+    return any(
+        _turn_explicitly_set_facet(turn_query, facet_id) and facet_id in session_query.facets
+        for facet_id in turn_query.facets
+    )
+
+
+def classify_merge_action(
+    session_query: StructuredQuery,
+    turn_query: StructuredQuery,
+    *,
+    user_message: str = "",
+) -> str:
+    """Label how this turn combined session state with the validated turn query."""
+    if is_context_switch_turn(session_query, turn_query, user_message=user_message):
+        return "context_switch"
+    if is_affirmation_follow_up(user_message):
+        return "affirmation"
+    if not turn_query.session.inherit:
+        return "no_inherit"
+    if is_category_refinement_turn(user_message, turn_query):
+        return "category_refinement"
+    if is_price_only_follow_up(user_message, turn_query):
+        return "price_only_inherit"
+    if _facet_replace_turn(session_query, turn_query):
+        return "facet_replace"
+    return "inherit"
+
+
 def merge_session_query(
     session_query: StructuredQuery,
     turn_query: StructuredQuery,
@@ -211,6 +246,8 @@ def merge_session_query(
         if facet_id in cleared_facets:
             continue
         if facet_id in merged.facets:
+            if _turn_explicitly_set_facet(turn_query, facet_id):
+                continue
             combined = list(dict.fromkeys(spec.values + merged.facets[facet_id].values))
             merged.facets[facet_id] = FacetSpec(values=combined, combine=merged.facets[facet_id].combine)
         else:

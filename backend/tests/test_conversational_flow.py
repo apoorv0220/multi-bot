@@ -88,7 +88,8 @@ def test_profile_builds_value_aliases():
     profile = _bathconnect_profile()
     finish = profile["facets"].get("finish") or {}
     aliases = finish.get("value_aliases") or {}
-    assert "matte" in aliases or "matt" in (finish.get("sample_values") or [])
+    assert aliases.get("chrome plated") == "chrome"
+    assert "matte" not in aliases or "matt" in (finish.get("sample_values") or [])
     gazetteer = profile["category_strategy"]["gazetteer"]
     taps_entry = next((e for e in gazetteer if e.get("id") == "taps"), None)
     assert taps_entry is not None

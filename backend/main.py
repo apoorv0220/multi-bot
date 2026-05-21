@@ -60,7 +60,7 @@ from models import (
     UserTenant,
 )
 from retrieval.max_results import effective_chat_max_results
-from retrieval.planner import RetrievalPlan, build_retrieval_plan
+from retrieval.planner import RetrievalPlan, apply_retrieval_rewrite, build_retrieval_plan
 from retrieval.post_filter import (
     apply_score_threshold,
     catalog_match_mode_instruction,
@@ -86,6 +86,7 @@ from retrieval.session_query import (
     SESSION_RESET_MESSAGE,
     structured_query_to_session_state,
 )
+from retrieval.trace import build_retrieval_trace, retrieval_debug_enabled
 from retrieval.structured_query import StructuredQuery, empty_structured_query
 from indexing.progress import normalize_reindex_progress
 from retrieval.profile import apply_retrieval_profile_to_tenant, retrieval_profile_summary
@@ -999,7 +1000,7 @@ async def _resolve_structured_query(
     message: str,
     session_state: Dict[str, Any],
     profile: Optional[dict[str, Any]],
-) -> tuple[StructuredQuery, RetrievalPlan, QueryUnderstandingResult]:
+) -> tuple[StructuredQuery, RetrievalPlan, QueryUnderstandingResult, Optional[Dict[str, Any]]]:
     session_query = load_structured_query_from_session(session_state)
     conversation_summary = (session_state.get("conversation_summary") or "").strip() or None
     understanding = await run_query_understanding(
@@ -1013,9 +1014,18 @@ async def _resolve_structured_query(
     turn_validated = validate_structured_query(understanding.query, profile=profile)
     merged = merge_session_query(session_query, turn_validated, user_message=message)
     merged = validate_structured_query(merged, profile=profile)
+    merged = apply_retrieval_rewrite(merged)
     understanding.validation_ms = (time.perf_counter() - validation_started) * 1000.0
     plan = build_retrieval_plan(merged, profile=profile, tenant_profile=profile)
-    return merged, plan, understanding
+    debug_ctx: Optional[Dict[str, Any]] = None
+    if retrieval_debug_enabled():
+        debug_ctx = {
+            "session_query": session_query,
+            "turn_after_qu": understanding.query,
+            "turn_after_validate": turn_validated,
+            "conversation_summary": conversation_summary,
+        }
+    return merged, plan, understanding, debug_ctx
 
 
 def _catalog_skip_preprocess() -> bool:
@@ -1317,7 +1327,7 @@ async def _run_chat_for_tenant(
             match_mode=None,
         )
 
-    structured_query, retrieval_plan, query_understanding = await _resolve_structured_query(
+    structured_query, retrieval_plan, query_understanding, retrieval_debug_ctx = await _resolve_structured_query(
         request.message,
         session_state,
         retrieval_profile,
@@ -1457,6 +1467,37 @@ async def _run_chat_for_tenant(
             filtered_results,
             structured_query.intent,
         )
+    embedding_meta: Dict[str, Any] = {
+        "source": "chat_query",
+        "intent": structured_query.intent,
+        "retrieval_tier": retrieval_tier,
+        "match_mode": match_mode,
+        "dropped_filters": tiered.dropped_filters,
+        "query_understanding_mode": query_understanding.mode,
+        "rules_prepass_ms": query_understanding.prepass_ms,
+        "llm_ms": query_understanding.llm_ms,
+        "validation_ms": query_understanding.validation_ms,
+        "llm_used": query_understanding.llm_used,
+        "llm_fallback": query_understanding.llm_fallback,
+    }
+    if retrieval_debug_enabled() and retrieval_debug_ctx:
+        embedding_meta["structured_query"] = structured_query.to_dict()
+        embedding_meta["retrieval_trace"] = build_retrieval_trace(
+            user_message=request.message,
+            session_query=retrieval_debug_ctx["session_query"],
+            turn_after_qu=retrieval_debug_ctx["turn_after_qu"],
+            turn_after_validate=retrieval_debug_ctx["turn_after_validate"],
+            merged=structured_query,
+            plan=retrieval_plan,
+            conversation_summary=retrieval_debug_ctx.get("conversation_summary"),
+            vector_primary_source_type=vector_primary_source_type,
+            enhanced_query=enhanced_query,
+            retrieval_tier=retrieval_tier,
+            match_mode=match_mode,
+            dropped_filters=list(tiered.dropped_filters or []),
+            hit_count=len(search_results),
+            product_card_count=len(card_results),
+        )
     _record_usage_event(
         db,
         tenant_id=session.tenant_id,
@@ -1466,24 +1507,7 @@ async def _run_chat_for_tenant(
         completion_tokens=embedding_usage.get("completion_tokens", 0),
         total_tokens=embedding_usage.get("total_tokens", 0),
         session_id=session.id,
-        meta_json={
-            "source": "chat_query",
-            "intent": structured_query.intent,
-            "retrieval_tier": retrieval_tier,
-            "match_mode": match_mode,
-            "dropped_filters": tiered.dropped_filters,
-            "query_understanding_mode": query_understanding.mode,
-            "rules_prepass_ms": query_understanding.prepass_ms,
-            "llm_ms": query_understanding.llm_ms,
-            "validation_ms": query_understanding.validation_ms,
-            "llm_used": query_understanding.llm_used,
-            "llm_fallback": query_understanding.llm_fallback,
-            **(
-                {"structured_query": structured_query.to_dict()}
-                if os.getenv("RETRIEVAL_DEBUG_QUERY", "false").strip().lower() in ("1", "true", "yes")
-                else {}
-            ),
-        },
+        meta_json=embedding_meta,
     )
     context_texts: list[str] = []
     sources: list[SearchResult] = []

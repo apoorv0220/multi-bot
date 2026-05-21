@@ -4,6 +4,7 @@ import os
 from typing import Any
 
 from retrieval.planner import _category_confidence_threshold, _has_product_type_category
+from retrieval.profile import resolve_facet_value_to_sample
 from retrieval.structured_query import CategorySpec, FacetSpec, StructuredQuery
 
 
@@ -12,13 +13,7 @@ _EXPLICIT_CATEGORY_CONFIDENCE = 0.95
 
 
 def _normalize_facet_value(facet_id: str, value: str, facet_meta: dict[str, Any]) -> str:
-    norm = value.strip().lower()
-    aliases = facet_meta.get("value_aliases") or {}
-    if isinstance(aliases, dict):
-        for alias, canonical in aliases.items():
-            if norm == str(alias).strip().lower():
-                return str(canonical).strip().lower()
-    return norm
+    return resolve_facet_value_to_sample(facet_id, value, facet_meta)
 
 
 def validate_structured_query(

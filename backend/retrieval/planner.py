@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from indexing.payloads import default_bucket_priority
+from retrieval.rules_prepass import term_present_as_word
 from retrieval.structured_query import StructuredQuery
 
 _PRODUCT_TYPE_PATTERN = re.compile(
@@ -38,8 +39,9 @@ def _expand_category_hint_terms(values: list[str], profile: dict[str, Any] | Non
         labels = [str(x).strip().lower() for x in (entry.get("labels") or []) + (entry.get("normalized") or [])]
         matched = entry_id in terms or any(t in entry_id for t in tokens)
         if not matched:
+            cat_phrase = entry_id.replace("_", " ")
             for label in labels:
-                if any(t in label or label in t for t in tokens):
+                if any(term_present_as_word(t, label) or term_present_as_word(t, cat_phrase) for t in tokens):
                     matched = True
                     break
                 if entry_id in terms or any(label == t for t in tokens):
@@ -183,14 +185,15 @@ def _catalog_dense_query_text(query: StructuredQuery) -> str:
             if v:
                 parts.append(v)
     residual = (query.free_text or "").strip()
-    if residual and not _is_price_only_free_text(residual):
+    if residual and re.fullmatch(r"[\s'\"]+", residual):
+        residual = ""
+    filler_only = residual.lower() in {"some", "any", "the", "a", "an", "me", "those", "these", "them", "it"}
+    if residual and not filler_only and not _is_price_only_free_text(residual):
         parts.append(residual)
     elif query.price.max is not None:
         parts.append(f"under {query.price.max:g}")
     elif query.price.min is not None:
         parts.append(f"over {query.price.min:g}")
-    elif residual:
-        parts.append(residual)
     return " ".join(dict.fromkeys(p for p in parts if p)).strip()
 
 
@@ -262,12 +265,16 @@ def build_retrieval_plan(
     if query.intent == "catalog":
         content_kind = "product"
 
-    if query.retrieval_rewrite.strip():
-        dense_text = query.retrieval_rewrite.strip()
-    elif query.intent == "catalog" and (
-        query.category.values or query.facets or query.price.min is not None or query.price.max is not None
-    ):
+    catalog_slots = query.intent == "catalog" and (
+        query.category.values
+        or query.facets
+        or query.price.min is not None
+        or query.price.max is not None
+    )
+    if catalog_slots:
         dense_text = _catalog_dense_query_text(query)
+    elif query.retrieval_rewrite.strip():
+        dense_text = query.retrieval_rewrite.strip()
     else:
         dense_text = query.free_text.strip()
         if category_hint_terms:
