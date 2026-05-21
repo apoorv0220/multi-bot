@@ -101,7 +101,15 @@ class IndexingScheduler:
                 tid = str(tenant.id)
                 logger.info("Scheduled reindex for tenant %s (%s)", tid, tenant.name)
                 source_cfg = app_main._provider_aware_source_config(tenant)
-                payload_st = (tenant.widget_source_type or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+                from sources.config import resolve_vector_primary_source_type
+
+                payload_st = resolve_vector_primary_source_type(
+                    widget_source_type=tenant.widget_source_type,
+                    source_db_type=tenant.source_db_type,
+                    source_mode=tenant.source_mode,
+                    source_db_url=tenant.source_db_url,
+                    source_static_urls_json=tenant.source_static_urls_json,
+                )
                 payload_label = (tenant.brand_name or tenant.name or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
                 url_fb = (tenant.widget_website_url or "").strip() or None
                 embedder = Embedder(

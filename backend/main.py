@@ -96,6 +96,7 @@ from sources.config import (
     parse_source_dsn as shared_parse_source_dsn,
     plan_to_dict,
     resolve_source_plan,
+    resolve_vector_primary_source_type,
 )
 from url_utils import validate_and_fix_url, get_base_url
 from tenant_assets import ensure_tenant_assets_dir, next_avatar_filename, remove_local_avatar_files_for_tenant, tenant_assets_dir
@@ -822,54 +823,66 @@ async def search_qdrant(
     content_kind: Optional[str] = None,
     use_hybrid: bool = False,
     lexical_text: Optional[str] = None,
+    *,
+    catalog_buckets_only: bool = False,
 ) -> List[Any]:
     if qdrant_client is None:
         raise HTTPException(status_code=503, detail="Qdrant service is unavailable")
     collection_name = _tenant_collection(tenant_id)
-    primary_st = (primary_source_type or "").strip() or "mrnwebdesigns_ie"
+    primary_st = (primary_source_type or "").strip() or None
 
     try:
         vector_store = VectorStoreAdapter(qdrant_client)
         named_dense = collection_uses_hybrid_vectors(qdrant_client, collection_name)
         ordered_buckets = preferred_buckets or ["cms", "support", "catalog", "static"]
-        all_results = []
-        seen_ids = set()
-        for bucket in ordered_buckets:
-            bucket_filters = filters_for_bucket(metadata_filters, bucket)
-            if use_hybrid and bucket == "catalog":
-                bucket_results = hybrid_search(
-                    qdrant_client,
-                    collection_name=collection_name,
-                    dense_vector=embedding,
-                    lexical_text=lexical_text or "",
-                    limit=limit,
-                    source_type=primary_st,
-                    content_bucket=bucket,
-                    content_kind=content_kind,
-                    metadata_filters=bucket_filters or None,
-                )
-            else:
-                bucket_results = vector_store.search(
-                    collection_name=collection_name,
-                    query_vector=embedding,
-                    limit=limit,
-                    source_type=primary_st,
-                    content_bucket=bucket,
-                    content_kind=content_kind if bucket == "catalog" else None,
-                    metadata_filters=bucket_filters or None,
-                    vector_name=DENSE_VECTOR_NAME if named_dense else None,
-                )
-            for result in bucket_results:
-                result_id = result.payload.get("entity_id") or getattr(result, "id", None)
-                if result_id in seen_ids:
-                    continue
-                seen_ids.add(result_id)
-                all_results.append(result)
-                if len(all_results) >= limit:
+        if catalog_buckets_only:
+            ordered_buckets = ["catalog"]
+
+        def _collect_bucket_hits(*, source_type: str | None) -> list[Any]:
+            collected: list[Any] = []
+            seen: set[Any] = set()
+            for bucket in ordered_buckets:
+                bucket_filters = filters_for_bucket(metadata_filters, bucket)
+                if use_hybrid and bucket == "catalog":
+                    bucket_results = hybrid_search(
+                        qdrant_client,
+                        collection_name=collection_name,
+                        dense_vector=embedding,
+                        lexical_text=lexical_text or "",
+                        limit=limit,
+                        source_type=source_type,
+                        content_bucket=bucket,
+                        content_kind=content_kind,
+                        metadata_filters=bucket_filters or None,
+                    )
+                else:
+                    bucket_results = vector_store.search(
+                        collection_name=collection_name,
+                        query_vector=embedding,
+                        limit=limit,
+                        source_type=source_type,
+                        content_bucket=bucket,
+                        content_kind=content_kind if bucket == "catalog" else None,
+                        metadata_filters=bucket_filters or None,
+                        vector_name=DENSE_VECTOR_NAME if named_dense else None,
+                    )
+                for result in bucket_results:
+                    result_id = result.payload.get("entity_id") or getattr(result, "id", None)
+                    if result_id in seen:
+                        continue
+                    seen.add(result_id)
+                    collected.append(result)
+                    if len(collected) >= limit:
+                        break
+                if len(collected) >= limit:
                     break
-            if len(all_results) >= limit:
-                break
-        if len(all_results) < limit:
+            return collected
+
+        all_results = _collect_bucket_hits(source_type=primary_st)
+        if not all_results and primary_st:
+            all_results = _collect_bucket_hits(source_type=None)
+        if not catalog_buckets_only and len(all_results) < limit:
+            seen_ids = {r.payload.get("entity_id") or getattr(r, "id", None) for r in all_results}
             external_results = vector_store.search(
                 collection_name=collection_name,
                 query_vector=embedding,
@@ -1228,7 +1241,17 @@ async def _run_chat_for_tenant(
 ) -> Dict[str, Any]:
     ensure_collection_for_tenant(tenant_id)
     tenant_row = db.get(Tenant, uuid.UUID(tenant_id))
-    vector_primary_source_type = tenant_row.widget_source_type if tenant_row else None
+    vector_primary_source_type = (
+        resolve_vector_primary_source_type(
+            widget_source_type=tenant_row.widget_source_type,
+            source_db_type=tenant_row.source_db_type,
+            source_mode=tenant_row.source_mode,
+            source_db_url=tenant_row.source_db_url,
+            source_static_urls_json=tenant_row.source_static_urls_json,
+        )
+        if tenant_row
+        else None
+    )
     url_fallback = ((tenant_row.widget_website_url or "").strip() or None) if tenant_row else None
     max_hits = effective_chat_max_results(tenant=tenant_row, request_max=request.max_results)
 
@@ -1400,6 +1423,7 @@ async def _run_chat_for_tenant(
             content_kind=retrieval_plan.content_kind,
             use_hybrid=retrieval_plan.use_retrieval_hybrid,
             lexical_text=retrieval_plan.lexical_query_text,
+            catalog_buckets_only=structured_query.intent == "catalog",
         )
 
     tiered = await execute_tiered_search(
@@ -1718,7 +1742,13 @@ async def get_public_widget_config(
         "brand_name": tenant.brand_name,
         "primary_color": tenant.widget_primary_color,
         "website_url": tenant.widget_website_url,
-        "source_type": tenant.widget_source_type,
+        "source_type": resolve_vector_primary_source_type(
+            widget_source_type=tenant.widget_source_type,
+            source_db_type=tenant.source_db_type,
+            source_mode=tenant.source_mode,
+            source_db_url=tenant.source_db_url,
+            source_static_urls_json=tenant.source_static_urls_json,
+        ),
         "user_message_color": tenant.widget_user_message_color,
         "bot_message_color": tenant.widget_bot_message_color,
         "user_message_text_color": tenant.widget_user_message_text_color,
@@ -3762,7 +3792,13 @@ async def trigger_reindex(request: ReindexRequest, user_ctx=Depends(get_current_
             payload_label = LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
             url_fb = None
             if tenant:
-                payload_st = (tenant.widget_source_type or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+                payload_st = resolve_vector_primary_source_type(
+                    widget_source_type=tenant.widget_source_type,
+                    source_db_type=tenant.source_db_type,
+                    source_mode=tenant.source_mode,
+                    source_db_url=tenant.source_db_url,
+                    source_static_urls_json=tenant.source_static_urls_json,
+                )
                 payload_label = (tenant.brand_name or tenant.name or "").strip() or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
                 url_fb = (tenant.widget_website_url or "").strip() or None
             embedder = Embedder(

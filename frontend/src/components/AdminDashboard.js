@@ -1560,8 +1560,8 @@ const AdminDashboard = ({ role, tenantId, tenantIds = [] }) => {
                 label="Vector primary source_type (Qdrant payload)"
                 value={widgetSourceType}
                 onChange={(e) => setWidgetSourceType(e.target.value)}
-                placeholder="e.g. mrnwebdesigns_ie — empty uses default"
-                helperText="Must match indexed payload source_type for primary search; secondary bucket remains external."
+                placeholder="Optional override (e.g. mrnwebdesigns_ie)"
+                helperText="Leave empty to use Source DB type (woocommerce, magento, …) as Qdrant source_type. Set only when indexed payloads use a custom tag."
                 fullWidth
               />
               <TextField

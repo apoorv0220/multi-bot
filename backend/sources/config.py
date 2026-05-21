@@ -35,6 +35,30 @@ def parse_source_dsn(dsn: str | None, table_prefix: str | None, url_table: str |
     return cfg
 
 
+def resolve_vector_primary_source_type(
+    *,
+    widget_source_type: str | None = None,
+    source_db_type: str | None = None,
+    source_mode: str | None = None,
+    source_db_url: str | None = None,
+    source_static_urls_json: str | None = None,
+) -> str:
+    """Qdrant payload ``source_type`` for indexing and primary vector search.
+
+    Explicit ``widget_source_type`` (branding override) wins; otherwise use the
+    normalized provider from DB source settings (woocommerce, magento, etc.).
+    """
+    explicit = (widget_source_type or "").strip()
+    if explicit:
+        return explicit
+    return normalize_source_provider(
+        source_db_type,
+        source_mode=source_mode,
+        source_db_url=source_db_url,
+        source_static_urls_json=source_static_urls_json,
+    )
+
+
 def normalize_source_provider(
     source_db_type: str | None,
     *,

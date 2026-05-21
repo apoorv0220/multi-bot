@@ -7,9 +7,39 @@ from sources.config import (
     normalize_source_provider,
     parse_source_dsn,
     resolve_source_plan,
+    resolve_vector_primary_source_type,
 )
 from sources.static_adapter import StaticUrlAdapter
 from sources.woocommerce_adapter import WooCommerceCatalogAdapter, resolve_product_image_url
+
+
+def test_resolve_vector_primary_source_type_prefers_widget_override():
+    assert (
+        resolve_vector_primary_source_type(
+            widget_source_type="mrnwebdesigns_ie",
+            source_db_type="woocommerce",
+        )
+        == "mrnwebdesigns_ie"
+    )
+
+
+def test_resolve_vector_primary_source_type_defaults_to_db_provider():
+    assert (
+        resolve_vector_primary_source_type(
+            widget_source_type=None,
+            source_db_type="woocommerce",
+            source_mode="wordpress",
+        )
+        == "woocommerce"
+    )
+    assert (
+        resolve_vector_primary_source_type(
+            widget_source_type="",
+            source_db_type="magento",
+            source_mode="magento",
+        )
+        == "magento"
+    )
 
 
 def test_coerce_source_mode_for_provider():

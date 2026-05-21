@@ -121,11 +121,6 @@ class Embedder:
         self.source_config = source_config or {}
         self.progress_callback = progress_callback
         self.usage_callback = usage_callback
-        st = (vector_payload_source_type or "").strip()
-        self.vector_payload_source_type = st or LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
-        lb = (vector_payload_source_label or "").strip()
-        self.vector_payload_source_label = lb or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
-        self.url_fallback_base = (url_fallback_base or "").strip() or None
         self.source_mode = (self.source_config.get("source_mode") or "wordpress").strip().lower()
         self.source_provider = normalize_source_provider(
             self.source_config.get("source_db_type"),
@@ -133,6 +128,21 @@ class Embedder:
             source_db_url=self.source_config.get("source_db_url"),
             source_static_urls_json=self.source_config.get("source_static_urls_json"),
         )
+        st = (vector_payload_source_type or "").strip()
+        if st:
+            self.vector_payload_source_type = st
+        else:
+            from sources.config import resolve_vector_primary_source_type
+
+            self.vector_payload_source_type = resolve_vector_primary_source_type(
+                source_db_type=self.source_config.get("source_db_type"),
+                source_mode=self.source_mode,
+                source_db_url=self.source_config.get("source_db_url"),
+                source_static_urls_json=self.source_config.get("source_static_urls_json"),
+            )
+        lb = (vector_payload_source_label or "").strip()
+        self.vector_payload_source_label = lb or LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
+        self.url_fallback_base = (url_fallback_base or "").strip() or None
         self.source_plan = resolve_source_plan(self.source_config)
         self.source_static_urls_json = self.source_config.get("source_static_urls_json")
         raw_aliases = (self.source_config.get("source_domain_aliases") or "").strip()

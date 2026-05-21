@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MRN Web Designs Chatbot - Embed Example</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      line-height: 1.6;
+    }
+    h1 {
+      color: #bf362e;
+    }
+    pre {
+      background-color: #f5f5f5;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    .note {
+      background-color: #fffde7;
+      padding: 15px;
+      border-left: 4px solid #ffd600;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <script src="/runtime-config.js"></script>
+  <h1>MRN Web Designs Chatbot - Embed Example</h1>
+  
+  <p>This page demonstrates how to embed the MRN Web Designs AI chatbot into any website.</p>
+  
+  <h2>How to Embed the Chatbot</h2>
+  
+  <p>To embed the chatbot on your website, add the following code before the closing <code>&lt;/body&gt;</code> tag:</p>
+  
+  <pre>&lt;script&gt;
+  // Optional configuration (legacy: window.MRNWEBDESIGNS_CHATBOT_CONFIG still works)
+  window.CHATBOT_WIDGET_CONFIG = {
+    baseUrl: 'https://your-frontend-domain',    // URL where the chatbot widget is hosted
+    apiUrl: 'https://your-backend-domain',      // URL of the backend API
+    tenantPublicKey: 'replace-with-widget-key'  // Per-tenant public embed key (from admin / DB)
+  };
+  
+  // Load the widget script
+  (function() {
+    const script = document.createElement('script');
+    script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
+    script.async = true;
+    document.body.appendChild(script);
+  })();
+&lt;/script&gt;</pre>
+
+  <div class="note">
+    <strong>Note:</strong> When deploying to production, update the URLs to your actual hosted domain.
+    Each site must set <code>tenantPublicKey</code> to the embed key issued for <em>that</em> tenant (literal string in the snippet you paste); the backend maps it via <code>WIDGET_EMBED_KEYS_JSON</code>.
+  </div>
+  
+  <h2>Features</h2>
+  <ul>
+    <li>AI-powered search across your content</li>
+    <li>Include external sources in search results</li>
+    <li>Automatic reindexing of content</li>
+    <li>Source citations with confidence scores</li>
+    <li>Responsive design (works on mobile and desktop)</li>
+  </ul>
+  
+  <!-- Example of how to embed the chatbot -->
+  <script>
+    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+    window.CHATBOT_WIDGET_CONFIG = {
+      baseUrl: resolvedWidgetBaseUrl,
+      apiUrl: resolvedApiBaseUrl,
+      // Demo key only — production sites paste their own tenant embed key here (not from runtime-config).
+      tenantPublicKey: "demo_pub_bathconnect_7721e85d",
+    };
+    
+    // Load the widget script
+    (function() {
+      const script = document.createElement('script');
+      script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
+      script.async = true;
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html>

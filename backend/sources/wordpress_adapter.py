@@ -15,9 +15,12 @@ class WordPressContentAdapter(SourceAdapter):
         fetcher = WordPressFetcher(source_config=ctx.source_config, fallback_site_url=ctx.source_config.get("url_fallback_base"))
         records: list[SourceRecord] = []
 
+        skip_product_posts = bool(ctx.source_config.get("include_woocommerce_catalog"))
         if ctx.source_config.get("include_wordpress_content", True):
             for post in fetcher.get_all_posts():
                 post_type = str(post.get("type") or "").strip().lower()
+                if skip_product_posts and post_type == "product":
+                    continue
                 content_kind = "cms_page" if post_type == "page" else "blog_post"
                 records.append(
                     SourceRecord(

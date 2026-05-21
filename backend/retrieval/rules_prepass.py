@@ -119,7 +119,15 @@ def _match_facet_values(query: str, profile: dict[str, Any] | None) -> dict[str,
             sample_norm = _normalize_label(str(sample))
             if not sample_norm:
                 continue
-            if sample_norm in q_norm or sample_norm in q_tokens:
+            if len(sample_norm) <= 2:
+                if sample_norm in q_tokens:
+                    if sample_norm not in hits:
+                        hits.append(sample_norm)
+                continue
+            if sample_norm in q_tokens or re.search(
+                rf"\b{re.escape(sample_norm)}\b",
+                q_norm,
+            ):
                 if sample_norm not in hits:
                     hits.append(sample_norm)
             elif sample_norm == "matt" and "matt" in q_norm:

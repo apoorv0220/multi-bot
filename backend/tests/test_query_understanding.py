@@ -6,6 +6,7 @@ from retrieval.query_understanding import (
     run_query_understanding,
     should_skip_llm,
 )
+from retrieval.query_validator import validate_structured_query
 from retrieval.rules_prepass import rules_prepass
 from retrieval.structured_query import FacetSpec, StructuredQuery, empty_structured_query
 from tests.test_structured_query import _bath_profile
@@ -35,6 +36,29 @@ def test_should_skip_llm_for_complete_prepass(monkeypatch):
     prepass.category.values = ["basins"]
     prepass.facets["colour"] = FacetSpec(values=["black"], combine="OR")
     assert should_skip_llm(prepass, "matt black basins", mode="hybrid") is True
+
+
+def test_facet_match_does_not_treat_size_s_as_substring_of_hoodies():
+    profile = {
+        "facets": {
+            "color": {"sample_values": ["Red", "Blue"], "value_aliases": {}},
+            "size": {"sample_values": ["S", "M", "L"], "value_aliases": {}},
+        },
+        "category_strategy": {
+            "gazetteer": [
+                {
+                    "id": "hoodies_sweatshirts",
+                    "labels": ["Hoodies & Sweatshirts"],
+                    "aliases": {},
+                }
+            ]
+        },
+    }
+    for message in ("red hoodies", "Do you have any hoodies"):
+        sq = validate_structured_query(rules_prepass(message, profile=profile), profile=profile)
+        assert "size" not in sq.facets, message
+    red = validate_structured_query(rules_prepass("red hoodies", profile=profile), profile=profile)
+    assert red.facets.get("color") is not None
 
 
 def test_should_not_skip_llm_when_or_present():

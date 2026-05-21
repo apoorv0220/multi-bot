@@ -25,9 +25,9 @@ def test_embedder_vector_payload_defaults():
     e = Embedder(
         client=client,
         collection_name="tenant_test_docs",
-        source_config={},
+        source_config={"source_db_type": "woocommerce", "source_mode": "wordpress"},
     )
-    assert e.vector_payload_source_type == LEGACY_VECTOR_PRIMARY_SOURCE_TYPE
+    assert e.vector_payload_source_type == "woocommerce"
     assert e.vector_payload_source_label == LEGACY_VECTOR_PRIMARY_SOURCE_LABEL
 
 
