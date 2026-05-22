@@ -633,3 +633,29 @@ class MagentoFetcher:
                 return cursor.fetchall()
         finally:
             connection.close()
+
+    def fetch_cms_pages(self) -> list[dict[str, Any]]:
+        connection = self.get_connection()
+        if not connection:
+            detail = self.last_connection_error or "unknown connection error"
+            raise ConnectionError(f"Failed to connect to Magento database for CMS pages: {detail}")
+        try:
+            with connection.cursor() as cursor:
+                if not self._table_exists(cursor, "cms_page"):
+                    return []
+                cursor.execute(
+                    f"""
+                    SELECT
+                        page_id AS id,
+                        title,
+                        content,
+                        identifier,
+                        is_active
+                    FROM {self._t("cms_page")}
+                    WHERE is_active = 1
+                    ORDER BY page_id ASC
+                    """
+                )
+                return cursor.fetchall()
+        finally:
+            connection.close()

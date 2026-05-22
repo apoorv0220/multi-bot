@@ -73,18 +73,19 @@ from indexing.collections import DENSE_VECTOR_NAME, collection_uses_hybrid_vecto
 from retrieval.query_validator import validate_structured_query
 from retrieval.catalog_response import (
     build_catalog_grounded_system_prompt,
-    build_price_relaxed_deterministic_answer,
     format_products_for_prompt,
-    should_use_price_relaxed_template,
 )
+from retrieval.filter_adherence import build_filter_adherence
 from retrieval.query_understanding import QueryUnderstandingResult, run_query_understanding
 from retrieval.catalog_cards import filter_results_for_catalog_cards, filter_results_for_response_sources
 from retrieval.session_query import (
     is_session_reset_turn,
     load_structured_query_from_session,
+    classify_merge_action,
     merge_session_query,
     SESSION_RESET_MESSAGE,
     structured_query_to_session_state,
+    update_filter_stack,
 )
 from retrieval.trace import build_retrieval_trace, retrieval_debug_enabled
 from retrieval.structured_query import StructuredQuery, empty_structured_query
@@ -227,6 +228,7 @@ class ChatResponse(BaseModel):
     products: Optional[List[ChatProduct]] = None
     retrieval_tier: Optional[str] = None
     match_mode: Optional[str] = None
+    retrieval_debug: Optional[Dict[str, Any]] = None
 
 
 class PublicVisitorProfileRequest(BaseModel):
@@ -296,6 +298,18 @@ class BlockedIPRequest(BaseModel):
 class BlockedCountryRequest(BaseModel):
     country_code: str
     reason: Optional[str] = ""
+
+
+class GazetteerEntryMatchFlagsPatch(BaseModel):
+    id: str
+    hard_filter: Optional[bool] = None
+    demote_accessory_substrings: Optional[bool] = None
+    fixture_stem: Optional[str] = None
+    accessory_keywords: Optional[list[str]] = None
+
+
+class RetrievalProfileGazetteerPatchRequest(BaseModel):
+    entries: list[GazetteerEntryMatchFlagsPatch]
 
 
 class TenantBrandingConfigRequest(BaseModel):
@@ -726,23 +740,35 @@ def _provider_aware_source_config(tenant: Optional[Tenant]) -> Dict[str, Any]:
 def _get_chat_session_state(session: ChatSession) -> Dict[str, Any]:
     filters_blob = session.active_filters_json or {}
     structured = None
-    if isinstance(filters_blob, dict) and filters_blob.get("intent") and "free_text" in filters_blob:
-        structured = filters_blob
+    filter_stack: list[dict[str, Any]] = []
+    recent_requests: list[str] = []
+    if isinstance(filters_blob, dict):
+        if isinstance(filters_blob.get("structured_query"), dict):
+            structured = filters_blob["structured_query"]
+            filter_stack = list(filters_blob.get("filter_stack") or [])
+            recent_requests = list(filters_blob.get("recent_requests") or [])
+        elif filters_blob.get("intent") and "free_text" in filters_blob:
+            structured = filters_blob
     return {
         "conversation_summary": session.conversation_summary or "",
         "active_filters": filters_blob if not structured else {},
         "structured_query": structured,
+        "filter_stack": filter_stack,
         "user_preferences": session.user_preferences_json or {},
         "last_result_context": session.last_result_context_json or [],
         "conversation_intent": session.conversation_intent or "general",
-        "recent_requests": [],
+        "recent_requests": recent_requests,
     }
 
 
 def _set_chat_session_state(session: ChatSession, state: Dict[str, Any]) -> None:
     session.conversation_summary = state.get("conversation_summary") or None
     if state.get("structured_query") is not None:
-        session.active_filters_json = state.get("structured_query") or {}
+        session.active_filters_json = {
+            "structured_query": state.get("structured_query") or {},
+            "filter_stack": list(state.get("filter_stack") or []),
+            "recent_requests": list(state.get("recent_requests") or []),
+        }
     else:
         session.active_filters_json = state.get("active_filters") or {}
     session.user_preferences_json = state.get("user_preferences") or {}
@@ -1000,7 +1026,7 @@ async def _resolve_structured_query(
     message: str,
     session_state: Dict[str, Any],
     profile: Optional[dict[str, Any]],
-) -> tuple[StructuredQuery, RetrievalPlan, QueryUnderstandingResult, Optional[Dict[str, Any]]]:
+) -> tuple[StructuredQuery, RetrievalPlan, QueryUnderstandingResult, Optional[Dict[str, Any]], list[dict[str, Any]]]:
     session_query = load_structured_query_from_session(session_state)
     conversation_summary = (session_state.get("conversation_summary") or "").strip() or None
     understanding = await run_query_understanding(
@@ -1012,7 +1038,20 @@ async def _resolve_structured_query(
     )
     validation_started = time.perf_counter()
     turn_validated = validate_structured_query(understanding.query, profile=profile)
-    merged = merge_session_query(session_query, turn_validated, user_message=message)
+    filter_stack = list(session_state.get("filter_stack") or [])
+    merged = merge_session_query(
+        session_query,
+        turn_validated,
+        user_message=message,
+        filter_stack=filter_stack,
+    )
+    merge_action = classify_merge_action(session_query, turn_validated, user_message=message)
+    filter_stack = update_filter_stack(
+        filter_stack,
+        before=session_query,
+        after=merged,
+        merge_action=merge_action,
+    )
     merged = validate_structured_query(merged, profile=profile)
     merged = apply_retrieval_rewrite(merged)
     understanding.validation_ms = (time.perf_counter() - validation_started) * 1000.0
@@ -1025,7 +1064,7 @@ async def _resolve_structured_query(
             "turn_after_validate": turn_validated,
             "conversation_summary": conversation_summary,
         }
-    return merged, plan, understanding, debug_ctx
+    return merged, plan, understanding, debug_ctx, filter_stack
 
 
 def _catalog_skip_preprocess() -> bool:
@@ -1327,10 +1366,12 @@ async def _run_chat_for_tenant(
             match_mode=None,
         )
 
-    structured_query, retrieval_plan, query_understanding, retrieval_debug_ctx = await _resolve_structured_query(
-        request.message,
-        session_state,
-        retrieval_profile,
+    structured_query, retrieval_plan, query_understanding, retrieval_debug_ctx, filter_stack = (
+        await _resolve_structured_query(
+            request.message,
+            session_state,
+            retrieval_profile,
+        )
     )
 
     if is_session_reset_turn(request.message, structured_query):
@@ -1460,13 +1501,31 @@ async def _run_chat_for_tenant(
         if structured_query.intent == "catalog"
         else []
     )
-    if structured_query.intent == "catalog" and card_results:
+    catalog_products_only = structured_query.intent == "catalog"
+    if catalog_products_only and card_results:
         response_results = card_results
     else:
         response_results = filter_results_for_response_sources(
             filtered_results,
             structured_query.intent,
         )
+    filter_adherence: Dict[str, Any] | None = None
+    if structured_query.intent == "catalog":
+        catalog_hit_count = len(filtered_results) or len(search_results)
+        filter_adherence = build_filter_adherence(
+            user_message=request.message,
+            structured_query=structured_query,
+            retrieval_plan=retrieval_plan,
+            card_results=card_results,
+            profile=retrieval_profile,
+            match_mode=match_mode,
+            retrieval_tier=retrieval_tier,
+            dropped_filters=list(tiered.dropped_filters or []),
+            hit_count=catalog_hit_count,
+            product_card_count=len(card_results),
+            price_relaxed=tiered.price_relaxed,
+        )
+
     embedding_meta: Dict[str, Any] = {
         "source": "chat_query",
         "intent": structured_query.intent,
@@ -1480,6 +1539,8 @@ async def _run_chat_for_tenant(
         "llm_used": query_understanding.llm_used,
         "llm_fallback": query_understanding.llm_fallback,
     }
+    if filter_adherence:
+        embedding_meta["filter_adherence"] = filter_adherence
     if retrieval_debug_enabled() and retrieval_debug_ctx:
         embedding_meta["structured_query"] = structured_query.to_dict()
         embedding_meta["retrieval_trace"] = build_retrieval_trace(
@@ -1517,24 +1578,23 @@ async def _run_chat_for_tenant(
         validated_url = validate_and_fix_url(original_url, fallback_base=url_fallback) or get_base_url(original_url)
         if not validated_url:
             continue
-        context_texts.append(f"Source: {result.payload['source']}\nURL: {validated_url}\n{result.payload['content']}")
-        sources.append(
-            SearchResult(
-                content=result.payload["content"][:200] + "...",
-                source=result.payload["source"],
-                url=validated_url,
-                score=result.score,
+        if not catalog_products_only:
+            context_texts.append(
+                f"Source: {result.payload['source']}\nURL: {validated_url}\n{result.payload['content']}"
             )
-        )
+            sources.append(
+                SearchResult(
+                    content=result.payload["content"][:200] + "...",
+                    source=result.payload["source"],
+                    url=validated_url,
+                    score=result.score,
+                )
+            )
         result_context_payloads.append(build_result_context_payload({**result.payload, "url": validated_url}))
     price_relaxed = tiered.price_relaxed
     if structured_query.intent == "catalog":
         products = _build_chat_products(card_results)
-    if not sources:
-        answer = "I could not find high-confidence context for that request."
-        confidence = 0.0
-        completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "gpt-3.5-turbo"}
-    elif structured_query.intent == "catalog" and products:
+    if structured_query.intent == "catalog":
         brand = _tenant_chat_brand_label(tenant_row)
         site = (tenant_row.widget_website_url or "").strip() if tenant_row else ""
         site_clause = (
@@ -1544,42 +1604,35 @@ async def _run_chat_for_tenant(
         )
         price_min = retrieval_plan.price_min
         price_max = retrieval_plan.price_max
-        if should_use_price_relaxed_template(
-            price_relaxed=price_relaxed,
-            products=products,
+        catalog_prompt = build_catalog_grounded_system_prompt(
+            brand,
+            match_mode=match_mode,
+            retrieval_tier=retrieval_tier,
             price_min=price_min,
             price_max=price_max,
-        ):
-            template_answer = build_price_relaxed_deterministic_answer(
-                brand=brand,
-                products=products,
-                price_min=price_min,
-                price_max=price_max,
-            )
-            answer = template_answer or "I could not find products matching your price and filters."
-            completion_usage = {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-                "model_name": "catalog-template",
-            }
-        else:
-            catalog_prompt = build_catalog_grounded_system_prompt(
-                brand,
-                match_mode=match_mode,
-                retrieval_tier=retrieval_tier,
-                price_min=price_min,
-                price_max=price_max,
-                price_relaxed=price_relaxed,
-                site_clause=site_clause,
-            )
-            answer, completion_usage = await generate_answer(
-                request.message,
-                context_texts,
-                system_prompt=catalog_prompt,
-                catalog_products_json=format_products_for_prompt(products),
-            )
+            price_relaxed=price_relaxed,
+            site_clause=site_clause,
+            filter_adherence=filter_adherence,
+            products_empty=not products,
+        )
+        answer, completion_usage = await generate_answer(
+            request.message,
+            context_texts,
+            system_prompt=catalog_prompt,
+            catalog_products_json=format_products_for_prompt(products) if products else "[]",
+        )
         confidence = response_results[0].score if response_results else 0.0
+    elif not sources:
+        if structured_query.intent == "support":
+            answer = (
+                "I could not find return or policy information in the indexed content for this store. "
+                "It may not be in the Magento CMS tables yet—add a CMS page or include a static policy URL "
+                "in tenant source settings, then reindex."
+            )
+        else:
+            answer = "I could not find high-confidence context for that request."
+        confidence = 0.0
+        completion_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "model_name": "gpt-3.5-turbo"}
     else:
         answer, completion_usage = await generate_answer(
             request.message,
@@ -1597,6 +1650,7 @@ async def _run_chat_for_tenant(
         user_message=request.message,
         result_context=result_context_payloads,
         recent_requests=list(session_state.get("recent_requests") or []),
+        filter_stack=filter_stack,
     )
 
     assistant_message = ChatMessage(
@@ -1635,16 +1689,20 @@ async def _run_chat_for_tenant(
     )
     session.last_message_at = datetime.now(timezone.utc)
     db.commit()
+    retrieval_debug_payload = None
+    if retrieval_debug_enabled():
+        retrieval_debug_payload = embedding_meta.get("retrieval_trace")
     return ChatResponse(
         response=answer,
         session_id=str(session.id),
         message_id=str(assistant_message.id),
         source=source_type,
         confidence=confidence,
-        sources=sources,
+        sources=sources or None,
         products=products or None,
         retrieval_tier=retrieval_tier,
         match_mode=match_mode,
+        retrieval_debug=retrieval_debug_payload,
     )
 
 @app.post("/api/auth/register", response_model=AuthResponse)
@@ -2529,6 +2587,66 @@ async def get_tenant_retrieval_profile(
         "retrieval_profile_version": tenant.retrieval_profile_version,
         "profile": tenant.retrieval_profile_json,
         "summary": retrieval_profile_summary(tenant.retrieval_profile_json),
+    }
+
+
+@app.patch("/api/admin/tenants/{tenant_id}/retrieval-profile/gazetteer")
+async def patch_tenant_retrieval_profile_gazetteer(
+    tenant_id: str,
+    payload: RetrievalProfileGazetteerPatchRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
+):
+    _ensure_manage_tenant(db, user_ctx, tenant_id)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    profile = tenant.retrieval_profile_json
+    if not profile:
+        raise HTTPException(status_code=400, detail="Tenant has no retrieval profile; run reindex first")
+    gazetteer = list((profile.get("category_strategy") or {}).get("gazetteer") or [])
+    by_id = {str(entry.get("id") or ""): entry for entry in gazetteer if entry.get("id")}
+    updated_ids: list[str] = []
+    for patch in payload.entries:
+        entry_id = (patch.id or "").strip().lower()
+        if not entry_id or entry_id not in by_id:
+            raise HTTPException(status_code=400, detail=f"Unknown gazetteer id: {patch.id}")
+        entry = by_id[entry_id]
+        if patch.hard_filter is not None:
+            if patch.hard_filter:
+                entry["hard_filter"] = True
+            else:
+                entry.pop("hard_filter", None)
+        if patch.demote_accessory_substrings is not None:
+            if patch.demote_accessory_substrings:
+                entry["demote_accessory_substrings"] = True
+            else:
+                entry.pop("demote_accessory_substrings", None)
+        if patch.fixture_stem is not None:
+            stem = patch.fixture_stem.strip()
+            if stem:
+                entry["fixture_stem"] = stem
+            else:
+                entry.pop("fixture_stem", None)
+        if patch.accessory_keywords is not None:
+            keywords = [str(k).strip().lower() for k in patch.accessory_keywords if str(k).strip()]
+            if keywords:
+                entry["accessory_keywords"] = keywords
+            else:
+                entry.pop("accessory_keywords", None)
+        updated_ids.append(entry_id)
+    strategy = dict(profile.get("category_strategy") or {})
+    strategy["gazetteer"] = [by_id[str(entry.get("id") or "")] for entry in gazetteer]
+    profile = dict(profile)
+    profile["category_strategy"] = strategy
+    tenant.retrieval_profile_json = profile
+    db.add(tenant)
+    db.commit()
+    return {
+        "tenant_id": tenant_id,
+        "updated_ids": updated_ids,
+        "retrieval_profile_version": tenant.retrieval_profile_version,
+        "summary": retrieval_profile_summary(profile),
     }
 
 

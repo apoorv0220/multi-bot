@@ -71,10 +71,34 @@ _STATIC_FACET_ALIASES: dict[str, dict[str, str]] = {
         "gray": "grey",
         "matte": "matt",
         "chrome plated": "chrome",
+        "violet": "purple",
+        "lilac": "purple",
+        "lavender": "lavender",
+        "charcoal": "charcoal",
+        "sand": "beige",
+        "navy": "navy",
+        "burgundy": "red",
     },
     "color": {
         "gray": "grey",
         "matte": "matt",
+        "violet": "purple",
+        "lilac": "purple",
+        "lavender": "lavender",
+        "charcoal": "charcoal",
+        "sand": "beige",
+        "navy": "navy",
+        "burgundy": "red",
+    },
+    "material": {
+        "denim": "denim",
+        "polyester": "polyester",
+        "cotton": "cotton",
+        "leather": "leather",
+        "wool": "wool",
+        "linen": "linen",
+        "nylon": "nylon",
+        "silk": "silk",
     },
     "finish": {
         "matte": "matt",
@@ -148,6 +172,11 @@ def resolve_facet_value_to_sample(
         for alias, canonical in aliases.items():
             if norm == _normalize_label(alias):
                 return _normalize_label(str(canonical))
+    static_target = (_STATIC_FACET_ALIASES.get(facet_id) or {}).get(norm)
+    if static_target:
+        static_norm = _normalize_label(static_target)
+        if static_norm in samples_norm:
+            return static_norm
     if facet_id == "size":
         static_target = _SIZE_LETTER_ALIASES.get(norm)
         if static_target and static_target in samples_norm:
@@ -251,6 +280,7 @@ def build_retrieval_profile(
         facet_entry: dict[str, Any] = {
             "qdrant_path": f"attributes.{facet_id}",
             "indexed": True,
+            "match_mode": "soft",
             "within_facet_combine_default": "OR",
             "coverage_pct": round(coverage_pct, 2),
             "product_count": hits,
@@ -335,6 +365,7 @@ def build_retrieval_profile(
         "category_strategy": {
             "field": "categories",
             "confidence_threshold": _category_confidence_threshold(),
+            "default_category_match": "soft",
             "gazetteer": gazetteer,
         },
         "core_fields": core_fields,
@@ -360,9 +391,53 @@ def build_retrieval_profile(
     }
 
 
-def apply_retrieval_profile_to_tenant(tenant: "Tenant", profile: dict[str, Any]) -> None:
-    tenant.retrieval_profile_json = profile
-    tenant.retrieval_profile_version = int(profile.get("profile_version") or 0)
+_GAZETTEER_MATCH_FLAG_KEYS = (
+    "hard_filter",
+    "demote_accessory_substrings",
+    "fixture_stem",
+    "accessory_keywords",
+)
+
+
+def merge_gazetteer_match_flags(
+    old_profile: dict[str, Any] | None,
+    new_profile: dict[str, Any],
+) -> dict[str, Any]:
+    """Preserve per-category match flags from a previous profile after reindex rebuild."""
+    if not old_profile:
+        return new_profile
+    old_gazetteer = (old_profile.get("category_strategy") or {}).get("gazetteer") or []
+    new_strategy = new_profile.get("category_strategy") or {}
+    new_gazetteer = list(new_strategy.get("gazetteer") or [])
+    if not new_gazetteer:
+        return new_profile
+    old_by_id = {str(entry.get("id") or ""): entry for entry in old_gazetteer if entry.get("id")}
+    merged_gazetteer: list[dict[str, Any]] = []
+    for entry in new_gazetteer:
+        updated = dict(entry)
+        entry_id = str(updated.get("id") or "")
+        prior = old_by_id.get(entry_id)
+        if prior:
+            for key in _GAZETTEER_MATCH_FLAG_KEYS:
+                if key in prior:
+                    updated[key] = prior[key]
+        merged_gazetteer.append(updated)
+    merged = dict(new_profile)
+    merged["category_strategy"] = {**new_strategy, "gazetteer": merged_gazetteer}
+    return merged
+
+
+def apply_retrieval_profile_to_tenant(
+    tenant: "Tenant",
+    profile: dict[str, Any],
+    *,
+    merge_match_flags: bool = True,
+) -> None:
+    stored = profile
+    if merge_match_flags and tenant.retrieval_profile_json:
+        stored = merge_gazetteer_match_flags(tenant.retrieval_profile_json, profile)
+    tenant.retrieval_profile_json = stored
+    tenant.retrieval_profile_version = int(stored.get("profile_version") or 0)
 
 
 def retrieval_profile_summary(profile: dict[str, Any] | None) -> dict[str, Any] | None:

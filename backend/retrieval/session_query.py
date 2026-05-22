@@ -27,6 +27,15 @@ _PRICE_ONLY_PATTERN = re.compile(
     r"^\s*(?:under|below|over|above|max|min)?\s*(?:£|\$|€)?\s*\d+(?:\.\d+)?\s*$",
     re.IGNORECASE,
 )
+_BACKTRACK_PATTERN = re.compile(
+    r"\b(?:go back|previous list|normal ones again|undo last|revert(?:\s+that)?)\b",
+    re.IGNORECASE,
+)
+_PIVOT_PATTERN = re.compile(
+    r"\b(?:nvm|nevermind|forget|instead|actually|switch to)\b",
+    re.IGNORECASE,
+)
+_STABLE_FACET_IDS = frozenset({"gender", "department", "audience", "men", "women"})
 
 
 def is_legacy_filters_blob(blob: dict[str, Any]) -> bool:
@@ -110,6 +119,27 @@ def is_preference_turn(user_message: str) -> bool:
     return bool(_PREFERENCE_PATTERN.search((user_message or "").strip()))
 
 
+def is_backtrack_turn(user_message: str) -> bool:
+    return bool(_BACKTRACK_PATTERN.search((user_message or "").strip()))
+
+
+def _should_push_filter_snapshot(before: StructuredQuery, after: StructuredQuery) -> bool:
+    if before.category.values != after.category.values:
+        return True
+    before_facets = set(before.facets.keys())
+    after_facets = set(after.facets.keys())
+    if after_facets - before_facets:
+        return True
+    for facet_id in after_facets & before_facets:
+        if before.facets[facet_id].values != after.facets[facet_id].values:
+            return True
+        if after.facets[facet_id].exclude_values != before.facets[facet_id].exclude_values:
+            return True
+    if before.price.min != after.price.min or before.price.max != after.price.max:
+        return True
+    return False
+
+
 def _normalize_category_token(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().lower())
 
@@ -141,6 +171,8 @@ def is_context_switch_turn(
     """New product context (e.g. bathroom taps -> kitchen basins) clears stale filters."""
     if not turn_query.category.values or not session_query.category.values:
         return False
+    if _PIVOT_PATTERN.search((user_message or "").strip()):
+        return not _category_sets_overlap(session_query.category.values, turn_query.category.values)
     if is_category_refinement_turn(user_message, turn_query):
         return False
     if is_price_only_follow_up(user_message, turn_query):
@@ -170,6 +202,8 @@ def classify_merge_action(
     user_message: str = "",
 ) -> str:
     """Label how this turn combined session state with the validated turn query."""
+    if is_backtrack_turn(user_message):
+        return "backtrack"
     if is_context_switch_turn(session_query, turn_query, user_message=user_message):
         return "context_switch"
     if is_affirmation_follow_up(user_message):
@@ -185,16 +219,48 @@ def classify_merge_action(
     return "inherit"
 
 
+def _soft_context_switch_merge(
+    session_query: StructuredQuery,
+    turn_query: StructuredQuery,
+) -> StructuredQuery:
+    """Pivot category/facets but keep stable prefs (price, gender/department)."""
+    merged = turn_query.copy()
+    if session_query.price.max is not None and merged.price.max is None:
+        merged.price.max = session_query.price.max
+    if session_query.price.min is not None and merged.price.min is None:
+        merged.price.min = session_query.price.min
+    if session_query.stock_status and not merged.stock_status:
+        merged.stock_status = session_query.stock_status
+    for facet_id, spec in session_query.facets.items():
+        if facet_id in merged.facets:
+            continue
+        if facet_id in _STABLE_FACET_IDS or facet_id == "brand":
+            merged.facets[facet_id] = FacetSpec.from_dict(spec.to_dict())
+    merged.session.inherit = False
+    return merged
+
+
 def merge_session_query(
     session_query: StructuredQuery,
     turn_query: StructuredQuery,
     *,
     user_message: str = "",
+    filter_stack: list[dict[str, Any]] | None = None,
 ) -> StructuredQuery:
+    if is_backtrack_turn(user_message):
+        stack = list(filter_stack or [])
+        if stack:
+            restored = StructuredQuery.from_dict(stack[-1])
+            restored.session.inherit = True
+            return restored
+        merged = session_query.copy()
+        if merged.facets:
+            last_id = list(merged.facets.keys())[-1]
+            merged.facets.pop(last_id, None)
+        return merged
+
     if is_context_switch_turn(session_query, turn_query, user_message=user_message):
-        switched = turn_query.copy()
-        switched.session.inherit = False
-        return switched
+        return _soft_context_switch_merge(session_query, turn_query)
 
     if is_affirmation_follow_up(user_message):
         merged = session_query.copy()
@@ -249,7 +315,16 @@ def merge_session_query(
             if _turn_explicitly_set_facet(turn_query, facet_id):
                 continue
             combined = list(dict.fromkeys(spec.values + merged.facets[facet_id].values))
-            merged.facets[facet_id] = FacetSpec(values=combined, combine=merged.facets[facet_id].combine)
+            combined_excludes = list(
+                dict.fromkeys(
+                    (spec.exclude_values or []) + (merged.facets[facet_id].exclude_values or [])
+                )
+            )
+            merged.facets[facet_id] = FacetSpec(
+                values=combined,
+                combine=merged.facets[facet_id].combine,
+                exclude_values=combined_excludes,
+            )
         else:
             merged.facets[facet_id] = FacetSpec.from_dict(spec.to_dict())
 
@@ -318,6 +393,7 @@ def structured_query_to_session_state(
     result_context: list[dict[str, Any]],
     recent_requests: list[str] | None = None,
     user_preferences: dict[str, Any] | None = None,
+    filter_stack: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     recent = list(recent_requests or [])
     recent.append(user_message.strip())
@@ -336,4 +412,21 @@ def structured_query_to_session_state(
         "last_result_context": result_context[:5],
         "recent_requests": recent,
         "user_preferences": prefs,
+        "filter_stack": list(filter_stack or []),
     }
+
+
+def update_filter_stack(
+    stack: list[dict[str, Any]],
+    *,
+    before: StructuredQuery,
+    after: StructuredQuery,
+    merge_action: str,
+) -> list[dict[str, Any]]:
+    """Maintain a short stack of prior filter snapshots for backtracking."""
+    updated = list(stack or [])
+    if merge_action == "backtrack" and updated:
+        return updated[:-1] if len(updated) > 1 else []
+    if merge_action != "backtrack" and _should_push_filter_snapshot(before, after):
+        updated.append(before.to_dict())
+    return updated[-5:]

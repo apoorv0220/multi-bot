@@ -37,9 +37,13 @@ class CategorySpec:
 class FacetSpec:
     values: list[str] = field(default_factory=list)
     combine: FacetCombine = "OR"
+    exclude_values: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {"values": list(self.values), "combine": self.combine}
+        blob: dict[str, Any] = {"values": list(self.values), "combine": self.combine}
+        if self.exclude_values:
+            blob["exclude_values"] = list(self.exclude_values)
+        return blob
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "FacetSpec":
@@ -51,6 +55,7 @@ class FacetSpec:
         return cls(
             values=[str(v) for v in (data.get("values") or [])],
             combine=combine,  # type: ignore[arg-type]
+            exclude_values=[str(v) for v in (data.get("exclude_values") or [])],
         )
 
 

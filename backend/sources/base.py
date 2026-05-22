@@ -59,6 +59,7 @@ class SourcePlan:
     include_legacy_external: bool
     include_woocommerce_catalog: bool
     include_magento_catalog: bool
+    include_magento_cms: bool
     include_static_urls: bool
 
 

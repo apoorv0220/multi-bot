@@ -29,7 +29,11 @@ def _taps_profile():
     ]
     from retrieval.profile import build_retrieval_profile
 
-    return build_retrieval_profile(records, tenant_id="tenant-taps")
+    profile = build_retrieval_profile(records, tenant_id="tenant-taps")
+    for entry in (profile.get("category_strategy") or {}).get("gazetteer") or []:
+        if entry.get("id") == "taps":
+            entry["hard_filter"] = True
+    return profile
 
 
 def test_catalog_dense_query_rebuilds_after_strip():

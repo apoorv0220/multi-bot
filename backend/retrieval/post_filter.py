@@ -4,14 +4,11 @@ import os
 import re
 from typing import Any, Literal
 
+from retrieval.category_match import demote_accessory_config
 from retrieval.planner import RetrievalPlan
 from retrieval.structured_query import StructuredQuery
 
 RetrievalTier = Literal["strict", "relaxed_facets", "relaxed_category", "semantic_catalog", "relaxed_price"]
-_PRODUCT_TYPE_STEM = re.compile(
-    r"\b(?:taps?|faucets?|basins?|sinks?|toilets?|showers?|baths?|wcs?)\b",
-    re.IGNORECASE,
-)
 MatchMode = Literal["exact", "relaxed", "semantic_fallback"]
 
 
@@ -78,6 +75,7 @@ def filter_results_by_category_hints(
     hint_terms: list[str],
     *,
     require_match: bool = False,
+    profile: dict[str, Any] | None = None,
 ) -> list[Any]:
     """Keep hits whose payload categories match hint terms; optional hard filter for product-type hints."""
     if not hint_terms or not results:
@@ -86,7 +84,7 @@ def filter_results_by_category_hints(
     for result in results:
         payload = getattr(result, "payload", None) or {}
         if require_match:
-            if category_match_tier(payload, hint_terms) > 0:
+            if category_match_tier(payload, hint_terms, profile) > 0:
                 matched.append(result)
         elif _category_boost(payload, hint_terms) > 0:
             matched.append(result)
@@ -104,17 +102,6 @@ def _payload_categories(payload: dict[str, Any]) -> list[str]:
     return [str(c).strip().lower() for c in (payload.get("categories") or []) if str(c).strip()]
 
 
-def _fixture_stems_in_hints(hint_terms: list[str]) -> set[str]:
-    stems: set[str] = set()
-    for term in hint_terms:
-        t = term.strip().lower()
-        if not t:
-            continue
-        if _PRODUCT_TYPE_STEM.search(t):
-            stems.add(t.rstrip("s"))
-    return stems
-
-
 def _category_has_exact_fixture_label(categories: list[str], fixture_stem: str) -> bool:
     """True when a category path names the fixture type (e.g. 'Basins'), not an accessory branch."""
     stem = fixture_stem.strip().lower()
@@ -128,17 +115,27 @@ def _category_has_exact_fixture_label(categories: list[str], fixture_stem: str) 
     return False
 
 
-def _should_demote_accessory_categories(categories: list[str], hint_terms: list[str]) -> bool:
-    """Demote substring-only matches like 'Basin Taps & Mixers' when user asked for basins fixtures."""
-    fixture_stems = _fixture_stems_in_hints(hint_terms)
-    if "basin" not in fixture_stems:
+def _should_demote_accessory_categories(
+    categories: list[str],
+    hint_terms: list[str],
+    profile: dict[str, Any] | None,
+) -> bool:
+    """Demote substring-only matches when gazetteer entry has demote_accessory_substrings."""
+    config = demote_accessory_config(hint_terms, profile)
+    if not config:
         return False
-    if _category_has_exact_fixture_label(categories, "basin"):
+    fixture_stem = str(config.get("fixture_stem") or "").strip().lower()
+    keywords = config.get("accessory_keywords") or []
+    if _category_has_exact_fixture_label(categories, fixture_stem):
         return False
-    return any("tap" in cat or "mixer" in cat for cat in categories)
+    return any(any(kw in cat for kw in keywords) for cat in categories)
 
 
-def category_match_tier(payload: dict[str, Any], hint_terms: list[str]) -> int:
+def category_match_tier(
+    payload: dict[str, Any],
+    hint_terms: list[str],
+    profile: dict[str, Any] | None = None,
+) -> int:
     """Return 2=exact category, 1=substring, 0=no match (or accessory-only false positive)."""
     categories = _payload_categories(payload)
     if not hint_terms or not categories:
@@ -156,19 +153,125 @@ def category_match_tier(payload: dict[str, Any], hint_terms: list[str]) -> int:
             cat_stem = cat.rstrip("s")
             if t in cat or cat in t or t_stem in cat or cat_stem in t:
                 best = max(best, 1)
-    if best == 1 and _should_demote_accessory_categories(categories, hint_terms):
+    if best == 1 and _should_demote_accessory_categories(categories, hint_terms, profile):
         return 0
     return best
 
 
-def sort_results_by_category_tier(results: list[Any], hint_terms: list[str]) -> list[Any]:
+_FACET_MATCH_BOOST = 0.12
+
+
+def _payload_facet_values(payload: dict[str, Any], facet_id: str) -> list[str]:
+    attrs = payload.get("attributes") or {}
+    raw = attrs.get(facet_id)
+    if raw is None and facet_id == "color":
+        raw = attrs.get("colour")
+    if raw is None and facet_id == "colour":
+        raw = attrs.get("color")
+    if isinstance(raw, list):
+        return [str(v).strip().lower() for v in raw if str(v).strip()]
+    if raw:
+        return [str(raw).strip().lower()]
+    return []
+
+
+def _facet_value_matches(requested: str, payload_values: list[str]) -> bool:
+    req = requested.strip().lower()
+    if not req or not payload_values:
+        return False
+    for val in payload_values:
+        if val == req or req in val or val in req:
+            return True
+    return False
+
+
+def _facet_value_excludes_match(requested: str, payload_values: list[str]) -> bool:
+    """True when payload contains the excluded token as a whole word/value."""
+    req = requested.strip().lower()
+    if not req or not payload_values:
+        return False
+    for val in payload_values:
+        norm = val.strip().lower()
+        if norm == req:
+            return True
+        if re.search(rf"(^|\b){re.escape(req)}(\b|$)", norm):
+            return True
+    return False
+
+
+def boost_results_by_facets(
+    results: list[Any],
+    soft_facet_boosts: dict[str, list[str]] | None,
+) -> list[Any]:
+    """Boost scores when soft facet values appear in payload attributes."""
+    if not soft_facet_boosts or not results:
+        return results
+    scored: list[tuple[float, float, Any]] = []
+    for result in results:
+        payload = getattr(result, "payload", None) or {}
+        boost = 0.0
+        for facet_id, values in soft_facet_boosts.items():
+            payload_vals = _payload_facet_values(payload, facet_id)
+            if any(_facet_value_matches(v, payload_vals) for v in values):
+                boost += _FACET_MATCH_BOOST
+        base = float(getattr(result, "score", 0.0) or 0.0)
+        scored.append((boost, base, result))
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in scored]
+
+
+def filter_results_by_facet_excludes(
+    results: list[Any],
+    facet_excludes: dict[str, list[str]] | None,
+) -> list[Any]:
+    """Drop hits whose payload matches any excluded facet value."""
+    if not facet_excludes or not results:
+        return results
+    kept: list[Any] = []
+    for result in results:
+        payload = getattr(result, "payload", None) or {}
+        excluded = False
+        for facet_id, values in facet_excludes.items():
+            payload_vals = _payload_facet_values(payload, facet_id)
+            if any(_facet_value_excludes_match(v, payload_vals) for v in values):
+                excluded = True
+                break
+        if not excluded:
+            kept.append(result)
+    return kept
+
+
+def prefer_category_tier_hits(
+    results: list[Any],
+    hint_terms: list[str],
+    profile: dict[str, Any] | None = None,
+) -> list[Any]:
+    """When any hit matches category tier>=1, list those before non-matches."""
+    if not hint_terms or not results:
+        return results
+    tiers = [
+        (category_match_tier(getattr(r, "payload", None) or {}, hint_terms, profile), r)
+        for r in results
+    ]
+    if not any(t >= 1 for t, _ in tiers):
+        return results
+    matched = [r for t, r in tiers if t >= 1]
+    rest = [r for t, r in tiers if t < 1]
+    return matched + rest
+
+
+def sort_results_by_category_tier(
+    results: list[Any],
+    hint_terms: list[str],
+    profile: dict[str, Any] | None = None,
+) -> list[Any]:
     """Sort by category match tier (desc), then vector score (desc)."""
     if not hint_terms or not results:
         return results
     scored: list[tuple[int, float, Any]] = []
     for result in results:
         payload = getattr(result, "payload", None) or {}
-        tier = category_match_tier(payload, hint_terms)
+        tier = category_match_tier(payload, hint_terms, profile)
         base = float(getattr(result, "score", 0.0) or 0.0)
         scored.append((tier, base, result))
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
@@ -180,11 +283,12 @@ def filter_results_by_category_tier(
     hint_terms: list[str],
     *,
     min_tier: int = 1,
+    profile: dict[str, Any] | None = None,
 ) -> list[Any]:
     """Drop accessory false-positives when at least one hit has a real category match."""
     if not hint_terms or not results:
         return results
-    tiers = [category_match_tier(getattr(r, "payload", None) or {}, hint_terms) for r in results]
+    tiers = [category_match_tier(getattr(r, "payload", None) or {}, hint_terms, profile) for r in results]
     if not any(t >= min_tier for t in tiers):
         return results
     return [r for r, tier in zip(results, tiers) if tier >= min_tier]

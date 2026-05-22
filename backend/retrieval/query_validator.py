@@ -16,6 +16,31 @@ def _normalize_facet_value(facet_id: str, value: str, facet_meta: dict[str, Any]
     return resolve_facet_value_to_sample(facet_id, value, facet_meta)
 
 
+def _canonical_gazetteer_category(value: str, profile: dict[str, Any] | None) -> str:
+    """Map NL category token to a single gazetteer id when possible."""
+    val_norm = value.strip().lower()
+    if not val_norm or not profile:
+        return val_norm
+    for entry in (profile.get("category_strategy") or {}).get("gazetteer") or []:
+        entry_id = str(entry.get("id") or "").strip().lower()
+        if not entry_id:
+            continue
+        if val_norm == entry_id:
+            return entry_id
+        labels = [str(x).strip().lower() for x in (entry.get("labels") or []) + (entry.get("normalized") or [])]
+        aliases = entry.get("aliases") or {}
+        alias_keys = (
+            [str(k).strip().lower() for k in aliases.keys()]
+            if isinstance(aliases, dict)
+            else []
+        )
+        if val_norm in labels or val_norm in alias_keys:
+            return entry_id
+        if any(val_norm in label or label in val_norm for label in labels if label):
+            return entry_id
+    return val_norm
+
+
 def validate_structured_query(
     query: StructuredQuery,
     *,
@@ -32,7 +57,7 @@ def validate_structured_query(
                     gazetteer_ids.add(str(label).strip().lower())
         filtered_cats = []
         for val in validated.category.values:
-            v_norm = val.strip().lower()
+            v_norm = _canonical_gazetteer_category(val, profile)
             if not gazetteer_ids or v_norm in gazetteer_ids or any(v_norm in g for g in gazetteer_ids):
                 filtered_cats.append(v_norm)
         is_explicit = validated.category.confidence >= _EXPLICIT_CATEGORY_CONFIDENCE
@@ -83,6 +108,7 @@ def validate_structured_query(
             validated_facets["brand"] = FacetSpec(
                 values=[v.strip() for v in spec.values if v.strip()],
                 combine=spec.combine,
+                exclude_values=[v.strip().lower() for v in spec.exclude_values if v.strip()],
             )
             continue
         facet_meta = profile_facets.get(facet_id)
@@ -98,9 +124,26 @@ def validate_structured_query(
                 norm_values.append(_normalize_facet_value(facet_id, val, facet_meta))
             else:
                 norm_values.append(val.strip().lower())
-        if norm_values:
-            validated_facets[facet_id] = FacetSpec(values=list(dict.fromkeys(norm_values)), combine=spec.combine)
+        exclude_norm = []
+        for ex in spec.exclude_values:
+            if facet_meta:
+                exclude_norm.append(_normalize_facet_value(facet_id, ex, facet_meta))
+            else:
+                exclude_norm.append(ex.strip().lower())
+        if norm_values or exclude_norm:
+            validated_facets[facet_id] = FacetSpec(
+                values=list(dict.fromkeys(norm_values)),
+                combine=spec.combine,
+                exclude_values=list(dict.fromkeys(exclude_norm)),
+            )
     validated.facets = validated_facets
+    for facet_id, spec in validated.facets.items():
+        if spec.exclude_values:
+            excluded = {_normalize_facet_value(facet_id, v, profile_facets.get(facet_id) or {}) for v in spec.exclude_values}
+            spec.values = [
+                v for v in spec.values
+                if _normalize_facet_value(facet_id, v, profile_facets.get(facet_id) or {}) not in excluded
+            ]
 
     if stripped_terms:
         extra = " ".join(stripped_terms)

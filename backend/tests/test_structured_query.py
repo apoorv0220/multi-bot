@@ -29,7 +29,14 @@ def _bath_profile():
             metadata={"categories": ["Basins"]},
         ),
     ]
-    return build_retrieval_profile(records, tenant_id="tenant-bath")
+    profile = build_retrieval_profile(records, tenant_id="tenant-bath")
+    for entry in (profile.get("category_strategy") or {}).get("gazetteer") or []:
+        if entry.get("id") == "basins":
+            entry["hard_filter"] = True
+            entry["demote_accessory_substrings"] = True
+            entry["fixture_stem"] = "basin"
+            entry["accessory_keywords"] = ["tap", "mixer"]
+    return profile
 
 
 def test_rules_prepass_matt_black_basins():

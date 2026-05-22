@@ -41,7 +41,15 @@ def _bathconnect_profile():
             metadata={"categories": ["Showers"]},
         ),
     ]
-    return build_retrieval_profile(records, tenant_id="tenant-bathconnect")
+    profile = build_retrieval_profile(records, tenant_id="tenant-bathconnect")
+    for entry in (profile.get("category_strategy") or {}).get("gazetteer") or []:
+        if entry.get("id") in {"taps", "showers", "basins"}:
+            entry["hard_filter"] = True
+        if entry.get("id") == "basins":
+            entry["demote_accessory_substrings"] = True
+            entry["fixture_stem"] = "basin"
+            entry["accessory_keywords"] = ["tap", "mixer"]
+    return profile
 
 
 def test_chrome_taps_boosts_product_category_over_finish_only():

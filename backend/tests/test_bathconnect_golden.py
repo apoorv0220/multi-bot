@@ -201,9 +201,9 @@ def test_basins_ranking_prefers_wash_basins_over_mixers(bathconnect_profile):
             entity_id="wash",
         ),
     ]
-    ranked = sort_results_by_category_tier(hits, plan.category_hint_terms)
+    ranked = sort_results_by_category_tier(hits, plan.category_hint_terms, bathconnect_profile)
     assert ranked[0].payload["entity_id"] == "wash"
-    filtered = filter_results_by_category_tier(ranked, plan.category_hint_terms)
+    filtered = filter_results_by_category_tier(ranked, plan.category_hint_terms, profile=bathconnect_profile)
     assert all("mixer" not in h.payload["entity_id"] for h in filtered)
 
 
@@ -218,8 +218,8 @@ def test_basins_and_category_basins_top3_overlap(bathconnect_profile):
         _hit("Mixer", ["Basin Taps & Mixers"], 70.0, entity_id="c"),
         _hit("Wash C", ["Basins"], 45.0, entity_id="d"),
     ]
-    nat_ranked = sort_results_by_category_tier(hits, plan_nat.category_hint_terms)[:3]
-    exp_ranked = sort_results_by_category_tier(hits, plan_exp.category_hint_terms)[:3]
+    nat_ranked = sort_results_by_category_tier(hits, plan_nat.category_hint_terms, bathconnect_profile)[:3]
+    exp_ranked = sort_results_by_category_tier(hits, plan_exp.category_hint_terms, bathconnect_profile)[:3]
     nat_ids = {h.payload["entity_id"] for h in nat_ranked}
     exp_ids = {h.payload["entity_id"] for h in exp_ranked}
     assert len(nat_ids & exp_ids) >= 2

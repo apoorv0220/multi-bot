@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from retrieval.filter_adherence import filter_adherence_instruction
 from retrieval.post_filter import MatchMode, RetrievalTier, catalog_match_mode_instruction
 
 
@@ -57,22 +58,14 @@ def build_catalog_grounded_system_prompt(
     price_max: float | None = None,
     price_relaxed: bool = False,
     site_clause: str = "",
+    filter_adherence: dict[str, Any] | None = None,
+    products_empty: bool = False,
 ) -> str:
     mode_note = catalog_match_mode_instruction(match_mode) if match_mode and match_mode != "exact" else ""
-    if price_relaxed and (price_min is not None or price_max is not None):
-        bound = ""
-        if price_max is not None and price_min is not None:
-            bound = f"between {price_min} and {price_max}"
-        elif price_max is not None:
-            bound = f"under {price_max}"
-        elif price_min is not None:
-            bound = f"over {price_min}"
-        mode_note = (
-            f"Important: No products matched the requested price ({bound}) with the other filters. "
-            "The product list shows the closest alternatives without that price limit. "
-            "Say clearly that nothing matched the price and you are showing close options. "
-            "Do not claim any listed price satisfies the price limit."
-        )
+    adherence_note = filter_adherence_instruction(
+        filter_adherence,
+        products_empty=products_empty,
+    )
     price_rule = ""
     if price_max is not None and not price_relaxed:
         price_rule = f" Only mention products whose price is at most {price_max}."
@@ -88,52 +81,9 @@ def build_catalog_grounded_system_prompt(
         "Do not mention a price cap or budget unless the user asked for one or every listed product is within that cap. "
         "Mention the user can open the product URL."
         f"{(' ' + mode_note) if mode_note else ''}"
+        f"{adherence_note}"
         f"{tier_hint}"
         f"{price_rule}"
         f"{site_clause} "
-        "Keep the reply concise (under 300 characters). List at most 3 products."
+        "Keep the reply concise (under 300 characters). List at most 3 products when products are provided."
     )
-
-
-def build_price_relaxed_deterministic_answer(
-    *,
-    brand: str,
-    products: list[Any],
-    price_min: float | None,
-    price_max: float | None,
-    max_list: int = 3,
-) -> str | None:
-    """Template answer when price was relaxed and nothing met the price bound."""
-    if not products:
-        return None
-    bound = ""
-    if price_max is not None:
-        bound = f"under {price_max:g}"
-    elif price_min is not None:
-        bound = f"over {price_min:g}"
-    else:
-        return None
-    lines = [
-        f"I couldn't find any {brand} products {bound} with your other filters.",
-        "Here are the closest matches without that price limit:",
-    ]
-    for product in products[:max_list]:
-        title = getattr(product, "title", None) or "Product"
-        price = getattr(product, "price", None)
-        if price is not None:
-            lines.append(f"- {title} — {price:g}")
-        else:
-            lines.append(f"- {title}")
-    return " ".join(lines)
-
-
-def should_use_price_relaxed_template(
-    *,
-    price_relaxed: bool,
-    products: list[Any],
-    price_min: float | None,
-    price_max: float | None,
-) -> bool:
-    if not price_relaxed or (price_min is None and price_max is None):
-        return False
-    return len(products_within_price_bounds(products, price_min=price_min, price_max=price_max)) == 0

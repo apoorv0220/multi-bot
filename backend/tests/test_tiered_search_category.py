@@ -37,6 +37,7 @@ def test_semantic_catalog_requires_category_match_when_hints_active():
         hits,
         ["basins"],
         require_match=True,
+        profile=_bath_profile(),
     )
     assert len(filtered) == 1
     assert "Countertop" in filtered[0].payload["categories"][1]

@@ -204,6 +204,7 @@ def resolve_source_plan(source_config: dict[str, Any]) -> SourcePlan:
             include_legacy_external=False,
             include_woocommerce_catalog=False,
             include_magento_catalog=False,
+            include_magento_cms=False,
             include_static_urls=True,
         )
     if provider == "woocommerce":
@@ -214,6 +215,7 @@ def resolve_source_plan(source_config: dict[str, Any]) -> SourcePlan:
             include_legacy_external=False,
             include_woocommerce_catalog=mode in {"wordpress", "mixed"},
             include_magento_catalog=False,
+            include_magento_cms=False,
             include_static_urls=mode in {"static", "mixed"},
         )
     if provider == "magento":
@@ -223,7 +225,8 @@ def resolve_source_plan(source_config: dict[str, Any]) -> SourcePlan:
             include_wordpress_content=False,
             include_legacy_external=False,
             include_woocommerce_catalog=False,
-            include_magento_catalog=mode in {"magento", "wordpress", "mixed"},
+            include_magento_catalog=mode in {"magento", "mixed"},
+            include_magento_cms=mode in {"magento", "mixed"},
             include_static_urls=mode in {"static", "mixed"},
         )
     return SourcePlan(
@@ -233,6 +236,7 @@ def resolve_source_plan(source_config: dict[str, Any]) -> SourcePlan:
         include_legacy_external=mode == "wordpress",
         include_woocommerce_catalog=False,
         include_magento_catalog=False,
+        include_magento_cms=False,
         include_static_urls=mode in {"static", "mixed"},
     )
 

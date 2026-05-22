@@ -16,7 +16,11 @@
           "basin": "basins",
           "sink": "basins",
           "sinks": "basins"
-        }
+        },
+        "hard_filter": true,
+        "demote_accessory_substrings": true,
+        "fixture_stem": "basin",
+        "accessory_keywords": ["tap", "mixer"]
       },
       {
         "id": "showers",
@@ -28,7 +32,8 @@
         ],
         "aliases": {
           "shower": "showers"
-        }
+        },
+        "hard_filter": true
       },
       {
         "id": "taps",
@@ -42,7 +47,8 @@
           "tap": "taps",
           "faucet": "taps",
           "faucets": "taps"
-        }
+        },
+        "hard_filter": true
       }
     ]
   },

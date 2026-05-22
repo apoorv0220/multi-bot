@@ -124,6 +124,38 @@ class MagentoCatalogAdapter(SourceAdapter):
                 )
             )
 
+        include_cms = bool(ctx.source_config.get("include_magento_cms", True))
+        if include_cms:
+            for page in fetcher.fetch_cms_pages():
+                title = (page.get("title") or "").strip()
+                body = _strip_html(page.get("content"))
+                identifier = (page.get("identifier") or "").strip()
+                if not title and not body:
+                    continue
+                page_id = str(page.get("id"))
+                slug = identifier or page_id
+                url = f"{base_url.rstrip('/')}/{slug}.html" if base_url else f"/{slug}"
+                identifier_lower = identifier.lower()
+                if any(
+                    token in identifier_lower
+                    for token in ("return", "refund", "shipping", "delivery", "policy", "privacy", "terms")
+                ):
+                    content_kind = "support_page"
+                else:
+                    content_kind = "cms_page"
+                records.append(
+                    SourceRecord(
+                        source_provider="magento",
+                        content_kind=content_kind,
+                        entity_id=page_id,
+                        title=title or identifier or "CMS page",
+                        body=body,
+                        summary=body[:240] if body else None,
+                        canonical_url=url,
+                        metadata={"identifier": identifier},
+                    )
+                )
+
         for category in fetcher.fetch_categories():
             title = (category.get("title") or "").strip()
             if not title:

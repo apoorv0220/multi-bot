@@ -153,7 +153,11 @@ def merge_prepass_and_llm(prepass: StructuredQuery, llm: StructuredQuery) -> Str
     for facet_id, spec in llm.facets.items():
         if facet_id in prepass.facets and prepass.facets[facet_id].values:
             continue
-        merged.facets[facet_id] = FacetSpec(values=list(spec.values), combine=spec.combine)
+        merged.facets[facet_id] = FacetSpec(
+            values=list(spec.values),
+            combine=spec.combine,
+            exclude_values=list(spec.exclude_values),
+        )
 
     if prepass.price.min is None and prepass.price.max is None:
         if llm.price.min is not None:
@@ -177,10 +181,6 @@ def merge_prepass_and_llm(prepass: StructuredQuery, llm: StructuredQuery) -> Str
     return merged
 
 
-_PRODUCT_TYPE_PATTERN = re.compile(
-    r"\b(?:taps?|faucets?|basins?|sinks?|toilets?|showers?|baths?|wcs?)\b",
-    re.IGNORECASE,
-)
 _PRICE_ONLY_PATTERN = re.compile(
     r"^\s*(?:under|below|over|above|max|min)?\s*\$?\d+(?:\.\d+)?\s*$",
     re.IGNORECASE,
@@ -189,31 +189,6 @@ _PRICE_ONLY_PATTERN = re.compile(
 
 def _normalize_token(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip().lower())
-
-
-def _prepass_reflects_product_type(message: str, prepass: StructuredQuery, profile: dict[str, Any] | None) -> bool:
-    if not profile:
-        return True
-    category_blob = " ".join(_normalize_token(v) for v in prepass.category.values)
-    gazetteer = (profile.get("category_strategy") or {}).get("gazetteer") or []
-    for match in _PRODUCT_TYPE_PATTERN.finditer(message):
-        token = _normalize_token(match.group(0))
-        stem = token.rstrip("s")
-        if not token:
-            continue
-        if stem in category_blob or token in category_blob:
-            continue
-        for entry in gazetteer:
-            cat_id = _normalize_token(str(entry.get("id") or ""))
-            label_norms = {_normalize_token(str(label)) for label in (entry.get("labels") or [])}
-            label_norms.add(cat_id)
-            token_variants = {token, stem, f"{stem}s"}
-            if not token_variants.intersection(label_norms) and stem != cat_id.rstrip("s"):
-                continue
-            if cat_id in category_blob or any(label in category_blob for label in label_norms):
-                break
-            return False
-    return True
 
 
 def should_skip_llm(
@@ -236,9 +211,9 @@ def should_skip_llm(
         return False
     if prepass.intent != "catalog":
         return False
-    if profile and _PRODUCT_TYPE_PATTERN.search(message) and not _prepass_reflects_product_type(
-        message, prepass, profile
-    ):
+    from retrieval.category_match import prepass_missing_hard_filter_category
+
+    if profile and prepass_missing_hard_filter_category(message, prepass, profile):
         return False
     if re.search(r"\b(?:or|either)\b", message, re.IGNORECASE):
         return False

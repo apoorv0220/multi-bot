@@ -9,10 +9,13 @@ from retrieval.planner import RetrievalPlan, _has_product_type_category
 from retrieval.post_filter import (
     MatchMode,
     RetrievalTier,
+    boost_results_by_facets,
     filter_results_by_category_hints,
     filter_results_by_category_tier,
+    filter_results_by_facet_excludes,
     filter_results_by_price,
     match_mode_for_tier,
+    prefer_category_tier_hits,
     sort_results_by_category_tier,
 )
 
@@ -125,10 +128,10 @@ async def _run_variant(
     category_values: list[str] | None = None,
     profile: dict[str, Any] | None = None,
     tier: RetrievalTier = "strict",
+    soft_facet_boosts: dict[str, list[str]] | None = None,
+    facet_excludes: dict[str, list[str]] | None = None,
 ) -> list[Any]:
     hits = await search_fn(filters)
-    if price_min is not None or price_max is not None:
-        hits = filter_results_by_price(hits, min_price=price_min, max_price=price_max)
     if category_hint_terms:
         has_qdrant_category = bool((filters or {}).get("categories"))
         require_category = bool(
@@ -145,10 +148,17 @@ async def _run_variant(
             hits,
             category_hint_terms,
             require_match=require_category,
+            profile=profile,
         )
-        hits = sort_results_by_category_tier(hits, category_hint_terms)
+        hits = sort_results_by_category_tier(hits, category_hint_terms, profile)
         if _has_product_type_category(category_values or [], profile):
-            hits = filter_results_by_category_tier(hits, category_hint_terms)
+            hits = filter_results_by_category_tier(hits, category_hint_terms, profile=profile)
+    if price_min is not None or price_max is not None:
+        hits = filter_results_by_price(hits, min_price=price_min, max_price=price_max)
+    hits = boost_results_by_facets(hits, soft_facet_boosts)
+    hits = filter_results_by_facet_excludes(hits, facet_excludes)
+    if category_hint_terms and not (filters or {}).get("categories"):
+        hits = prefer_category_tier_hits(hits, category_hint_terms, profile)
     return hits
 
 
@@ -169,6 +179,8 @@ async def execute_tiered_search(
             category_hint_terms=plan.category_hint_terms,
             category_values=plan.category_values,
             profile=profile,
+            soft_facet_boosts=plan.soft_facet_boosts,
+            facet_excludes=plan.facet_excludes,
         )
         return TieredSearchResult(hits=hits, tier="strict", match_mode="exact")
 
@@ -206,6 +218,8 @@ async def execute_tiered_search(
                 category_values=plan.category_values,
                 profile=profile,
                 tier=tier,
+                soft_facet_boosts=plan.soft_facet_boosts,
+                facet_excludes=plan.facet_excludes,
             )
             if len(hits) >= min_hits:
                 return TieredSearchResult(

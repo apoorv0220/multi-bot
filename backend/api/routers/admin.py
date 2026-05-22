@@ -127,6 +127,21 @@ async def get_tenant_retrieval_profile(
     return await admin_service.get_tenant_retrieval_profile(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
 
+@router.patch("/api/admin/tenants/{tenant_id}/retrieval-profile/gazetteer")
+async def patch_tenant_retrieval_profile_gazetteer(
+    tenant_id: str,
+    payload: legacy_main.RetrievalProfileGazetteerPatchRequest,
+    user_ctx=Depends(legacy_main.get_current_user),
+    db=Depends(legacy_main.db_session),
+):
+    return await legacy_main.patch_tenant_retrieval_profile_gazetteer(
+        tenant_id=tenant_id,
+        payload=payload,
+        user_ctx=user_ctx,
+        db=db,
+    )
+
+
 @router.get("/api/admin/reference/countries")
 async def list_reference_countries(user_ctx=Depends(legacy_main.get_current_user)):
     return await admin_service.list_reference_countries(user_ctx=user_ctx)

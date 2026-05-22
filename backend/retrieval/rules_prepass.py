@@ -25,6 +25,10 @@ OVER_PRICE_PATTERN = re.compile(r"\b(?:over|above|min)\s+\$?(\d+(?:\.\d+)?)", re
 CLEAR_PRICE_PATTERN = re.compile(r"\b(?:no price|clear price|remove price)\b", re.IGNORECASE)
 CLEAR_CATEGORY_PATTERN = re.compile(r"\b(?:clear category|any category)\b", re.IGNORECASE)
 CLEAR_ALL_PATTERN = re.compile(r"\b(?:start over|reset filters|clear all)\b", re.IGNORECASE)
+NEGATION_PATTERN = re.compile(
+    r"\b(?:and\s+)?(?:no|not|without|nothing\s+in)\s+(?P<val>[a-z][a-z0-9\-]+(?:\s+[a-z][a-z0-9\-]+)?)",
+    re.IGNORECASE,
+)
 SHOPPING_VERBS = (
     "want",
     "need",
@@ -38,10 +42,6 @@ SHOPPING_VERBS = (
     "search for",
 )
 COLOUR_FINISH_FACET_KEYS = frozenset({"colour", "color", "finish"})
-PRODUCT_TYPE_PATTERN = re.compile(
-    r"\b(?:taps?|faucets?|basins?|sinks?|toilets?|showers?|baths?|wcs?)\b",
-    re.IGNORECASE,
-)
 
 
 def _normalize_label(value: str) -> str:
@@ -78,6 +78,35 @@ def _extract_explicit_size_phrase(message: str) -> str | None:
     if not match:
         return None
     return _normalize_label(match.group("value"))
+
+
+_PRODUCT_TYPE_CATEGORY_PATTERNS: list[tuple[re.Pattern[str], tuple[str, ...]]] = [
+    (re.compile(r"\b(?:t-?shirts?|tees)\b", re.IGNORECASE), ("tee", "shirt", "tops")),
+    (re.compile(r"\btank\s+tops?\b", re.IGNORECASE), ("tank", "tops", "bras")),
+    (re.compile(r"\b(?:trousers|pants)\b", re.IGNORECASE), ("pants", "trouser", "pant")),
+    (re.compile(r"\bjackets?\b", re.IGNORECASE), ("jacket",)),
+    (re.compile(r"\b(?:hoodies|sweatshirts?)\b", re.IGNORECASE), ("hoodie", "sweatshirt")),
+    (re.compile(r"\bbags?\b", re.IGNORECASE), ("bag",)),
+]
+
+
+def _match_category_product_type(message: str, profile: dict[str, Any] | None) -> tuple[list[str], float]:
+    """Prefer garment-type categories (tees, pants) over collection buckets like erin_recommends."""
+    if not profile:
+        return [], 0.0
+    gazetteer = (profile.get("category_strategy") or {}).get("gazetteer") or []
+    for pattern, stems in _PRODUCT_TYPE_CATEGORY_PATTERNS:
+        if not pattern.search(message):
+            continue
+        for entry in gazetteer:
+            cat_id = str(entry.get("id") or "").strip().lower()
+            if not cat_id or cat_id in {"erin_recommends", "default_category", "sale", "new"}:
+                continue
+            labels = [str(x).strip().lower() for x in (entry.get("labels") or []) + (entry.get("normalized") or [])]
+            haystacks = [cat_id, cat_id.replace("_", " ")] + labels
+            if any(any(stem in h for stem in stems) for h in haystacks):
+                return [cat_id], 0.89
+    return [], 0.0
 
 
 def _match_gazetteer(query: str, profile: dict[str, Any] | None) -> tuple[list[str], float]:
@@ -252,33 +281,9 @@ def _is_colour_only_facets(facets: dict[str, FacetSpec]) -> bool:
 
 
 def _product_type_terms_in_query(message: str, profile: dict[str, Any] | None) -> list[str]:
-    if not profile:
-        return []
-    q_tokens = set(_tokenize(message))
-    q_norm = _normalize_label(message)
-    hits: list[str] = []
-    gazetteer = (profile.get("category_strategy") or {}).get("gazetteer") or []
-    for entry in gazetteer:
-        labels = list(entry.get("labels") or []) + list(entry.get("normalized") or [])
-        cat_id = str(entry.get("id") or "").strip().lower()
-        aliases = entry.get("aliases") or {}
-        if isinstance(aliases, dict):
-            labels.extend(str(alias) for alias in aliases.keys())
-            labels.extend(str(canonical) for canonical in aliases.values())
-        for label in labels:
-            label_norm = _normalize_label(label)
-            if not label_norm:
-                continue
-            if label_norm in q_tokens or label_norm in q_norm:
-                if cat_id and cat_id not in hits:
-                    hits.append(cat_id)
-                if label_norm not in hits:
-                    hits.append(label_norm)
-    for match in PRODUCT_TYPE_PATTERN.finditer(message):
-        token = _normalize_label(match.group(0))
-        if token and token not in hits:
-            hits.append(token)
-    return list(dict.fromkeys(hits))
+    from retrieval.category_match import hard_filter_category_terms_in_message
+
+    return hard_filter_category_terms_in_message(message, profile)
 
 
 def _boost_category_over_colour_only_facets(
@@ -299,16 +304,57 @@ def _boost_category_over_colour_only_facets(
     return merged, boosted_conf
 
 
+def _apply_negation_phrases(
+    message: str,
+    facets: dict[str, FacetSpec],
+    profile: dict[str, Any] | None,
+) -> None:
+    if not profile:
+        return
+    profile_facets = (profile.get("facets") or {})
+    for match in NEGATION_PATTERN.finditer(message):
+        token = _normalize_label(match.group("val"))
+        if not token:
+            continue
+        for facet_id, meta in profile_facets.items():
+            samples = [str(s) for s in (meta.get("sample_values") or []) if s]
+            aliases = meta.get("value_aliases") or {}
+            alias_hits = (
+                [_normalize_label(k) for k in aliases.keys()]
+                if isinstance(aliases, dict)
+                else []
+            )
+            matched = token in {_normalize_label(s) for s in samples}
+            matched = matched or token in alias_hits
+            if not matched and not any(token in _normalize_label(s) for s in samples):
+                continue
+            spec = facets.setdefault(facet_id, FacetSpec(values=[], combine="OR"))
+            spec.values = [v for v in spec.values if _normalize_label(v) != token]
+            excludes = list(spec.exclude_values)
+            if token not in excludes:
+                excludes.append(token)
+            spec.exclude_values = excludes
+
+
 def _strip_matched_tokens(free_text: str, category_values: list[str], facets: dict[str, FacetSpec]) -> str:
     remaining = _POSSESSIVE_PATTERN.sub(r"\1", free_text or "")
     remaining = re.sub(r"\b's\b", " ", remaining, flags=re.IGNORECASE)
     for cat in category_values:
+        cat = str(cat).strip()
+        if not cat:
+            continue
         remaining = re.sub(re.escape(cat), " ", remaining, flags=re.IGNORECASE)
     for spec in facets.values():
         for val in spec.values:
+            val = str(val).strip()
+            if not val:
+                continue
             remaining = re.sub(re.escape(val), " ", remaining, flags=re.IGNORECASE)
     for verb in SHOPPING_VERBS:
         remaining = re.sub(rf"\b{re.escape(verb)}\b", " ", remaining, flags=re.IGNORECASE)
+    remaining = re.sub(r",\s*,+", " ", remaining)
+    remaining = re.sub(r"\s*,\s*", " ", remaining)
+    remaining = re.sub(r",+", " ", remaining)
     return re.sub(r"\s+", " ", remaining).strip()
 
 
@@ -363,6 +409,12 @@ def rules_prepass(
             result.facets[facet_key] = FacetSpec(values=[value], combine="OR")
 
     cat_values, cat_conf = _match_gazetteer(message, profile)
+    product_type_values, product_type_conf = _match_category_product_type(message, profile)
+    if product_type_values and product_type_conf >= cat_conf:
+        cat_values, cat_conf = product_type_values, product_type_conf
+    elif product_type_values:
+        cat_values = list(dict.fromkeys(product_type_values + [v for v in cat_values if v != "erin_recommends"]))
+        cat_conf = max(cat_conf, product_type_conf)
     if cat_values and not explicit_category and cat_conf >= (result.category.confidence or 0.0):
         result.category.values = cat_values
         result.category.confidence = cat_conf
@@ -384,6 +436,7 @@ def rules_prepass(
             result.facets[facet_id] = spec
 
     _apply_within_facet_or(message, result.facets, profile)
+    _apply_negation_phrases(message, result.facets, profile)
 
     boosted_values, boosted_conf = _boost_category_over_colour_only_facets(
         message,

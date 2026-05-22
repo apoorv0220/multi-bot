@@ -6,18 +6,41 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from indexing.payloads import default_bucket_priority
+from retrieval.category_match import has_hard_filter_category, should_apply_hard_category_filter
+from retrieval.facet_match import facet_match_mode
 from retrieval.rules_prepass import term_present_as_word
 from retrieval.structured_query import StructuredQuery
 
-_PRODUCT_TYPE_PATTERN = re.compile(
-    r"\b(?:taps?|faucets?|basins?|sinks?|toilets?|showers?|baths?|wcs?)\b",
-    re.IGNORECASE,
-)
 _PRICE_ONLY_FREE_TEXT = re.compile(
     r"^\s*(?:under|below|over|above|max|min)?\s*(?:£|\$|€)?\s*\d+(?:\.\d+)?\s*$",
     re.IGNORECASE,
 )
+_DENSE_FILLER_PHRASE = re.compile(
+    r"\b(?:can you|could you|please|show me|find me|i need|i want|looking for|"
+    r"make those|make them|keep it|keep them|what about|how about)\b",
+    re.IGNORECASE,
+)
+_DENSE_FILLER_TOKENS = frozenset({
+    "some", "any", "the", "a", "an", "me", "those", "these", "them", "it",
+    "can", "you", "make", "keep", "under", "please", "show", "find", "want",
+    "need", "looking", "for", "about", "what", "how",
+})
 
+
+def _structured_has_dense_context(query: StructuredQuery) -> bool:
+    if query.category.values:
+        return True
+    if query.facets:
+        return True
+    if query.price.min is not None or query.price.max is not None:
+        return True
+    return False
+
+
+def _strip_dense_filler_text(text: str) -> str:
+    remaining = _DENSE_FILLER_PHRASE.sub(" ", text or "")
+    tokens = [t for t in remaining.split() if t.lower() not in _DENSE_FILLER_TOKENS]
+    return re.sub(r"\s+", " ", " ".join(tokens)).strip()
 
 def _expand_category_hint_terms(values: list[str], profile: dict[str, Any] | None) -> list[str]:
     """All gazetteer labels/ids that match user tokens (substring-friendly)."""
@@ -82,6 +105,8 @@ class RetrievalPlan:
     price_max: float | None = None
     category_hint_terms: list[str] = field(default_factory=list)
     category_values: list[str] = field(default_factory=list)
+    soft_facet_boosts: dict[str, list[str]] = field(default_factory=dict)
+    facet_excludes: dict[str, list[str]] = field(default_factory=dict)
     use_retrieval_hybrid: bool = False
 
 
@@ -98,73 +123,6 @@ def _lexical_query_text(query: StructuredQuery) -> str:
     sku_tokens = re.findall(r"\b[A-Z0-9][A-Z0-9\-]{3,}\b", query.free_text or "")
     parts.extend(sku_tokens)
     return " ".join(dict.fromkeys(p for p in parts if p)).strip()
-
-
-def _category_confidence_threshold(profile: dict[str, Any] | None) -> float:
-    if profile:
-        try:
-            return float(
-                (profile.get("category_strategy") or {}).get("confidence_threshold")
-                or os.getenv("RETRIEVAL_CATEGORY_CONFIDENCE_THRESHOLD", "0.75")
-            )
-        except (TypeError, ValueError):
-            pass
-    try:
-        return float(os.getenv("RETRIEVAL_CATEGORY_CONFIDENCE_THRESHOLD", "0.75"))
-    except ValueError:
-        return 0.75
-
-
-def _product_type_filter_enabled() -> bool:
-    return os.getenv("RETRIEVAL_CATEGORY_FILTER_ON_PRODUCT_TYPE", "true").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
-
-
-def _gazetteer_product_type_ids(profile: dict[str, Any] | None) -> set[str]:
-    ids: set[str] = set()
-    if not profile:
-        return ids
-    for entry in (profile.get("category_strategy") or {}).get("gazetteer") or []:
-        entry_id = str(entry.get("id") or "").strip().lower()
-        labels = " ".join(str(x) for x in (entry.get("labels") or []) + (entry.get("normalized") or []))
-        blob = f"{entry_id} {labels}".lower()
-        if _PRODUCT_TYPE_PATTERN.search(blob):
-            if entry_id:
-                ids.add(entry_id)
-    return ids
-
-
-def _has_product_type_category(values: list[str], profile: dict[str, Any] | None) -> bool:
-    if not values:
-        return False
-    product_ids = _gazetteer_product_type_ids(profile)
-    for val in values:
-        v = str(val).strip().lower()
-        if not v:
-            continue
-        if _PRODUCT_TYPE_PATTERN.search(v):
-            return True
-        if v in product_ids or v.rstrip("s") in product_ids:
-            return True
-    return False
-
-
-def _should_apply_product_type_category_filter(
-    query: StructuredQuery,
-    profile: dict[str, Any] | None,
-) -> bool:
-    if not _product_type_filter_enabled():
-        return False
-    if query.category.apply == "filter":
-        return False
-    if not query.category.values:
-        return False
-    if query.category.confidence < _category_confidence_threshold(profile):
-        return False
-    return _has_product_type_category(query.category.values, profile)
 
 
 def _is_price_only_free_text(text: str) -> bool:
@@ -187,7 +145,9 @@ def _catalog_dense_query_text(query: StructuredQuery) -> str:
     residual = (query.free_text or "").strip()
     if residual and re.fullmatch(r"[\s'\"]+", residual):
         residual = ""
-    filler_only = residual.lower() in {"some", "any", "the", "a", "an", "me", "those", "these", "them", "it"}
+    if _structured_has_dense_context(query):
+        residual = _strip_dense_filler_text(residual)
+    filler_only = not residual or all(t in _DENSE_FILLER_TOKENS for t in residual.lower().split())
     if residual and not filler_only and not _is_price_only_free_text(residual):
         parts.append(residual)
     elif query.price.max is not None:
@@ -234,7 +194,7 @@ def build_retrieval_plan(
 
     category_hint_terms: list[str] = []
     use_category_filter = query.category.apply == "filter"
-    if not use_category_filter and _should_apply_product_type_category_filter(query, profile):
+    if not use_category_filter and should_apply_hard_category_filter(query, profile):
         use_category_filter = True
     if use_category_filter and query.category.values:
         filters["categories"] = _expand_category_filter_values(query.category.values, profile)
@@ -247,16 +207,24 @@ def build_retrieval_plan(
 
     # Price bounds are applied in-app after vector search (see retrieval/post_filter.py).
 
+    soft_facet_boosts: dict[str, list[str]] = {}
+    facet_excludes: dict[str, list[str]] = {}
     for facet_id, spec in query.facets.items():
+        if spec.exclude_values:
+            facet_excludes[facet_id] = [v.lower() for v in spec.exclude_values]
         if facet_id == "brand" and spec.values:
             filters["brand"] = spec.values[0]
             continue
         if not spec.values:
             continue
-        facet_filters[facet_id] = {
-            "values": [v.lower() for v in spec.values],
-            "combine": spec.combine,
-        }
+        values = [v.lower() for v in spec.values]
+        if facet_match_mode(facet_id, profile) == "strict":
+            facet_filters[facet_id] = {
+                "values": values,
+                "combine": spec.combine,
+            }
+        else:
+            soft_facet_boosts[facet_id] = values
 
     if facet_filters:
         filters["facet_filters"] = facet_filters
@@ -294,5 +262,20 @@ def build_retrieval_plan(
         price_max=query.price.max,
         category_hint_terms=category_hint_terms,
         category_values=list(query.category.values),
+        soft_facet_boosts=soft_facet_boosts,
+        facet_excludes=facet_excludes,
         use_retrieval_hybrid=_hybrid_enabled_for_query(query, profile),
     )
+
+
+def _category_confidence_threshold(profile: dict[str, Any] | None) -> float:
+    from retrieval.category_match import _category_confidence_threshold as _threshold
+
+    return _threshold(profile)
+
+
+def _has_product_type_category(values: list[str], profile: dict[str, Any] | None) -> bool:
+    return has_hard_filter_category(values, profile)
+
+
+_should_apply_product_type_category_filter = should_apply_hard_category_filter

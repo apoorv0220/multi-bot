@@ -789,6 +789,7 @@ class Embedder:
                     "include_legacy_external": self.source_plan.include_legacy_external,
                     "include_woocommerce_catalog": self.source_plan.include_woocommerce_catalog,
                     "include_magento_catalog": self.source_plan.include_magento_catalog,
+                    "include_magento_cms": self.source_plan.include_magento_cms,
                     "include_static_urls": self.source_plan.include_static_urls,
                 },
                 "message": "All content reindexed successfully"
@@ -830,6 +831,7 @@ class Embedder:
                 "include_legacy_external": self.source_plan.include_legacy_external,
                 "include_woocommerce_catalog": self.source_plan.include_woocommerce_catalog,
                 "include_magento_catalog": self.source_plan.include_magento_catalog,
+                "include_magento_cms": self.source_plan.include_magento_cms,
                 "include_static_urls": self.source_plan.include_static_urls,
                 "url_fallback_base": self.url_fallback_base,
             },
@@ -840,7 +842,7 @@ class Embedder:
             batches.extend(await WordPressContentAdapter().discover(ctx))
         if self.source_plan.include_woocommerce_catalog:
             batches.extend(await WooCommerceCatalogAdapter().discover(ctx))
-        if self.source_plan.include_magento_catalog:
+        if self.source_plan.include_magento_catalog or self.source_plan.include_magento_cms:
             batches.extend(await MagentoCatalogAdapter().discover(ctx))
         if self.source_plan.include_static_urls:
             batches.extend(await StaticUrlAdapter().discover(ctx))
