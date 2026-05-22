@@ -80,8 +80,26 @@ def _extract_explicit_size_phrase(message: str) -> str | None:
     return _normalize_label(match.group("value"))
 
 
+_PRODUCT_TYPE_TIE_BREAK = (
+    "tees",
+    "tops",
+    "tanks",
+    "pants",
+    "jackets",
+    "hoodies_sweatshirts",
+    "bags",
+)
+
+
+def _product_type_tie_rank(cat_id: str) -> int:
+    try:
+        return _PRODUCT_TYPE_TIE_BREAK.index(cat_id)
+    except ValueError:
+        return len(_PRODUCT_TYPE_TIE_BREAK)
+
+
 _PRODUCT_TYPE_CATEGORY_PATTERNS: list[tuple[re.Pattern[str], tuple[str, ...]]] = [
-    (re.compile(r"\b(?:t-?shirts?|tees)\b", re.IGNORECASE), ("tee", "shirt", "tops")),
+    (re.compile(r"\b(?:t-?shirts?|tees)\b", re.IGNORECASE), ("tee", "shirt")),
     (re.compile(r"\btank\s+tops?\b", re.IGNORECASE), ("tank", "tops", "bras")),
     (re.compile(r"\b(?:trousers|pants)\b", re.IGNORECASE), ("pants", "trouser", "pant")),
     (re.compile(r"\bjackets?\b", re.IGNORECASE), ("jacket",)),
@@ -90,22 +108,55 @@ _PRODUCT_TYPE_CATEGORY_PATTERNS: list[tuple[re.Pattern[str], tuple[str, ...]]] =
 ]
 
 
+def _category_id_matches_stem(cat_id: str, stem: str) -> bool:
+    """Match stems to gazetteer ids by segment, not substring (shirt ≠ hoodies_sweatshirts)."""
+    stem = stem.strip().lower()
+    if not stem or not cat_id:
+        return False
+    parts = re.split(r"[_\-\s]+", cat_id.strip().lower())
+    if stem in parts:
+        return True
+    plural = f"{stem}s"
+    return plural in parts or any(part.rstrip("s") == stem for part in parts)
+
+
+def _product_type_entry_score(stems: tuple[str, ...], entry: dict[str, Any]) -> int:
+    cat_id = str(entry.get("id") or "").strip().lower()
+    if not cat_id or cat_id in {"erin_recommends", "default_category", "sale", "new"}:
+        return 0
+    labels = [str(x).strip().lower() for x in (entry.get("labels") or []) + (entry.get("normalized") or [])]
+    score = 0
+    for stem in stems:
+        if _category_id_matches_stem(cat_id, stem):
+            score += 100
+        for label in labels:
+            if term_present_as_word(stem, label):
+                score += 80
+    return score
+
+
 def _match_category_product_type(message: str, profile: dict[str, Any] | None) -> tuple[list[str], float]:
     """Prefer garment-type categories (tees, pants) over collection buckets like erin_recommends."""
     if not profile:
         return [], 0.0
     gazetteer = (profile.get("category_strategy") or {}).get("gazetteer") or []
+    best_id = ""
+    best_score = 0
     for pattern, stems in _PRODUCT_TYPE_CATEGORY_PATTERNS:
         if not pattern.search(message):
             continue
         for entry in gazetteer:
             cat_id = str(entry.get("id") or "").strip().lower()
-            if not cat_id or cat_id in {"erin_recommends", "default_category", "sale", "new"}:
-                continue
-            labels = [str(x).strip().lower() for x in (entry.get("labels") or []) + (entry.get("normalized") or [])]
-            haystacks = [cat_id, cat_id.replace("_", " ")] + labels
-            if any(any(stem in h for stem in stems) for h in haystacks):
-                return [cat_id], 0.89
+            score = _product_type_entry_score(stems, entry)
+            if score > best_score or (
+                score == best_score
+                and score > 0
+                and _product_type_tie_rank(cat_id) < _product_type_tie_rank(best_id)
+            ):
+                best_score = score
+                best_id = cat_id
+    if best_id:
+        return [best_id], 0.89
     return [], 0.0
 
 

@@ -25,6 +25,24 @@ def test_t_shirts_prefers_tee_category_over_erin_recommends():
     assert conf >= 0.85
 
 
+def test_t_shirts_not_hoodies_when_sweatshirt_id_contains_shirt_substring():
+    profile = {
+        "category_strategy": {
+            "gazetteer": [
+                {"id": "hoodies_sweatshirts", "labels": ["Hoodies & Sweatshirts"], "aliases": {}},
+                {"id": "tees", "labels": ["Tees"], "aliases": {}},
+                {"id": "tops", "labels": ["Tops"], "aliases": {}},
+            ]
+        }
+    }
+    values, conf = _match_category_product_type(
+        "Show me men's t-shirts, but nothing in red",
+        profile,
+    )
+    assert values[0] == "tees"
+    assert conf >= 0.85
+
+
 def test_pants_phrase_matches_pants_gazetteer():
     profile = _profile_with_tees_and_erin()
     values, conf = _match_category_product_type("Show me men's pants", profile)

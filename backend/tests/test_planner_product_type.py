@@ -60,6 +60,39 @@ def test_product_type_category_filter_on_combined_query():
     assert "tap" in plan.dense_query_text.lower()
 
 
+def test_dense_query_strips_facet_exclude_negation_phrases():
+    profile = {
+        "facets": {
+            "color": {"sample_values": ["Red", "Blue"], "value_aliases": {}, "indexed": True},
+            "material": {"sample_values": ["Wool", "Cotton"], "value_aliases": {}, "indexed": True},
+        },
+        "category_strategy": {
+            "gazetteer": [
+                {"id": "pants", "labels": ["Pants"], "aliases": {}},
+                {"id": "tees", "labels": ["Tees"], "aliases": {}},
+            ]
+        },
+        "stats": {"product_count": 100},
+    }
+    query = validate_structured_query(
+        rules_prepass("Show me men's pants, but nothing in red", profile=profile),
+        profile=profile,
+    )
+    plan = build_retrieval_plan(query, profile=profile)
+    dense = plan.dense_query_text.lower()
+    assert "pants" in dense
+    assert "red" not in dense
+    assert "nothing" not in dense
+
+    follow = validate_structured_query(
+        rules_prepass("And no wool", profile=profile, session_query=query),
+        profile=profile,
+    )
+    merged = merge_session_query(query, follow, user_message="And no wool")
+    plan2 = build_retrieval_plan(merged, profile=profile)
+    assert "wool" not in plan2.dense_query_text.lower()
+
+
 def test_price_follow_up_dense_query_includes_session_context():
     profile = _taps_profile()
     first = validate_structured_query(

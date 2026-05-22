@@ -1074,11 +1074,18 @@ def _catalog_skip_preprocess() -> bool:
 def _search_limit_for_plan(max_hits: int, plan: RetrievalPlan) -> int:
     multiplier = max(1, int(os.getenv("RETRIEVAL_SEARCH_LIMIT_MULTIPLIER", "5")))
     cap = max(1, int(os.getenv("CHAT_MAX_RESULTS_ABSOLUTE_CEILING", "50")))
+    if plan.facet_excludes:
+        try:
+            exclude_multiplier = max(2, int(os.getenv("RETRIEVAL_FACET_EXCLUDE_SEARCH_MULTIPLIER", "3")))
+        except ValueError:
+            exclude_multiplier = 3
+        multiplier = max(multiplier, multiplier * exclude_multiplier)
     if (
         plan.price_min is not None
         or plan.price_max is not None
         or plan.metadata_filters
         or plan.category_hint_terms
+        or plan.facet_excludes
     ):
         return min(max(max_hits * multiplier, max_hits), cap)
     return max_hits

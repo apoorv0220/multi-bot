@@ -25,6 +25,8 @@ _DENSE_FILLER_TOKENS = frozenset({
     "can", "you", "make", "keep", "under", "please", "show", "find", "want",
     "need", "looking", "for", "about", "what", "how",
 })
+_COLLECTION_CATEGORY_IDS = frozenset({"erin_recommends", "default_category", "sale", "new"})
+_PRODUCT_TYPE_PREPASSES_CONFIDENCE = 0.89
 
 
 def _structured_has_dense_context(query: StructuredQuery) -> bool:
@@ -41,6 +43,25 @@ def _strip_dense_filler_text(text: str) -> str:
     remaining = _DENSE_FILLER_PHRASE.sub(" ", text or "")
     tokens = [t for t in remaining.split() if t.lower() not in _DENSE_FILLER_TOKENS]
     return re.sub(r"\s+", " ", " ".join(tokens)).strip()
+
+
+def _strip_facet_exclude_phrases(text: str, query: StructuredQuery) -> str:
+    """Remove negation clauses so dense/lexical search is not biased toward excluded values."""
+    remaining = text or ""
+    for spec in query.facets.values():
+        for raw in spec.exclude_values:
+            val = re.escape(str(raw).strip().lower())
+            if not val:
+                continue
+            patterns = (
+                rf"(?:,?\s*)?\bbut\s+nothing\s+in\s+{val}\b",
+                rf"(?:,?\s*)?\bnothing\s+in\s+{val}\b",
+                rf"\b(?:no|not|without|excluding)\s+(?:the\s+)?(?:color\s+|colour\s+)?{val}\b",
+                rf"\band\s+no\s+{val}\b",
+            )
+            for pattern in patterns:
+                remaining = re.sub(pattern, " ", remaining, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", remaining).strip()
 
 def _expand_category_hint_terms(values: list[str], profile: dict[str, Any] | None) -> list[str]:
     """All gazetteer labels/ids that match user tokens (substring-friendly)."""
@@ -112,8 +133,9 @@ class RetrievalPlan:
 
 def _lexical_query_text(query: StructuredQuery) -> str:
     parts: list[str] = []
-    if query.free_text.strip():
-        parts.append(query.free_text.strip())
+    free_text = _strip_facet_exclude_phrases(query.free_text.strip(), query)
+    if free_text:
+        parts.append(free_text)
     if query.category.values:
         parts.extend(str(v) for v in query.category.values)
     for facet_id, spec in query.facets.items():
@@ -142,7 +164,7 @@ def _catalog_dense_query_text(query: StructuredQuery) -> str:
             v = str(val).strip()
             if v:
                 parts.append(v)
-    residual = (query.free_text or "").strip()
+    residual = _strip_facet_exclude_phrases((query.free_text or "").strip(), query)
     if residual and re.fullmatch(r"[\s'\"]+", residual):
         residual = ""
     if _structured_has_dense_context(query):
@@ -275,7 +297,11 @@ def _category_confidence_threshold(profile: dict[str, Any] | None) -> float:
 
 
 def _has_product_type_category(values: list[str], profile: dict[str, Any] | None) -> bool:
-    return has_hard_filter_category(values, profile)
+    if has_hard_filter_category(values, profile):
+        return True
+    if not values:
+        return False
+    return any(str(v).strip().lower() not in _COLLECTION_CATEGORY_IDS for v in values)
 
 
 _should_apply_product_type_category_filter = should_apply_hard_category_filter

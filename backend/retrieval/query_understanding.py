@@ -15,6 +15,8 @@ from retrieval.structured_query import CategorySpec, FacetSpec, StructuredQuery
 logger = logging.getLogger("query-understanding")
 
 _EXPLICIT_PREPASSES_CONFIDENCE = 0.95
+_PRODUCT_TYPE_PREPASSES_CONFIDENCE = 0.89
+_COLLECTION_CATEGORY_IDS = frozenset({"erin_recommends", "default_category", "sale", "new"})
 
 
 @dataclass
@@ -141,14 +143,25 @@ def merge_prepass_and_llm(prepass: StructuredQuery, llm: StructuredQuery) -> Str
     if llm.retrieval_rewrite.strip():
         merged.retrieval_rewrite = llm.retrieval_rewrite.strip()
 
-    prepass_explicit_category = prepass.category.confidence >= _EXPLICIT_PREPASSES_CONFIDENCE
+    prepass_product_type = bool(
+        prepass.category.values
+        and prepass.category.confidence >= _PRODUCT_TYPE_PREPASSES_CONFIDENCE
+        and all(str(v).strip().lower() not in _COLLECTION_CATEGORY_IDS for v in prepass.category.values)
+    )
+    prepass_explicit_category = (
+        prepass.category.confidence >= _EXPLICIT_PREPASSES_CONFIDENCE or prepass_product_type
+    )
     if not prepass_explicit_category and llm.category.values:
-        if not prepass.category.values or llm.category.confidence >= prepass.category.confidence:
-            merged.category = CategorySpec(
-                values=list(llm.category.values),
-                confidence=max(prepass.category.confidence, llm.category.confidence),
-                apply=prepass.category.apply,
-            )
+        llm_is_collection = all(
+            str(v).strip().lower() in _COLLECTION_CATEGORY_IDS for v in llm.category.values
+        )
+        if not (prepass_product_type and llm_is_collection):
+            if not prepass.category.values or llm.category.confidence >= prepass.category.confidence:
+                merged.category = CategorySpec(
+                    values=list(llm.category.values),
+                    confidence=max(prepass.category.confidence, llm.category.confidence),
+                    apply=prepass.category.apply,
+                )
 
     for facet_id, spec in llm.facets.items():
         if facet_id in prepass.facets and prepass.facets[facet_id].values:

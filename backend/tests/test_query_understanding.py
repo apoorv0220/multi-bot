@@ -18,6 +18,18 @@ def _llm_response(payload: dict):
     return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))])
 
 
+def test_merge_prepass_and_llm_keeps_product_type_category_over_collection():
+    prepass = empty_structured_query(intent="catalog")
+    prepass.category.values = ["tops"]
+    prepass.category.confidence = 0.89
+    prepass.category.apply = "hint"
+    llm = empty_structured_query(intent="catalog")
+    llm.category.values = ["erin_recommends"]
+    llm.category.confidence = 0.92
+    merged = merge_prepass_and_llm(prepass, llm)
+    assert merged.category.values == ["tops"]
+
+
 def test_merge_prepass_and_llm_keeps_explicit_category():
     prepass = empty_structured_query(intent="catalog")
     prepass.category.values = ["basins"]

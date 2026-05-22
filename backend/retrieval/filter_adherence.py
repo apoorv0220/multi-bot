@@ -144,13 +144,23 @@ def filter_adherence_instruction(
         cats = ", ".join(gap.get("category") or []) or "that category"
         price = gap.get("price_max")
         price_bit = f" under {price:g}" if price is not None else ""
-        parts.append(
-            f"Search found {gap.get('hit_count', 0)} related items but none became listable products "
-            f"with the active filters ({cats}{price_bit}, size, colour, etc.). "
-            f"In one short sentence say you could not find an exact match for what they asked "
-            f"(e.g. no red jackets in size M under $50) and suggest loosening colour, size, or price. "
-            f"Do not invent products."
-        )
+        excl = gap.get("facet_excludes") or {}
+        excl_bits = ", ".join(f"no {vals[0]}" for vals in excl.values() if vals)
+        if excl_bits:
+            parts.append(
+                f"Search found {gap.get('hit_count', 0)} related items but none could be listed as products "
+                f"for {cats} with exclusions ({excl_bits}){price_bit}. "
+                f"Say briefly that nothing listable matched those filters yet; suggest loosening an exclusion "
+                f"or colour. Do not claim the catalog has zero {cats} and do not invent products."
+            )
+        else:
+            parts.append(
+                f"Search found {gap.get('hit_count', 0)} related items but none became listable products "
+                f"with the active filters ({cats}{price_bit}, size, colour, etc.). "
+                f"In one short sentence say you could not find an exact match for what they asked "
+                f"(e.g. no red jackets in size M under $50) and suggest loosening colour, size, or price. "
+                f"Do not invent products."
+            )
     sub = (adherence or {}).get("color_substitute")
     if sub:
         user = ", ".join(sub.get("user") or [])
