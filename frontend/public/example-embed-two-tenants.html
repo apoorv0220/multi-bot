@@ -12,7 +12,7 @@
       padding: 24px;
       line-height: 1.6;
     }
-    h1 { color: #bf362e; }
+    h1 { color: var(--embed-primary, #bf362e); }
     .card {
       border: 1px solid #ddd;
       border-radius: 8px;
@@ -48,6 +48,7 @@
 </head>
 <body>
   <script src="/runtime-config.js"></script>
+  <script src="/example-embed-branding.js"></script>
   <h1>Two-Tenant Embed Demo</h1>
   <p>
     Yes, your understanding is correct: plugin integration stays the same, but each client site should use its own tenant config/key.
@@ -56,7 +57,7 @@
 
   <div class="card">
     <h2>Tenant A</h2>
-    <p><strong>Name:</strong> Migraine</p>
+    <p><strong>Name:</strong> <span data-tenant-brand="migraine">Loading…</span></p>
     <p><strong>Tenant ID:</strong> <code>4c97be2e-0adf-4101-b215-9e612f7b35b7</code></p>
     <p><strong>Demo Public Key:</strong> <code>demo_pub_migraine_4c97be2e</code></p>
     <pre>&lt;script&gt;
@@ -71,7 +72,7 @@ window.CHATBOT_WIDGET_CONFIG = {
 
   <div class="card">
     <h2>Tenant B</h2>
-    <p><strong>Name:</strong> Default Tenant</p>
+    <p><strong>Name:</strong> <span data-tenant-brand="default">Loading…</span></p>
     <p><strong>Tenant ID:</strong> <code>7721e85d-9290-4464-b02d-f87f12bc48c0</code></p>
     <p><strong>Demo Public Key:</strong> <code>demo_pub_default_7721e85d</code></p>
     <pre>&lt;script&gt;
@@ -104,6 +105,20 @@ window.CHATBOT_WIDGET_CONFIG = {
       },
     };
 
+    async function loadTenantBrandLabels() {
+      for (const [key, config] of Object.entries(TENANT_CONFIGS)) {
+        const data = await window.applyExampleEmbedBranding?.({
+          tenantPublicKey: config.tenantPublicKey,
+          apiUrl: config.apiUrl,
+          skipDomUpdates: true,
+        });
+        const label = (data && (data.brand_name || data.header_title)) || key;
+        document.querySelectorAll(`[data-tenant-brand="${key}"]`).forEach((node) => {
+          node.textContent = label;
+        });
+      }
+    }
+
     function removeExistingWidget() {
       const iframe = document.getElementById("mrnwebdesigns-chatbot-iframe");
       const button = document.getElementById("mrnwebdesigns-chatbot-toggle");
@@ -112,15 +127,20 @@ window.CHATBOT_WIDGET_CONFIG = {
       document.querySelectorAll("script[data-widget-loader='true']").forEach((el) => el.remove());
     }
 
-    function loadTenant(tenantKey) {
+    async function loadTenant(tenantKey) {
       removeExistingWidget();
       window.CHATBOT_WIDGET_CONFIG = TENANT_CONFIGS[tenantKey];
+      await window.applyExampleEmbedBranding?.({
+        titleText: "{brand} Chatbot - Two-Tenant Demo",
+      });
       const script = document.createElement("script");
       script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
       script.async = true;
       script.dataset.widgetLoader = "true";
       document.body.appendChild(script);
     }
+
+    loadTenantBrandLabels();
   </script>
 </body>
 </html>

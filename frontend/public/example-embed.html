@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MRN Web Designs Chatbot - Embed Example</title>
+  <title>Chatbot - Embed Example</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -13,7 +13,7 @@
       line-height: 1.6;
     }
     h1 {
-      color: #bf362e;
+      color: var(--embed-primary, #bf362e);
     }
     pre {
       background-color: #f5f5f5;
@@ -31,9 +31,10 @@
 </head>
 <body>
   <script src="/runtime-config.js"></script>
-  <h1>MRN Web Designs Chatbot - Embed Example</h1>
+  <script src="/example-embed-branding.js"></script>
+  <h1 data-embed-title>Chatbot - Embed Example</h1>
   
-  <p>This page demonstrates how to embed the MRN Web Designs AI chatbot into any website.</p>
+  <p data-embed-intro>This page demonstrates how to embed the store AI chatbot into any website.</p>
   
   <h2>How to Embed the Chatbot</h2>
   
@@ -70,19 +71,18 @@
     <li>Responsive design (works on mobile and desktop)</li>
   </ul>
   
-  <!-- Example of how to embed the chatbot -->
   <script>
-    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
-    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
-    window.CHATBOT_WIDGET_CONFIG = {
-      baseUrl: resolvedWidgetBaseUrl,
-      apiUrl: resolvedApiBaseUrl,
-      // Demo key only — production sites paste their own tenant embed key here (not from runtime-config).
-      tenantPublicKey: "demo_pub_magento_5a83cg1y",
-    };
-    
-    // Load the widget script
-    (function() {
+    (async function () {
+      const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+      const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+      window.CHATBOT_WIDGET_CONFIG = {
+        baseUrl: resolvedWidgetBaseUrl,
+        apiUrl: resolvedApiBaseUrl,
+        tenantPublicKey: "demo_pub_magento_5a83cg1y",
+      };
+
+      await window.applyExampleEmbedBranding?.();
+
       const script = document.createElement('script');
       script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + '/widget.js';
       script.async = true;

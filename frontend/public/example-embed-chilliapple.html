@@ -3,20 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Embed Example - Chilliapple Tenant</title>
+  <title>Chatbot - Embed Example</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; line-height: 1.6; }
-    h1 { color: #bf362e; }
+    h1 { color: var(--embed-primary, #bf362e); }
     pre { background-color: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }
     .note { background-color: #fffde7; padding: 15px; border-left: 4px solid #ffd600; margin: 20px 0; }
   </style>
 </head>
 <body>
   <script src="/runtime-config.js"></script>
-  <h1>Chatbot Embed Example - Chilliapple Tenant</h1>
-  <p>This page demonstrates the public website embed for the <strong>Chilliapple</strong> tenant.</p>
+  <script src="/example-embed-branding.js"></script>
+  <h1 data-embed-title>Chatbot - Embed Example</h1>
+  <p data-embed-intro>This page demonstrates how to embed the store AI chatbot into any website.</p>
   <p>
-    Update <code>tenantPublicKey</code> to the Chilliapple widget key that is mapped in
+    Update <code>tenantPublicKey</code> to the widget key that is mapped in
     <code>WIDGET_EMBED_KEYS_JSON</code>.
   </p>
 
@@ -27,7 +28,7 @@
 window.CHATBOT_WIDGET_CONFIG = {
   baseUrl: "https://your-frontend-domain",
   apiUrl: "https://your-backend-domain",
-  tenantPublicKey: "demo_pub_chilliapple_replace_me"
+  tenantPublicKey: "demo_pub_chilliapple_4c97be2e"
 };
 (function () {
   const script = document.createElement("script");
@@ -50,14 +51,17 @@ window.CHATBOT_WIDGET_CONFIG = {
   </ul>
 
   <script>
-    const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
-    const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
-    window.CHATBOT_WIDGET_CONFIG = {
-      baseUrl: resolvedWidgetBaseUrl,
-      apiUrl: resolvedApiBaseUrl,
-      tenantPublicKey: "demo_pub_chilliapple_4c97be2e",
-    };
-    (function () {
+    (async function () {
+      const resolvedWidgetBaseUrl = window.RUNTIME_CONFIG?.WIDGET_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+      const resolvedApiBaseUrl = window.RUNTIME_CONFIG?.API_BASE_URL || `${window.location.protocol}//${window.location.host}`;
+      window.CHATBOT_WIDGET_CONFIG = {
+        baseUrl: resolvedWidgetBaseUrl,
+        apiUrl: resolvedApiBaseUrl,
+        tenantPublicKey: "demo_pub_chilliapple_4c97be2e",
+      };
+
+      await window.applyExampleEmbedBranding?.();
+
       const script = document.createElement("script");
       script.src = window.CHATBOT_WIDGET_CONFIG.baseUrl + "/widget.js";
       script.async = true;
