@@ -6,6 +6,7 @@ import ipaddress
 import re
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -89,8 +90,19 @@ from retrieval.session_query import (
 )
 from retrieval.trace import build_retrieval_trace, retrieval_debug_enabled
 from retrieval.structured_query import StructuredQuery, empty_structured_query
+from retrieval.chat_orchestrator import (
+    apply_sort_to_results,
+    build_static_response,
+    classify_turn,
+    ensure_commerce_catalog_intent,
+    session_structured_query_for_writeback,
+)
+from retrieval.match_quality import classify_match_quality_for_results, finalize_response_subtype
+from retrieval.response_composer import compose_search_intro
+from retrieval.tools.product_refs import extract_product_title_from_message
 from indexing.progress import normalize_reindex_progress
 from retrieval.profile import apply_retrieval_profile_to_tenant, retrieval_profile_summary
+from commerce.currency import currency_from_profile, normalize_currency_code
 from sources.config import (
     coerce_source_mode_for_provider,
     normalize_source_provider,
@@ -107,6 +119,11 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
 logger = logging.getLogger("chatbot-api")
+
+_SINGULAR_CHEAPEST_RE = re.compile(
+    r"\b(?:what(?:'|\s+is)\s+the\s+cheapest|the\s+cheapest\s+(?:product|item))\b",
+    re.IGNORECASE,
+)
 
 app = FastAPI(title="Multi-Tenant Chatbot API")
 app.add_middleware(
@@ -210,6 +227,23 @@ class ChatProduct(BaseModel):
     brand: Optional[str] = None
     image_url: Optional[str] = None
     score: Optional[float] = None
+    rating: Optional[float] = None
+    review_count: Optional[int] = None
+    match_quality: Optional[str] = None
+    missed_constraints: Optional[List[str]] = None
+    currency: Optional[str] = None
+
+
+class ChatCategoryLink(BaseModel):
+    name: str
+    url: Optional[str] = None
+    product_count: Optional[int] = None
+
+
+class ChatAction(BaseModel):
+    type: str = "link"
+    label: str
+    url: str
 
 
 class ChatRequest(BaseModel):
@@ -226,6 +260,10 @@ class ChatResponse(BaseModel):
     confidence: Optional[float] = None
     sources: Optional[List[SearchResult]] = None
     products: Optional[List[ChatProduct]] = None
+    categories: Optional[List[ChatCategoryLink]] = None
+    actions: Optional[List[ChatAction]] = None
+    meta: Optional[Dict[str, Any]] = None
+    response_subtype: Optional[str] = None
     retrieval_tier: Optional[str] = None
     match_mode: Optional[str] = None
     retrieval_debug: Optional[Dict[str, Any]] = None
@@ -956,6 +994,72 @@ def _tenant_retrieval_profile(tenant_row: Optional[Tenant]) -> Optional[dict[str
     return profile if isinstance(profile, dict) else None
 
 
+def _tenant_currency(
+    tenant_row: Optional[Tenant],
+    profile: Optional[dict[str, Any]] = None,
+) -> str:
+    prof = profile if profile is not None else _tenant_retrieval_profile(tenant_row)
+    return currency_from_profile(prof)
+
+
+def _with_currency_meta(meta: Optional[dict[str, Any]], currency: str) -> dict[str, Any]:
+    merged = dict(meta or {})
+    merged.setdefault("currency", currency)
+    return merged
+
+
+def _resolve_website_url(
+    tenant_row: Optional[Tenant],
+    results: list[Any] | None = None,
+) -> str | None:
+    if tenant_row and (tenant_row.widget_website_url or "").strip():
+        return tenant_row.widget_website_url.strip()
+    for result in results or []:
+        payload = getattr(result, "payload", None) or {}
+        url = (payload.get("url") or "").strip()
+        if url:
+            base = get_base_url(url)
+            if base:
+                return base
+    return None
+
+
+async def _apply_turn_adequacy(
+    *,
+    message: str,
+    answer: str,
+    response_subtype: str | None,
+    classification: Any,
+    products: list[ChatProduct] | None,
+    actions: list[dict[str, Any]] | None,
+    website_url: str | None,
+    structured_query_intent: str | None,
+    meta: dict[str, Any] | None,
+) -> tuple[str, list[ChatProduct] | None, list[dict[str, Any]] | None, str | None, dict[str, Any]]:
+    from retrieval.turn_adequacy import apply_turn_adequacy
+
+    adequacy = await apply_turn_adequacy(
+        user_message=message,
+        answer=answer,
+        response_subtype=response_subtype,
+        browse_all=bool(getattr(classification, "browse_all", False)),
+        products=products,
+        actions=actions,
+        website_url=website_url,
+        structured_query_intent=structured_query_intent,
+        llm_call=openai_adapter.create_structured_completion,
+    )
+    merged_meta = dict(meta or {})
+    merged_meta.update(adequacy.meta)
+    return (
+        adequacy.answer,
+        products,
+        adequacy.actions,
+        adequacy.response_subtype or response_subtype,
+        merged_meta,
+    )
+
+
 def _build_chat_system_prompt(
     tenant_row: Optional[Tenant],
     *,
@@ -989,12 +1093,15 @@ def _build_chat_system_prompt(
     )
 
 
-def _build_chat_products(filtered_results: list[Any]) -> list[ChatProduct]:
+def _build_chat_products(
+    filtered_results: list[Any],
+    match_scores: list[Any] | None = None,
+) -> list[ChatProduct]:
     from retrieval.catalog_cards import is_product_card_eligible
 
     products: list[ChatProduct] = []
     seen_entities: set[str] = set()
-    for result in filtered_results:
+    for index, result in enumerate(filtered_results):
         payload = result.payload or {}
         if not is_product_card_eligible(payload):
             continue
@@ -1009,6 +1116,19 @@ def _build_chat_products(filtered_results: list[Any]) -> list[ChatProduct]:
             continue
         price_raw = payload.get("price")
         price_val = float(price_raw) if price_raw not in (None, "") else None
+        rating_raw = payload.get("rating")
+        rating_val = float(rating_raw) if rating_raw not in (None, "") else None
+        review_raw = payload.get("review_count")
+        review_val = int(review_raw) if review_raw not in (None, "") else None
+        mq = None
+        missed = None
+        if match_scores and index < len(match_scores):
+            mq = match_scores[index].match_quality
+            missed = list(match_scores[index].missed_constraints or []) or None
+        currency_val = None
+        currency_raw = payload.get("currency")
+        if currency_raw not in (None, ""):
+            currency_val = normalize_currency_code(str(currency_raw))
         products.append(
             ChatProduct(
                 title=title,
@@ -1017,6 +1137,11 @@ def _build_chat_products(filtered_results: list[Any]) -> list[ChatProduct]:
                 brand=(payload.get("brand") or None),
                 image_url=payload.get("image_url"),
                 score=result.score,
+                rating=rating_val,
+                review_count=review_val,
+                match_quality=mq,
+                missed_constraints=missed,
+                currency=currency_val,
             )
         )
     return products
@@ -1339,6 +1464,7 @@ async def _run_chat_for_tenant(
     )
     session_state = _get_chat_session_state(session)
     retrieval_profile = _tenant_retrieval_profile(tenant_row)
+    tenant_currency = _tenant_currency(tenant_row, retrieval_profile)
 
     fuzzy_response = get_tenant_quick_reply(db, tenant_id, request.message, tenant_row)
     if fuzzy_response:
@@ -1371,6 +1497,7 @@ async def _run_chat_for_tenant(
             products=None,
             retrieval_tier=None,
             match_mode=None,
+            meta={"currency": tenant_currency},
         )
 
     structured_query, retrieval_plan, query_understanding, retrieval_debug_ctx, filter_stack = (
@@ -1380,6 +1507,106 @@ async def _run_chat_for_tenant(
             retrieval_profile,
         )
     )
+
+    classification = classify_turn(
+        request.message,
+        structured_query=structured_query,
+        session_state=session_state,
+        profile=retrieval_profile,
+    )
+    pre_intent = structured_query.intent
+    structured_query = ensure_commerce_catalog_intent(structured_query, classification)
+    if structured_query.intent == "catalog" and pre_intent != "catalog":
+        structured_query = apply_retrieval_rewrite(structured_query)
+        retrieval_plan = build_retrieval_plan(
+            structured_query,
+            profile=retrieval_profile,
+            tenant_profile=retrieval_profile,
+        )
+    if classification.sort:
+        structured_query.sort = classification.sort
+        structured_query = apply_retrieval_rewrite(structured_query)
+        retrieval_plan = build_retrieval_plan(
+            structured_query,
+            profile=retrieval_profile,
+            tenant_profile=retrieval_profile,
+        )
+
+    if classification.preserve_catalog_session and classification.response_subtype == "product_search":
+        prior_blob = session_state.get("structured_query") or {}
+        if prior_blob.get("category", {}).get("values") or prior_blob.get("facets") or prior_blob.get("price", {}).get("max"):
+            structured_query = validate_structured_query(
+                StructuredQuery.from_dict(prior_blob),
+                profile=retrieval_profile,
+            )
+            structured_query = apply_retrieval_rewrite(structured_query)
+            retrieval_plan = build_retrieval_plan(
+                structured_query,
+                profile=retrieval_profile,
+                tenant_profile=retrieval_profile,
+            )
+
+    brand_label = _tenant_chat_brand_label(tenant_row)
+    website_url = ((tenant_row.widget_website_url or "").strip() or None) if tenant_row else None
+
+    _NO_SEARCH_SUBTYPES = frozenset({"list_categories", "general_chat", "guided_discovery", "not_in_catalog"})
+    if classification.response_subtype in _NO_SEARCH_SUBTYPES:
+        static_extras = build_static_response(
+            request.message,
+            classification=classification,
+            structured_query=structured_query,
+            session_state=session_state,
+            profile=retrieval_profile,
+            brand=brand_label,
+            website_url=website_url,
+        )
+        if static_extras and static_extras.skip_catalog_llm:
+            write_sq = session_structured_query_for_writeback(
+                structured_query=structured_query,
+                session_state=session_state,
+                classification=classification,
+            )
+            session_state = structured_query_to_session_state(
+                structured_query=write_sq,
+                user_message=request.message,
+                result_context=[],
+                recent_requests=list(session_state.get("recent_requests") or []),
+                filter_stack=filter_stack,
+            )
+            static_answer, _, static_actions, static_subtype, static_meta = await _apply_turn_adequacy(
+                message=request.message,
+                answer=static_extras.intro_text,
+                response_subtype=static_extras.response_subtype,
+                classification=classification,
+                products=None,
+                actions=static_extras.actions,
+                website_url=website_url,
+                structured_query_intent=structured_query.intent,
+                meta=_with_currency_meta(static_extras.meta, tenant_currency),
+            )
+            assistant_message = ChatMessage(
+                session_id=session.id,
+                tenant_id=session.tenant_id,
+                sender_type=SenderType.assistant,
+                content=static_answer,
+                model_name="commerce-router",
+                token_usage_json={"model_name": "commerce-router", "response_subtype": static_subtype},
+            )
+            db.add(assistant_message)
+            session.last_message_at = datetime.now(timezone.utc)
+            _set_chat_session_state(session, session_state)
+            db.commit()
+            return ChatResponse(
+                response=static_answer,
+                session_id=str(session.id),
+                message_id=str(assistant_message.id),
+                source="commerce_router",
+                confidence=1.0,
+                categories=[ChatCategoryLink(**c) for c in static_extras.categories] if static_extras.categories else None,
+                actions=[ChatAction(**a) for a in static_actions] if static_actions else None,
+                meta=static_meta,
+                response_subtype=static_subtype,
+            )
 
     if is_session_reset_turn(request.message, structured_query):
         cleared = empty_structured_query(intent="general")
@@ -1411,6 +1638,7 @@ async def _run_chat_for_tenant(
             products=None,
             retrieval_tier=None,
             match_mode=None,
+            meta={"currency": tenant_currency},
         )
 
     if is_public_chat:
@@ -1456,8 +1684,32 @@ async def _run_chat_for_tenant(
     products: list[ChatProduct] = []
     retrieval_tier: Optional[str] = None
     match_mode: Optional[str] = None
+    commerce_categories: list[dict[str, Any]] = []
+    commerce_actions: list[dict[str, Any]] = []
+    commerce_meta: dict[str, Any] = {"currency": tenant_currency}
+    response_subtype: str = classification.response_subtype
+    match_scores: list[Any] = []
     if qdrant_client is None:
         raise HTTPException(status_code=503, detail="Qdrant unavailable")
+    if classification.response_subtype == "product_detail":
+        title_hint = extract_product_title_from_message(request.message)
+        if title_hint:
+            from retrieval.structured_query import CategorySpec
+
+            structured_query = structured_query.copy()
+            structured_query.category = CategorySpec()
+            structured_query.free_text = title_hint
+            structured_query = apply_retrieval_rewrite(structured_query)
+            retrieval_plan = build_retrieval_plan(
+                structured_query,
+                profile=retrieval_profile,
+                tenant_profile=retrieval_profile,
+            )
+            retrieval_plan = replace(
+                retrieval_plan,
+                dense_query_text=title_hint,
+                lexical_query_text=title_hint,
+            )
     query_for_embedding = retrieval_plan.dense_query_text or request.message
     if structured_query.intent == "catalog" and _catalog_skip_preprocess():
         enhanced_query = query_for_embedding
@@ -1503,11 +1755,142 @@ async def _run_chat_for_tenant(
         threshold=score_threshold,
         max_hits=max_hits,
     )
+    from retrieval.post_filter import boost_results_by_rating
+    from retrieval.response_contract import rating_boost_weight
+
+    filtered_results = boost_results_by_rating(
+        filtered_results,
+        weight=rating_boost_weight(retrieval_profile),
+    )
     card_results = (
         filter_results_for_catalog_cards(filtered_results)
         if structured_query.intent == "catalog"
         else []
     )
+    if structured_query.intent == "catalog" and (classification.sort or structured_query.sort):
+        card_results = apply_sort_to_results(card_results, structured_query, classification)[:max_hits]
+    if structured_query.intent == "catalog" and _SINGULAR_CHEAPEST_RE.search(request.message or ""):
+        card_results = card_results[:1]
+
+    website_url = _resolve_website_url(tenant_row, card_results or filtered_results) or website_url
+
+    post_search_static = build_static_response(
+        request.message,
+        classification=classification,
+        structured_query=structured_query,
+        session_state=session_state,
+        profile=retrieval_profile,
+        brand=brand_label,
+        website_url=website_url,
+        card_results=card_results,
+        search_results=filtered_results,
+    )
+    if post_search_static and post_search_static.skip_catalog_llm:
+        write_sq = session_structured_query_for_writeback(
+            structured_query=structured_query,
+            session_state=session_state,
+            classification=classification,
+        )
+        session_state = structured_query_to_session_state(
+            structured_query=write_sq,
+            user_message=request.message,
+            result_context=[],
+            recent_requests=list(session_state.get("recent_requests") or []),
+            filter_stack=filter_stack,
+        )
+        static_products = None
+        if post_search_static.products:
+            static_products = [ChatProduct(**p) for p in post_search_static.products]
+        elif post_search_static.response_subtype == "category_plp_sample" and card_results:
+            static_products = _build_chat_products(card_results)
+        static_answer, static_products, static_actions, static_subtype, static_meta = await _apply_turn_adequacy(
+            message=request.message,
+            answer=post_search_static.intro_text,
+            response_subtype=post_search_static.response_subtype,
+            classification=classification,
+            products=static_products,
+            actions=post_search_static.actions,
+            website_url=website_url,
+            structured_query_intent=structured_query.intent,
+            meta=_with_currency_meta(post_search_static.meta, tenant_currency),
+        )
+        assistant_message = ChatMessage(
+            session_id=session.id,
+            tenant_id=session.tenant_id,
+            sender_type=SenderType.assistant,
+            content=static_answer,
+            model_name="commerce-router",
+            token_usage_json={
+                "model_name": "commerce-router",
+                "response_subtype": static_subtype,
+            },
+        )
+        db.add(assistant_message)
+        session.last_message_at = datetime.now(timezone.utc)
+        _set_chat_session_state(session, session_state)
+        db.commit()
+        return ChatResponse(
+            response=static_answer,
+            session_id=str(session.id),
+            message_id=str(assistant_message.id),
+            source="commerce_router",
+            confidence=1.0,
+            products=static_products,
+            categories=[ChatCategoryLink(**c) for c in post_search_static.categories]
+            if post_search_static.categories
+            else None,
+            actions=[ChatAction(**a) for a in static_actions] if static_actions else None,
+            meta=static_meta,
+            response_subtype=static_subtype,
+        )
+
+    commerce_intro = ""
+    if structured_query.intent == "catalog" and card_results:
+        card_results, match_scores = classify_match_quality_for_results(
+            card_results,
+            structured_query=structured_query,
+            user_message=request.message,
+            profile=retrieval_profile,
+            category_hint_terms=list(retrieval_plan.category_hint_terms or []),
+            price_relaxed=tiered.price_relaxed,
+            retrieval_tier=retrieval_tier,
+        )
+        response_subtype = finalize_response_subtype(
+            match_scores,
+            base_subtype=classification.response_subtype,
+        )
+        commerce_intro = compose_search_intro(
+            scores=match_scores,
+            response_subtype=response_subtype,
+            price_max=structured_query.price.max,
+            price_min=structured_query.price.min,
+            validation_meta=structured_query.validation_meta,
+            currency_code=tenant_currency,
+        )
+        commerce_meta["loader_stage"] = commerce_meta.get("loader_stage") or response_subtype
+        plp_static = build_static_response(
+            request.message,
+            classification=classification,
+            structured_query=structured_query,
+            session_state=session_state,
+            profile=retrieval_profile,
+            brand=brand_label,
+            website_url=website_url,
+            card_results=card_results,
+        )
+        if plp_static:
+            if plp_static.actions:
+                commerce_actions = plp_static.actions
+            if plp_static.intro_text and classification.response_subtype in (
+                "category_plp_sample",
+                "category_availability",
+                "sort_browse",
+            ):
+                commerce_intro = plp_static.intro_text or commerce_intro
+            if plp_static.meta:
+                commerce_meta.update(plp_static.meta)
+            if plp_static.response_subtype in ("category_plp_sample", "sort_browse", "category_availability"):
+                response_subtype = plp_static.response_subtype
     catalog_products_only = structured_query.intent == "catalog"
     if catalog_products_only and card_results:
         response_results = card_results
@@ -1600,7 +1983,7 @@ async def _run_chat_for_tenant(
         result_context_payloads.append(build_result_context_payload({**result.payload, "url": validated_url}))
     price_relaxed = tiered.price_relaxed
     if structured_query.intent == "catalog":
-        products = _build_chat_products(card_results)
+        products = _build_chat_products(card_results, match_scores or None)
     if structured_query.intent == "catalog":
         brand = _tenant_chat_brand_label(tenant_row)
         site = (tenant_row.widget_website_url or "").strip() if tenant_row else ""
@@ -1628,6 +2011,16 @@ async def _run_chat_for_tenant(
             system_prompt=catalog_prompt,
             catalog_products_json=format_products_for_prompt(products) if products else "[]",
         )
+        from retrieval.response_verifier import verify_catalog_response
+
+        answer, _verified = await verify_catalog_response(
+            user_message=request.message,
+            answer=answer,
+            products=[p.model_dump() if hasattr(p, "model_dump") else dict(p) for p in products],
+            llm_call=openai_adapter.create_structured_completion,
+        )
+        if commerce_intro:
+            answer = f"{commerce_intro}\n\n{answer}".strip()
         confidence = response_results[0].score if response_results else 0.0
     elif not sources:
         if structured_query.intent == "support":
@@ -1652,12 +2045,29 @@ async def _run_chat_for_tenant(
         )
         confidence = response_results[0].score if response_results else 0.0
     source_type = "vector_search"
-    session_state = structured_query_to_session_state(
+    write_sq = session_structured_query_for_writeback(
         structured_query=structured_query,
+        session_state=session_state,
+        classification=classification,
+    )
+    session_state = structured_query_to_session_state(
+        structured_query=write_sq,
         user_message=request.message,
         result_context=result_context_payloads,
         recent_requests=list(session_state.get("recent_requests") or []),
         filter_stack=filter_stack,
+    )
+
+    answer, products, commerce_actions, response_subtype, commerce_meta = await _apply_turn_adequacy(
+        message=request.message,
+        answer=answer,
+        response_subtype=response_subtype,
+        classification=classification,
+        products=products or None,
+        actions=commerce_actions or None,
+        website_url=website_url,
+        structured_query_intent=structured_query.intent,
+        meta=commerce_meta,
     )
 
     assistant_message = ChatMessage(
@@ -1707,6 +2117,10 @@ async def _run_chat_for_tenant(
         confidence=confidence,
         sources=sources or None,
         products=products or None,
+        categories=[ChatCategoryLink(**c) for c in commerce_categories] if commerce_categories else None,
+        actions=[ChatAction(**a) for a in commerce_actions] if commerce_actions else None,
+        meta=commerce_meta or None,
+        response_subtype=response_subtype,
         retrieval_tier=retrieval_tier,
         match_mode=match_mode,
         retrieval_debug=retrieval_debug_payload,
@@ -1849,6 +2263,7 @@ async def get_public_widget_config(
         "idle_rating_wait_seconds": tenant.idle_rating_wait_seconds,
         "max_results_default": effective_chat_max_results(tenant=tenant, request_max=None),
         "max_results_absolute_ceiling": max(1, int(os.getenv("CHAT_MAX_RESULTS_ABSOLUTE_CEILING", "50"))),
+        "currency": _tenant_currency(tenant),
     }
 
 

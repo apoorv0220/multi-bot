@@ -40,6 +40,10 @@ SHOPPING_VERBS = (
     "buy",
     "get me",
     "search for",
+    "help me buy",
+    "help me find",
+    "help me choose",
+    "help me pick",
 )
 COLOUR_FINISH_FACET_KEYS = frozenset({"colour", "color", "finish"})
 _AUDIENCE_CATEGORY_STEMS = frozenset({"men", "women"})
@@ -430,6 +434,16 @@ def rules_prepass(
     result = empty_structured_query()
     result.free_text = message
 
+    from retrieval.tools.product_refs import extract_product_title_from_message, is_product_detail_message
+
+    if is_product_detail_message(message):
+        result.intent = "catalog"
+        title = extract_product_title_from_message(message)
+        if title:
+            result.free_text = title
+            result.retrieval_rewrite = title
+        return result
+
     if CLEAR_ALL_PATTERN.search(message):
         result.session.clear = {
             "facets": list((session_query.facets if session_query else {}).keys()),
@@ -529,14 +543,33 @@ def rules_prepass(
 
     intent = infer_intent_from_query(message)
     q_lower = message.lower()
-    if any(verb in q_lower for verb in SHOPPING_VERBS):
+    has_shopping = any(verb in q_lower for verb in SHOPPING_VERBS)
+    if has_shopping:
         intent = "catalog"
     if any(word in q_lower for word in ("price", "stock", "product", "category", "brand:")):
         intent = "catalog"
     if cat_values or facet_hits or result.category.values:
         intent = "catalog"
     if any(word in q_lower for word in SUPPORT_PATH_KEYWORDS):
-        intent = "support"
+        if not has_shopping:
+            intent = "support"
+    if re.search(r"\b(?:cheapest|lowest\s+price|budget[\-\s]?friendly)\b", q_lower):
+        result.sort = "price_asc"
+    if re.search(r"\b(?:premium|luxury|high[\-\s]?end)\b", q_lower) and re.search(r"\babove\b|\bover\b", q_lower):
+        result.sort = "price_desc"
+    if re.search(r"\b(?:best[\-\s]?rated|top[\-\s]?rated)\b", q_lower):
+        result.sort = "rating_desc"
+    if re.search(r"\b(?:newest|latest|new\s+arrivals?)\b", q_lower):
+        result.sort = "newest"
+    if re.search(r"\b(?:best[\-\s]?selling|bestsellers?)\b", q_lower):
+        result.sort = "bestseller"
+    if re.search(r"\b(?:trending|popular\s+right\s+now|what(?:'s|\s+is)\s+popular)\b", q_lower):
+        result.sort = "trending"
+    if result.sort or re.search(
+        r"\b(?:show\s+(?:me\s+)?(?:all|every)\s+products?|newest|latest|cheapest|trending|popular)\b",
+        q_lower,
+    ):
+        intent = "catalog"
     result.intent = intent  # type: ignore[assignment]
 
     result.free_text = _strip_matched_tokens(

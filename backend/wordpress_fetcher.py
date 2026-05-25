@@ -46,6 +46,32 @@ class WordPressFetcher:
             logger.error(f"Error connecting to WordPress database: {e}")
             return None
 
+    def get_woocommerce_currency(self) -> str | None:
+        """Read WooCommerce store currency from wp_options."""
+        connection = self.get_connection()
+        if not connection:
+            return None
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    SELECT option_value
+                    FROM {self.table_prefix}options
+                    WHERE option_name = 'woocommerce_currency'
+                    LIMIT 1
+                    """
+                )
+                row = cursor.fetchone()
+                if row and row.get("option_value"):
+                    from commerce.currency import normalize_currency_code
+
+                    return normalize_currency_code(str(row["option_value"]))
+        except Exception as exc:
+            logger.warning("Could not read woocommerce_currency: %s", exc)
+        finally:
+            connection.close()
+        return None
+
     def get_all_posts(self):
         """Fetch all published posts and pages from WordPress"""
         connection = self.get_connection()

@@ -9,8 +9,9 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from retrieval.catalog_coverage import ensure_catalog_coverage, parse_catalog_coverage_blob
 from retrieval.rules_prepass import rules_prepass
-from retrieval.structured_query import CategorySpec, FacetSpec, StructuredQuery
+from retrieval.structured_query import CatalogCoverageSpec, CategorySpec, FacetSpec, StructuredQuery
 
 logger = logging.getLogger("query-understanding")
 
@@ -91,11 +92,15 @@ def build_llm_prompt(
         '  "facets": {"facet_id": {"values": ["..."], "combine": "OR" | "AND"}},\n'
         '  "price": {"min": number|null, "max": number|null},\n'
         '  "stock_status": "instock" | "outofstock" | null,\n'
-        '  "session": {"inherit": true, "clear": {"facets": [], "category": false, "price": false, "stock_status": false}}\n'
+        '  "session": {"inherit": true, "clear": {"facets": [], "category": false, "price": false, "stock_status": false}},\n'
+        '  "catalog_coverage": {"in_catalog": true|false, "missing_terms": ["..."], "confidence": 0.0-1.0}\n'
         "}\n"
         "Rules: AND across different facet keys; OR within one facet when user says or/either/slash lists. "
         "Use only facet_ids from the tenant profile. "
         "Do not invent categories or facets not supported by the profile. "
+        "catalog_coverage: in_catalog=false when the user asks for product types or brands not in the tenant profile "
+        "(e.g. shoes when no footwear category, Nike when brand not listed). "
+        "Size/colour/price alone never make in_catalog false. "
         "Prefer catalog intent for product shopping language. "
         "For catalog turns, always populate retrieval_rewrite with a compact product search phrase "
         "(e.g. chrome taps under 50) even when free_text is only a price refinement."
@@ -114,20 +119,21 @@ def build_llm_prompt(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def _parse_llm_json(raw: str) -> StructuredQuery | None:
+def _parse_llm_json(raw: str) -> tuple[StructuredQuery | None, CatalogCoverageSpec | None]:
     text = (raw or "").strip()
     if not text:
-        return None
+        return None, None
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*", "", text)
         text = re.sub(r"\s*```$", "", text)
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        return None
+        return None, None
     if not isinstance(data, dict):
-        return None
-    return StructuredQuery.from_dict(data)
+        return None, None
+    coverage = parse_catalog_coverage_blob(data)
+    return StructuredQuery.from_dict(data), coverage
 
 
 def merge_prepass_and_llm(prepass: StructuredQuery, llm: StructuredQuery) -> StructuredQuery:
@@ -256,7 +262,7 @@ async def extract_with_llm(
     *,
     llm_call: Callable[..., Any],
     conversation_summary: str | None = None,
-) -> tuple[StructuredQuery | None, float]:
+) -> tuple[StructuredQuery | None, CatalogCoverageSpec | None, float]:
     messages = build_llm_prompt(
         message,
         profile,
@@ -279,7 +285,7 @@ async def extract_with_llm(
         response = await asyncio.wait_for(_call(), timeout=timeout_s)
     except (asyncio.TimeoutError, Exception) as exc:
         logger.warning("LLM query understanding failed: %s", exc)
-        return None, (time.perf_counter() - started) * 1000.0
+        return None, None, (time.perf_counter() - started) * 1000.0
 
     content = ""
     try:
@@ -287,8 +293,8 @@ async def extract_with_llm(
     except (AttributeError, IndexError, TypeError):
         content = str(response)
 
-    parsed = _parse_llm_json(content)
-    return parsed, (time.perf_counter() - started) * 1000.0
+    parsed, coverage = _parse_llm_json(content)
+    return parsed, coverage, (time.perf_counter() - started) * 1000.0
 
 
 async def run_query_understanding(
@@ -299,10 +305,36 @@ async def run_query_understanding(
     llm_call: Callable[..., Any] | None = None,
     conversation_summary: str | None = None,
 ) -> QueryUnderstandingResult:
+    from retrieval.tools.product_refs import extract_product_title_from_message, is_product_detail_message
+
     mode = query_understanding_mode()
     prepass_started = time.perf_counter()
     prepass = rules_prepass(message, profile=profile, session_query=session_query)
     prepass_ms = (time.perf_counter() - prepass_started) * 1000.0
+
+    if is_product_detail_message(message):
+        title = extract_product_title_from_message(message) or prepass.free_text.strip()
+        query = prepass.copy()
+        query.intent = "catalog"
+        query.category = CategorySpec()
+        query.facets = {}
+        if title:
+            query.free_text = title
+            query.retrieval_rewrite = title
+        query.catalog_coverage = CatalogCoverageSpec(
+            in_catalog=True,
+            missing_terms=[],
+            confidence=1.0,
+            source="rules",
+        )
+        return QueryUnderstandingResult(
+            query=query,
+            prepass_ms=prepass_ms,
+            llm_ms=0.0,
+            mode=mode,
+            llm_used=False,
+            llm_fallback=False,
+        )
 
     llm_ms = 0.0
     llm_used = False
@@ -318,8 +350,17 @@ async def run_query_understanding(
         )
         or llm_call is None
     ):
+        coverage = await ensure_catalog_coverage(
+            message,
+            profile,
+            prepass.catalog_coverage,
+            intent=prepass.intent,
+            llm_call=llm_call,
+        )
+        query = prepass.copy()
+        query.catalog_coverage = coverage
         return QueryUnderstandingResult(
-            query=prepass,
+            query=query,
             prepass_ms=prepass_ms,
             llm_ms=0.0,
             mode=mode,
@@ -327,7 +368,7 @@ async def run_query_understanding(
             llm_fallback=False,
         )
 
-    llm_query, llm_ms = await extract_with_llm(
+    llm_query, llm_coverage, llm_ms = await extract_with_llm(
         message,
         profile,
         session_query,
@@ -337,8 +378,24 @@ async def run_query_understanding(
     )
     if llm_query is None:
         llm_fallback = True
+        merged = prepass.copy()
+    else:
+        merged = merge_prepass_and_llm(prepass, llm_query)
+        if llm_coverage and llm_coverage.in_catalog is not None:
+            merged.catalog_coverage = llm_coverage
+
+    coverage = await ensure_catalog_coverage(
+        message,
+        profile,
+        merged.catalog_coverage,
+        intent=merged.intent,
+        llm_call=llm_call,
+    )
+    merged.catalog_coverage = coverage
+
+    if llm_query is None:
         return QueryUnderstandingResult(
-            query=prepass,
+            query=merged,
             prepass_ms=prepass_ms,
             llm_ms=llm_ms,
             mode=mode,
@@ -346,7 +403,6 @@ async def run_query_understanding(
             llm_fallback=True,
         )
 
-    merged = merge_prepass_and_llm(prepass, llm_query)
     return QueryUnderstandingResult(
         query=merged,
         prepass_ms=prepass_ms,

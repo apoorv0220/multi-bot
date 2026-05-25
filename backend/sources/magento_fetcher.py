@@ -268,6 +268,48 @@ class MagentoFetcher:
             LIMIT 1
         ) AS final_price"""
 
+    def _review_product_entity_type_sql(self, cursor) -> str:
+        """Product entity_type value in review_entity_summary (not EAV entity_type_id 4)."""
+        if self._table_exists(cursor, "review_entity"):
+            return f"""(
+                SELECT re.entity_id
+                FROM {self._t("review_entity")} re
+                WHERE re.entity_code = 'product'
+                LIMIT 1
+            )"""
+        return "1"
+
+    def _review_summary_sql(self, cursor) -> str:
+        """Average star rating (0–5) and review count from review_entity_summary."""
+        if not self._table_exists(cursor, "review_entity_summary"):
+            return "NULL AS rating_summary, NULL AS reviews_count"
+        entity_type_col = (
+            "entity_type_id"
+            if self._has_column(cursor, "review_entity_summary", "entity_type_id")
+            else "entity_type"
+        )
+        store_filter = ""
+        if self._has_column(cursor, "review_entity_summary", "store_id"):
+            store_filter = f"AND res.store_id IN (0, {self.store_id})"
+        entity_type_val = self._review_product_entity_type_sql(cursor)
+        return f"""(
+            SELECT res.rating_summary
+            FROM {self._t("review_entity_summary")} res
+            WHERE res.entity_pk_value = cpe.entity_id
+              AND res.{entity_type_col} = {entity_type_val}
+              {store_filter}
+            ORDER BY res.store_id DESC
+            LIMIT 1
+        ) AS rating_summary, (
+            SELECT res.reviews_count
+            FROM {self._t("review_entity_summary")} res
+            WHERE res.entity_pk_value = cpe.entity_id
+              AND res.{entity_type_col} = {entity_type_val}
+              {store_filter}
+            ORDER BY res.store_id DESC
+            LIMIT 1
+        ) AS reviews_count"""
+
     def _gallery_image_sql(self, cursor) -> str:
         """First gallery image path (SyncCatalog getProductImageUrl fallback)."""
         mgte_table = "catalog_product_entity_media_gallery_value_to_entity"
@@ -302,6 +344,24 @@ class MagentoFetcher:
             ORDER BY {order_clause}
             LIMIT 1
         ) AS gallery_image"""
+
+    @staticmethod
+    def rating_from_summary(rating_summary: Any, reviews_count: Any) -> tuple[float | None, int | None]:
+        try:
+            reviews = int(reviews_count) if reviews_count not in (None, "") else 0
+        except (TypeError, ValueError):
+            reviews = 0
+        if reviews <= 0:
+            return None, None
+        try:
+            pct = float(rating_summary)
+        except (TypeError, ValueError):
+            return None, reviews or None
+        if pct <= 0:
+            return None, reviews or None
+        # Magento stores percent (0–100); convert to 0–5 stars.
+        stars = round(pct / 20.0, 1)
+        return stars, reviews
 
     @staticmethod
     def pick_image_path(row: dict[str, Any]) -> str | None:
@@ -557,6 +617,40 @@ class MagentoFetcher:
         finally:
             connection.close()
 
+    def get_base_currency(self) -> str:
+        """Store base currency from Magento core_config_data (e.g. USD, GBP)."""
+        if getattr(self, "_base_currency_cache", None):
+            return self._base_currency_cache
+        from commerce.currency import default_currency_code, normalize_currency_code
+
+        connection = self.get_connection()
+        if not connection:
+            return default_currency_code()
+        try:
+            with connection.cursor() as cursor:
+                for scope, scope_id in (("stores", self.store_id), ("default", 0)):
+                    cursor.execute(
+                        f"""
+                        SELECT value FROM {self._t("core_config_data")}
+                        WHERE path = 'currency/options/base'
+                          AND scope = %s
+                          AND scope_id = %s
+                        LIMIT 1
+                        """,
+                        (scope, scope_id),
+                    )
+                    row = cursor.fetchone()
+                    if row and row.get("value"):
+                        code = normalize_currency_code(str(row["value"]))
+                        if code:
+                            self._base_currency_cache = code
+                            return code
+        finally:
+            connection.close()
+        fallback = default_currency_code()
+        self._base_currency_cache = fallback
+        return fallback
+
     def fetch_products(self) -> list[dict[str, Any]]:
         connection = self.get_connection()
         if not connection:
@@ -587,6 +681,7 @@ class MagentoFetcher:
                     self._eav_value_sql("price", "price", meta),
                     self._indexed_final_price_sql(cursor, website_id),
                     self._eav_value_sql("special_price", "special_price", meta),
+                    self._review_summary_sql(cursor),
                     self._eav_value_sql("status", "status", meta),
                     self._eav_value_sql("visibility", "visibility", meta),
                 ]
@@ -599,6 +694,7 @@ class MagentoFetcher:
                     cpe.entity_id AS id,
                     cpe.sku AS sku,
                     cpe.type_id AS type_id,
+                    cpe.created_at AS created_at,
                     {", ".join(attr_selects)},
                     stock.stock_status AS stock_status,
                     GROUP_CONCAT(DISTINCT ce.path ORDER BY ce.path SEPARATOR '|||') AS category_paths
@@ -607,7 +703,7 @@ class MagentoFetcher:
                   ON stock.product_id = cpe.entity_id AND stock.website_id = 0
                 LEFT JOIN {self._t("catalog_category_product")} ccp ON ccp.product_id = cpe.entity_id
                 LEFT JOIN {self._t("catalog_category_entity")} ce ON ce.entity_id = ccp.category_id
-                GROUP BY cpe.entity_id, cpe.sku, cpe.type_id, stock.stock_status
+                GROUP BY cpe.entity_id, cpe.sku, cpe.type_id, cpe.created_at, stock.stock_status
                 """
                 cursor.execute(query)
                 rows = cursor.fetchall()
@@ -659,11 +755,19 @@ class MagentoFetcher:
                 row.get("category_paths"),
                 category_names_by_id,
             )
+            rating, review_count = self.rating_from_summary(
+                row.get("rating_summary"),
+                row.get("reviews_count"),
+            )
+            created_at = row.get("created_at")
             products.append(
                 {
                     **row,
                     "categories": "|||".join(categories) if categories else None,
                     "facet_attributes": facet_attributes,
+                    "rating": rating,
+                    "review_count": review_count,
+                    "created_at": created_at,
                 }
             )
         return products

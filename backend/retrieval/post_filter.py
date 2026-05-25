@@ -252,6 +252,35 @@ def boost_results_by_facets(
     return [item[2] for item in scored]
 
 
+def boost_results_by_rating(
+    results: list[Any],
+    *,
+    weight: float = 0.05,
+) -> list[Any]:
+    if not results or weight <= 0:
+        return results
+    import math
+
+    scored: list[tuple[float, float, Any]] = []
+    for result in results:
+        payload = getattr(result, "payload", None) or {}
+        rating_raw = payload.get("rating")
+        reviews_raw = payload.get("review_count")
+        try:
+            rating = float(rating_raw)
+        except (TypeError, ValueError):
+            rating = 0.0
+        try:
+            reviews = float(reviews_raw or 0)
+        except (TypeError, ValueError):
+            reviews = 0.0
+        boost = weight * rating + (weight * 0.5) * math.log1p(reviews)
+        base = float(getattr(result, "score", 0.0) or 0.0)
+        scored.append((boost, base, result))
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in scored]
+
+
 def filter_results_by_facet_excludes(
     results: list[Any],
     facet_excludes: dict[str, list[str]] | None,

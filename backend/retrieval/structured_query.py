@@ -103,6 +103,44 @@ class SessionSpec:
 
 
 @dataclass
+class CatalogCoverageSpec:
+    in_catalog: bool | None = None
+    missing_terms: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    source: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        blob: dict[str, Any] = {
+            "missing_terms": list(self.missing_terms),
+            "confidence": self.confidence,
+        }
+        if self.in_catalog is not None:
+            blob["in_catalog"] = self.in_catalog
+        if self.source:
+            blob["source"] = self.source
+        return blob
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "CatalogCoverageSpec":
+        if not data:
+            return cls()
+        in_catalog = data.get("in_catalog")
+        if in_catalog is not None:
+            in_catalog = bool(in_catalog)
+        missing = [str(v).strip() for v in (data.get("missing_terms") or []) if str(v).strip()]
+        try:
+            confidence = float(data.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        return cls(
+            in_catalog=in_catalog,
+            missing_terms=missing,
+            confidence=max(0.0, min(confidence, 1.0)),
+            source=str(data.get("source") or "").strip(),
+        )
+
+
+@dataclass
 class StructuredQuery:
     intent: IntentType = "general"
     free_text: str = ""
@@ -111,10 +149,13 @@ class StructuredQuery:
     facets: dict[str, FacetSpec] = field(default_factory=dict)
     price: PriceSpec = field(default_factory=PriceSpec)
     stock_status: str | None = None
+    sort: str | None = None
     session: SessionSpec = field(default_factory=SessionSpec)
+    catalog_coverage: CatalogCoverageSpec = field(default_factory=CatalogCoverageSpec)
+    validation_meta: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        blob: dict[str, Any] = {
             "intent": self.intent,
             "free_text": self.free_text,
             "retrieval_rewrite": self.retrieval_rewrite,
@@ -124,6 +165,13 @@ class StructuredQuery:
             "stock_status": self.stock_status,
             "session": self.session.to_dict(),
         }
+        if self.sort:
+            blob["sort"] = self.sort
+        if self.catalog_coverage.in_catalog is not None or self.catalog_coverage.missing_terms:
+            blob["catalog_coverage"] = self.catalog_coverage.to_dict()
+        if self.validation_meta:
+            blob["validation_meta"] = dict(self.validation_meta)
+        return blob
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "StructuredQuery":
@@ -142,7 +190,10 @@ class StructuredQuery:
             facets=facets,
             price=PriceSpec.from_dict(data.get("price")),
             stock_status=data.get("stock_status"),
+            sort=data.get("sort"),
             session=SessionSpec.from_dict(data.get("session")),
+            catalog_coverage=CatalogCoverageSpec.from_dict(data.get("catalog_coverage")),
+            validation_meta=dict(data.get("validation_meta") or {}),
         )
 
     def copy(self) -> "StructuredQuery":

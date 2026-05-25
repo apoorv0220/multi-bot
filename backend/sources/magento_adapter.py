@@ -16,6 +16,15 @@ def _parse_float(value):
         return None
 
 
+def _parse_int(value):
+    try:
+        if value in (None, ""):
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
 def _strip_html(text: str | None) -> str | None:
     if not text:
         return None
@@ -78,6 +87,7 @@ class MagentoCatalogAdapter(SourceAdapter):
             or ctx.source_config.get("source_canonical_base_url"),
         )
         base_url = fetcher.get_base_url()
+        store_currency = fetcher.get_base_currency()
         records: list[SourceRecord] = []
 
         for product in fetcher.fetch_products():
@@ -120,6 +130,10 @@ class MagentoCatalogAdapter(SourceAdapter):
                         "categories": categories,
                         "attributes": attributes,
                         "image_url": self._resolve_image_url(base_url, image_path),
+                        "rating": _parse_float(product.get("rating")),
+                        "review_count": _parse_int(product.get("review_count")),
+                        "created_at": product.get("created_at"),
+                        "currency": store_currency,
                     },
                 )
             )

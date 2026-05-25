@@ -404,12 +404,25 @@ def structured_query_to_session_state(
         prefs = _merge_user_preferences(prefs, structured_query)
 
     summary = _build_conversation_summary(structured_query, recent_requests=recent)
+    product_refs = []
+    for item in result_context[:5]:
+        if not isinstance(item, dict):
+            continue
+        if item.get("content_kind") == "product" or item.get("title"):
+            product_refs.append(
+                {
+                    "title": item.get("title"),
+                    "url": item.get("url"),
+                    "entity_id": item.get("entity_id"),
+                }
+            )
     return {
         "conversation_summary": summary,
         "structured_query": structured_query.to_dict(),
         "active_filters": structured_query.to_dict(),
         "conversation_intent": structured_query.intent,
         "last_result_context": result_context[:5],
+        "last_product_refs": product_refs[:5],
         "recent_requests": recent,
         "user_preferences": prefs,
         "filter_stack": list(filter_stack or []),

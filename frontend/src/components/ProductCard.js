@@ -1,11 +1,22 @@
 import React from 'react';
 import styled from 'styled-components';
+import { formatPrice } from '../utils/formatPrice';
 
-const ProductCard = ({ product }) => {
+const ProductCard = ({ product, currencyCode = 'USD' }) => {
   if (!product?.url) return null;
-  const priceLabel =
-    product.price != null && !Number.isNaN(Number(product.price))
-      ? `£${Number(product.price).toFixed(2)}`
+  const priceLabel = formatPrice(
+    product.price,
+    product.currency || currencyCode,
+  );
+  const ratingLabel =
+    product.rating != null && !Number.isNaN(Number(product.rating))
+      ? `★ ${Number(product.rating).toFixed(1)}${product.review_count ? ` (${product.review_count})` : ''}`
+      : null;
+  const matchNote =
+    product.match_quality && product.match_quality !== 'full'
+      ? product.match_quality === 'partial'
+        ? 'Close match'
+        : 'Alternative'
       : null;
 
   return (
@@ -18,6 +29,8 @@ const ProductCard = ({ product }) => {
       <CardBody>
         <Title>{product.title || 'Product'}</Title>
         {product.brand ? <Meta>{product.brand}</Meta> : null}
+        {ratingLabel ? <Meta>{ratingLabel}</Meta> : null}
+        {matchNote ? <MatchNote>{matchNote}</MatchNote> : null}
         {priceLabel ? <Price>{priceLabel}</Price> : null}
       </CardBody>
     </Card>
@@ -78,6 +91,13 @@ const Price = styled.div`
   font-weight: 600;
   margin-top: 4px;
   color: var(--primary-color);
+`;
+
+const MatchNote = styled.div`
+  font-size: 10px;
+  opacity: 0.7;
+  margin-top: 2px;
+  font-style: italic;
 `;
 
 export default ProductCard;

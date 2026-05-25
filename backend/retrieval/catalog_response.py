@@ -78,6 +78,7 @@ def build_catalog_grounded_system_prompt(
         f"You are a shopping assistant for {brand}. "
         "You will receive a JSON array `products` — the only products you may recommend. "
         "Use exact titles and prices from that list only; do not invent products or prices. "
+        "Do not mention brand names unless the product's brand field in the JSON matches that brand. "
         "Do not mention a price cap or budget unless the user asked for one or every listed product is within that cap. "
         "Mention the user can open the product URL."
         f"{(' ' + mode_note) if mode_note else ''}"

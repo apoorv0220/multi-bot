@@ -15,6 +15,15 @@ def _parse_float(value):
         return None
 
 
+def _parse_int(value):
+    try:
+        if value in (None, ""):
+            return None
+        return int(float(value))
+    except Exception:
+        return None
+
+
 def resolve_product_image_url(
     site_url: str,
     *,
@@ -66,11 +75,15 @@ class WooCommerceCatalogAdapter(SourceAdapter):
                     p.post_excerpt AS excerpt,
                     p.post_content AS content,
                     p.post_name AS slug,
+                    p.post_date AS created_at,
                     p.post_modified AS updated_at,
                     MAX(CASE WHEN pm.meta_key = '_sku' THEN pm.meta_value END) AS sku,
                     MAX(CASE WHEN pm.meta_key = '_price' THEN pm.meta_value END) AS price,
                     MAX(CASE WHEN pm.meta_key = '_sale_price' THEN pm.meta_value END) AS sale_price,
                     MAX(CASE WHEN pm.meta_key = '_stock_status' THEN pm.meta_value END) AS stock_status,
+                    MAX(CASE WHEN pm.meta_key = '_wc_average_rating' THEN pm.meta_value END) AS rating,
+                    MAX(CASE WHEN pm.meta_key = '_wc_review_count' THEN pm.meta_value END) AS review_count,
+                    MAX(CASE WHEN pm.meta_key = 'total_sales' THEN pm.meta_value END) AS total_sales,
                     GROUP_CONCAT(DISTINCT CASE WHEN tt.taxonomy = 'product_cat' THEN t.name END SEPARATOR '|||') AS categories,
                     GROUP_CONCAT(DISTINCT CASE WHEN tt.taxonomy LIKE 'pa_%%' THEN CONCAT(REPLACE(tt.taxonomy, 'pa_', ''), ':', t.name) END SEPARATOR '|||') AS attributes,
                     (SELECT att.guid
@@ -125,6 +138,7 @@ class WooCommerceCatalogAdapter(SourceAdapter):
     async def discover(self, ctx: SourceContext) -> list[SyncBatch]:
         fetcher = WordPressFetcher(source_config=ctx.source_config, fallback_site_url=ctx.source_config.get("url_fallback_base"))
         site_url = fetcher._get_site_url()
+        store_currency = fetcher.get_woocommerce_currency()
         records: list[SourceRecord] = []
 
         for product in self._fetch_products(fetcher):
@@ -167,6 +181,12 @@ class WooCommerceCatalogAdapter(SourceAdapter):
                         "categories": categories,
                         "attributes": dict(attributes),
                         "image_url": image_url,
+                        "rating": _parse_float(product.get("rating")),
+                        "review_count": _parse_int(product.get("review_count")),
+                        "total_sales": int(float(product.get("total_sales") or 0)) if product.get("total_sales") not in (None, "") else None,
+                        "created_at": str(product.get("created_at") or "") or None,
+                        "updated_at": str(product.get("updated_at") or "") or None,
+                        "currency": store_currency,
                     },
                 )
             )

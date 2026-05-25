@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { BsSend } from 'react-icons/bs';
 import Message from './Message';
 import { client } from '../api';
+import { normalizeCurrencyCode } from '../utils/formatPrice';
 
 /** Shown until GET /api/public/config returns tenant branding (avoid wrong-tenant flash). */
 const FALLBACK_GREETING = "Hello! How can I help you today?";
@@ -59,6 +60,7 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [privacyPolicyUrl, setPrivacyPolicyUrl] = useState("");
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingStage, setLoadingStage] = useState("");
   const [apiUrl, setApiUrl] = useState(() => normalizeWidgetApiUrl(process.env.REACT_APP_API_URL || ""));
   const [widgetKey, setWidgetKey] = useState(null);
   const [sessionStorageKey, setSessionStorageKey] = useState("chat_session_id");
@@ -73,6 +75,7 @@ const ChatWidget = ({ mode = "admin" }) => {
   const [quotaMessage, setQuotaMessage] = useState("");
   const [idleRatingWaitSeconds, setIdleRatingWaitSeconds] = useState(120);
   const [maxResultsDefault, setMaxResultsDefault] = useState(null);
+  const [currencyCode, setCurrencyCode] = useState('USD');
   const [showRatingPrompt, setShowRatingPrompt] = useState(false);
   const [selectedRating, setSelectedRating] = useState(0);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
@@ -181,6 +184,9 @@ const ChatWidget = ({ mode = "admin" }) => {
         setIdleRatingWaitSeconds(Number(data?.idle_rating_wait_seconds || 120));
         if (data?.max_results_default != null) {
           setMaxResultsDefault(Number(data.max_results_default));
+        }
+        if (data?.currency) {
+          setCurrencyCode(normalizeCurrencyCode(data.currency));
         }
       } catch (err) {
         console.error("Error loading widget config:", err);
@@ -313,6 +319,7 @@ const ChatWidget = ({ mode = "admin" }) => {
     setMessages((prevMessages) => [...prevMessages, userMessage]);
     setInput('');
     setIsLoading(true);
+    setLoadingStage('Understanding your request…');
     setShowRatingPrompt(false);
     resetIdleRatingTimer();
 
@@ -339,6 +346,10 @@ const ChatWidget = ({ mode = "admin" }) => {
         }
       }
 
+      if (response.data.meta?.currency) {
+        setCurrencyCode(normalizeCurrencyCode(response.data.meta.currency));
+      }
+
       // Add bot response with the new response format
       const botMessage = {
         type: 'bot',
@@ -346,9 +357,12 @@ const ChatWidget = ({ mode = "admin" }) => {
         timestamp: new Date(),
         sources: response.data.sources || [],
         products: response.data.products || [],
+        categories: response.data.categories || [],
+        actions: response.data.actions || [],
         confidence: response.data.confidence,
         source: response.data.source,
         matchMode: response.data.match_mode || null,
+        responseSubtype: response.data.response_subtype || null,
         messageId: response.data.message_id,
       };
       setMessages((prevMessages) => [...prevMessages, botMessage]);
@@ -374,6 +388,7 @@ const ChatWidget = ({ mode = "admin" }) => {
       setMessages((prevMessages) => [...prevMessages, errorMessage]);
     } finally {
       setIsLoading(false);
+      setLoadingStage('');
     }
   };
 
@@ -400,6 +415,8 @@ const ChatWidget = ({ mode = "admin" }) => {
             timestamp={message.timestamp}
             sources={message.sources}
             products={message.products}
+            categories={message.categories}
+            actions={message.actions}
             matchMode={message.matchMode}
             isError={message.isError}
             confidence={message.confidence}
@@ -410,10 +427,12 @@ const ChatWidget = ({ mode = "admin" }) => {
             widgetKey={widgetKey}
             userBubbleTextColor={userMessageTextColor}
             botBubbleTextColor={botMessageTextColor}
+            currencyCode={currencyCode}
           />
         ))}
         {isLoading && (
           <LoadingMessage>
+            {loadingStage ? <LoadingStageText>{loadingStage}</LoadingStageText> : null}
             <LoadingDots>
               <span>.</span>
               <span>.</span>
@@ -607,9 +626,17 @@ const SendButton = styled.button`
 
 const LoadingMessage = styled.div`
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
   padding: 10px;
   color: #666;
+  gap: 6px;
+`;
+
+const LoadingStageText = styled.div`
+  font-size: 12px;
+  opacity: 0.85;
 `;
 
 const LoadingDots = styled.div`

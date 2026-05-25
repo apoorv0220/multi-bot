@@ -10,6 +10,8 @@ const Message = ({
   timestamp,
   sources = [],
   products = [],
+  categories = [],
+  actions = [],
   matchMode = null,
   isError,
   source,
@@ -19,6 +21,7 @@ const Message = ({
   widgetKey = "",
   userBubbleTextColor = "#ffffff",
   botBubbleTextColor = "#1a1a1a",
+  currencyCode = "USD",
 }) => {
   // Format timestamp
   const formatTime = (date) => {
@@ -75,9 +78,31 @@ const Message = ({
         {type === 'bot' && !isError && products?.length > 0 && (
           <ProductList>
             {products.map((product, index) => (
-              <ProductCard key={product.url || index} product={product} />
+              <ProductCard
+                key={product.url || index}
+                product={product}
+                currencyCode={currencyCode}
+              />
             ))}
           </ProductList>
+        )}
+        {type === 'bot' && !isError && categories?.length > 0 && !products?.length && (
+          <CategoryList>
+            {categories.map((cat, index) => (
+              <CategoryLink key={cat.url || cat.name || index} href={cat.url || '#'} target="_blank" rel="noopener noreferrer">
+                {cat.name}
+              </CategoryLink>
+            ))}
+          </CategoryList>
+        )}
+        {type === 'bot' && !isError && actions?.length > 0 && (
+          <ActionList>
+            {actions.map((action, index) => (
+              <ActionButton key={action.url || index} href={action.url} target="_blank" rel="noopener noreferrer">
+                {action.label}
+              </ActionButton>
+            ))}
+          </ActionList>
         )}
         <ReactMarkdown>{text}</ReactMarkdown>
         {type === 'bot' && !isError && source === 'vector_search' && hasHighConfidenceSource && (
@@ -155,6 +180,39 @@ const ProductList = styled.div`
   flex-direction: column;
   gap: 4px;
   margin-bottom: 8px;
+`;
+
+const CategoryList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+`;
+
+const CategoryLink = styled.a`
+  font-size: 13px;
+  color: var(--primary-color);
+  text-decoration: none;
+  &:hover { text-decoration: underline; }
+`;
+
+const ActionList = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+`;
+
+const ActionButton = styled.a`
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--primary-color);
+  color: #fff !important;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  &:hover { filter: brightness(0.92); }
 `;
 
 const ReadMoreButton = styled.a`

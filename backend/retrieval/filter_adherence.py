@@ -114,6 +114,13 @@ def build_filter_adherence(
         notes["imperfect_match"] = True
     if dropped_filters:
         notes["dropped_filters"] = list(dropped_filters)
+    validation_meta = getattr(structured_query, "validation_meta", None) or {}
+    if validation_meta.get("soft_facets"):
+        notes["soft_facets"] = dict(validation_meta["soft_facets"])
+    if validation_meta.get("soft_categories"):
+        notes["soft_categories"] = list(validation_meta["soft_categories"])
+    if validation_meta.get("dropped_brands"):
+        notes["dropped_brands"] = list(validation_meta["dropped_brands"])
     if price_relaxed or retrieval_tier == "relaxed_price":
         notes["price_relaxed"] = {
             "max": structured_query.price.max,
@@ -203,6 +210,29 @@ def filter_adherence_instruction(
         parts.append(
             "We could not match every filter exactly; the products below are close matches. "
             "Say so briefly in one short sentence, then list the products."
+        )
+    soft_facets = (adherence or {}).get("soft_facets") or {}
+    if soft_facets:
+        bits = []
+        for facet_id, values in soft_facets.items():
+            if values:
+                bits.append(f"{facet_id}={'/'.join(str(v) for v in values[:2])}")
+        if bits:
+            parts.append(
+                "Some filters were approximate (" + ", ".join(bits) + "). "
+                "Say results may be close matches, not exact filter matches."
+            )
+    dropped_brands = (adherence or {}).get("dropped_brands") or []
+    if dropped_brands:
+        parts.append(
+            f"The requested brand ({', '.join(str(b) for b in dropped_brands[:2])}) is not sold here. "
+            "Do not claim products are from that brand."
+        )
+    soft_categories = (adherence or {}).get("soft_categories") or []
+    if soft_categories:
+        parts.append(
+            f"Category terms ({', '.join(str(c) for c in soft_categories[:2])}) were soft hints only; "
+            "some items may be related alternatives."
         )
     if products_empty and not parts:
         parts.append(

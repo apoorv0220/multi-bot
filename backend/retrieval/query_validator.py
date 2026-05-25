@@ -4,10 +4,9 @@ import os
 from typing import Any
 
 from retrieval.planner import _category_confidence_threshold, _has_product_type_category
-from retrieval.profile import resolve_facet_value_to_sample
+from retrieval.profile import resolve_facet_value_to_sample, _normalize_label
 from retrieval.rules_prepass import term_present_as_word
 from retrieval.structured_query import CategorySpec, FacetSpec, StructuredQuery
-
 
 # Only explicit `category: …` syntax from rules_prepass reaches this confidence.
 _EXPLICIT_CATEGORY_CONFIDENCE = 0.95
@@ -15,6 +14,10 @@ _EXPLICIT_CATEGORY_CONFIDENCE = 0.95
 
 def _normalize_facet_value(facet_id: str, value: str, facet_meta: dict[str, Any]) -> str:
     return resolve_facet_value_to_sample(facet_id, value, facet_meta)
+
+
+def _facet_samples_norm(facet_meta: dict[str, Any] | None) -> set[str]:
+    return {_normalize_label(str(s)) for s in ((facet_meta or {}).get("sample_values") or []) if s}
 
 
 def _category_id_matches_token(cat_id: str, token: str) -> bool:
@@ -46,7 +49,6 @@ def _score_gazetteer_category_match(val_norm: str, entry: dict[str, Any]) -> int
         return 90
     if _category_id_matches_token(entry_id, val_norm):
         return 80
-    # Short tokens (men, tops) must exact-match id/label — avoids men ⊂ recommends/women.
     min_fuzzy_len = 4
     for label in labels:
         if label == val_norm:
@@ -74,12 +76,14 @@ def _canonical_gazetteer_category(value: str, profile: dict[str, Any] | None) ->
     return best_id if best_score > 0 else val_norm
 
 
+
 def validate_structured_query(
     query: StructuredQuery,
     *,
     profile: dict[str, Any] | None,
 ) -> StructuredQuery:
     validated = query.copy()
+    validation_meta: dict[str, Any] = dict(validated.validation_meta or {})
 
     if validated.category.values:
         gazetteer_ids = set()
@@ -88,14 +92,28 @@ def validate_structured_query(
                 gazetteer_ids.add(str(entry.get("id") or "").lower())
                 for label in (entry.get("labels") or []) + (entry.get("normalized") or []):
                     gazetteer_ids.add(str(label).strip().lower())
-        filtered_cats = []
-        for val in validated.category.values:
-            v_norm = _canonical_gazetteer_category(val, profile)
-            if not gazetteer_ids or v_norm in gazetteer_ids:
-                filtered_cats.append(v_norm)
+        filtered_cats: list[str] = []
+        soft_categories: list[str] = []
         is_explicit = validated.category.confidence >= _EXPLICIT_CATEGORY_CONFIDENCE
-        if is_explicit and not filtered_cats:
+        for val in validated.category.values:
+            raw = str(val).strip()
+            if not raw:
+                continue
+            v_norm = _canonical_gazetteer_category(raw, profile)
+            if gazetteer_ids and v_norm not in gazetteer_ids:
+                if is_explicit:
+                    filtered_cats.append(v_norm or raw.lower())
+                else:
+                    soft_categories.append(raw)
+                continue
+            filtered_cats.append(v_norm)
+        if is_explicit and not filtered_cats and not soft_categories:
             filtered_cats = [str(v).strip().lower() for v in validated.category.values if str(v).strip()]
+        if soft_categories:
+            validation_meta["soft_categories"] = list(dict.fromkeys(soft_categories))
+            hint_blob = " ".join(soft_categories)
+            validated.free_text = f"{validated.free_text} {hint_blob}".strip()
+            validated.retrieval_rewrite = f"{validated.retrieval_rewrite} {hint_blob}".strip()
         validated.category.values = filtered_cats
         threshold = _EXPLICIT_CATEGORY_CONFIDENCE
         if profile:
@@ -111,8 +129,6 @@ def validate_structured_query(
             "true",
             "yes",
         )
-        # Natural-language categories default to hint + boost (phase 2b).
-        # Hard filter for explicit `category:` or when gazetteer threshold flag is enabled.
         product_type_filter = (
             _has_product_type_category(filtered_cats, profile)
             and validated.category.confidence >= _category_confidence_threshold(profile)
@@ -132,18 +148,38 @@ def validate_structured_query(
     profile_facets = (profile or {}).get("facets") or {}
     validated_facets: dict[str, FacetSpec] = {}
     stripped_terms: list[str] = []
+    soft_facets: dict[str, list[str]] = dict(validation_meta.get("soft_facets") or {})
+    dropped_brands: list[str] = list(validation_meta.get("dropped_brands") or [])
+
     for facet_id, spec in validated.facets.items():
         if facet_id == "brand":
             brand_meta = (profile or {}).get("core_fields", {}).get("brand") or {}
             if profile and not brand_meta.get("indexed", True):
                 stripped_terms.extend(spec.values)
                 continue
-            validated_facets["brand"] = FacetSpec(
-                values=[v.strip() for v in spec.values if v.strip()],
-                combine=spec.combine,
-                exclude_values=[v.strip().lower() for v in spec.exclude_values if v.strip()],
-            )
+            brand_facet_meta = {
+                "sample_values": brand_meta.get("sample_values") or [],
+                "value_aliases": brand_meta.get("value_aliases") or {},
+            }
+            kept: list[str] = []
+            samples_norm = _facet_samples_norm(brand_facet_meta)
+            for val in spec.values:
+                if not val.strip():
+                    continue
+                norm = _normalize_facet_value("brand", val, brand_facet_meta)
+                if samples_norm and norm not in samples_norm:
+                    dropped_brands.append(val.strip())
+                    stripped_terms.append(val.strip())
+                    continue
+                kept.append(norm)
+            if kept:
+                validated_facets["brand"] = FacetSpec(
+                    values=list(dict.fromkeys(kept)),
+                    combine=spec.combine,
+                    exclude_values=[v.strip().lower() for v in spec.exclude_values if v.strip()],
+                )
             continue
+
         facet_meta = profile_facets.get(facet_id)
         if profile and not facet_meta:
             stripped_terms.extend(spec.values)
@@ -151,12 +187,23 @@ def validate_structured_query(
         if profile and facet_meta and not facet_meta.get("indexed", True):
             stripped_terms.extend(spec.values)
             continue
-        norm_values = []
+
+        samples_norm = _facet_samples_norm(facet_meta)
+        norm_values: list[str] = []
         for val in spec.values:
+            raw = val.strip()
+            if not raw:
+                continue
             if facet_meta:
-                norm_values.append(_normalize_facet_value(facet_id, val, facet_meta))
+                norm = _normalize_facet_value(facet_id, raw, facet_meta)
             else:
-                norm_values.append(val.strip().lower())
+                norm = raw.lower()
+            norm_values.append(norm)
+            if samples_norm and norm not in samples_norm:
+                bucket = soft_facets.setdefault(facet_id, [])
+                if raw not in bucket:
+                    bucket.append(raw)
+
         exclude_norm = []
         for ex in spec.exclude_values:
             if facet_meta:
@@ -169,18 +216,30 @@ def validate_structured_query(
                 combine=spec.combine,
                 exclude_values=list(dict.fromkeys(exclude_norm)),
             )
+
     validated.facets = validated_facets
     for facet_id, spec in validated.facets.items():
         if spec.exclude_values:
-            excluded = {_normalize_facet_value(facet_id, v, profile_facets.get(facet_id) or {}) for v in spec.exclude_values}
+            excluded = {
+                _normalize_facet_value(facet_id, v, profile_facets.get(facet_id) or {})
+                for v in spec.exclude_values
+            }
             spec.values = [
-                v for v in spec.values
+                v
+                for v in spec.values
                 if _normalize_facet_value(facet_id, v, profile_facets.get(facet_id) or {}) not in excluded
             ]
 
     if stripped_terms:
         extra = " ".join(stripped_terms)
         validated.free_text = f"{validated.free_text} {extra}".strip()
+
+    if soft_facets:
+        validation_meta["soft_facets"] = soft_facets
+    if dropped_brands:
+        validation_meta["dropped_brands"] = list(dict.fromkeys(dropped_brands))
+    if validation_meta:
+        validated.validation_meta = validation_meta
 
     if validated.intent not in ("catalog", "support", "general"):
         validated.intent = "general"

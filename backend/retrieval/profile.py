@@ -8,6 +8,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Iterable, TYPE_CHECKING
 
+from commerce.currency import currency_from_profile
+
 if TYPE_CHECKING:
     from models import Tenant
     from sources.base import SourceRecord
@@ -230,6 +232,7 @@ def build_retrieval_profile(
     facet_product_hits: dict[str, int] = defaultdict(int)
     brand_values: Counter = Counter()
     category_labels: Counter = Counter()
+    currency_values: Counter = Counter()
     price_present = 0
     stock_present = 0
     brand_present = 0
@@ -238,6 +241,13 @@ def build_retrieval_profile(
         metadata = dict(getattr(record, "metadata", None) or {})
         if metadata.get("price") not in (None, ""):
             price_present += 1
+        currency_raw = (metadata.get("currency") or "").strip()
+        if currency_raw:
+            from commerce.currency import normalize_currency_code
+
+            code = normalize_currency_code(currency_raw)
+            if code:
+                currency_values[code] += 1
         if (metadata.get("stock_status") or "").strip():
             stock_present += 1
         brand = (metadata.get("brand") or "").strip()
@@ -305,6 +315,9 @@ def build_retrieval_profile(
                 "normalized": [],
             },
         )
+        cat_url = (getattr(record, "canonical_url", None) or "").strip()
+        if cat_url and not entry.get("url"):
+            entry["url"] = cat_url
         if title not in entry["labels"]:
             entry["labels"].append(title)
         if normalized and normalized not in entry["normalized"]:
@@ -331,11 +344,16 @@ def build_retrieval_profile(
 
     gazetteer = sorted(gazetteer_by_id.values(), key=lambda item: item["id"])
 
+    from commerce.currency import default_currency_code
+
+    store_currency = currency_values.most_common(1)[0][0] if currency_values else default_currency_code()
+
     core_fields: dict[str, Any] = {
         "price": {
             "qdrant_key": "price",
             "indexed": total_products > 0 and price_present > 0,
             "coverage_pct": round((price_present / total_products * 100.0) if total_products else 0.0, 2),
+            "currency": store_currency,
         },
         "stock_status": {
             "qdrant_key": "stock_status",
@@ -374,7 +392,10 @@ def build_retrieval_profile(
             "product_count": total_products,
             "category_entity_count": len(category_records),
             "facet_count": len(facets),
+            "currency": store_currency,
         },
+        "mixed_match_policy": "mixed_honest",
+        "rating_boost_weight": 0.05,
     }
     facet_catalog_hash = hashlib.sha256(
         json.dumps(profile_body, sort_keys=True, default=str).encode("utf-8")
@@ -451,4 +472,5 @@ def retrieval_profile_summary(profile: dict[str, Any] | None) -> dict[str, Any] 
         "facet_ids": sorted((profile.get("facets") or {}).keys()),
         "category_count": len((profile.get("category_strategy") or {}).get("gazetteer") or []),
         "product_count": (profile.get("stats") or {}).get("product_count"),
+        "currency": currency_from_profile(profile),
     }
