@@ -5,6 +5,7 @@ from typing import Any
 
 from retrieval.planner import _category_confidence_threshold, _has_product_type_category
 from retrieval.profile import resolve_facet_value_to_sample
+from retrieval.rules_prepass import term_present_as_word
 from retrieval.structured_query import CategorySpec, FacetSpec, StructuredQuery
 
 
@@ -16,29 +17,61 @@ def _normalize_facet_value(facet_id: str, value: str, facet_meta: dict[str, Any]
     return resolve_facet_value_to_sample(facet_id, value, facet_meta)
 
 
+def _category_id_matches_token(cat_id: str, token: str) -> bool:
+    """Match token to gazetteer id by segment (jacket → jackets), not substring."""
+    token = token.strip().lower()
+    if not token or not cat_id:
+        return False
+    parts = cat_id.strip().lower().replace("-", "_").split("_")
+    if token in parts:
+        return True
+    plural = f"{token}s"
+    return plural in parts or any(part.rstrip("s") == token for part in parts)
+
+
+def _score_gazetteer_category_match(val_norm: str, entry: dict[str, Any]) -> int:
+    entry_id = str(entry.get("id") or "").strip().lower()
+    if not entry_id:
+        return 0
+    if val_norm == entry_id:
+        return 100
+    labels = [str(x).strip().lower() for x in (entry.get("labels") or []) + (entry.get("normalized") or [])]
+    aliases = entry.get("aliases") or {}
+    alias_keys = (
+        [str(k).strip().lower() for k in aliases.keys()]
+        if isinstance(aliases, dict)
+        else []
+    )
+    if val_norm in labels or val_norm in alias_keys:
+        return 90
+    if _category_id_matches_token(entry_id, val_norm):
+        return 80
+    # Short tokens (men, tops) must exact-match id/label — avoids men ⊂ recommends/women.
+    min_fuzzy_len = 4
+    for label in labels:
+        if label == val_norm:
+            return 90
+        if len(val_norm) >= min_fuzzy_len and term_present_as_word(val_norm, label):
+            return 60
+    return 0
+
+
 def _canonical_gazetteer_category(value: str, profile: dict[str, Any] | None) -> str:
     """Map NL category token to a single gazetteer id when possible."""
     val_norm = value.strip().lower()
     if not val_norm or not profile:
         return val_norm
+    best_id = val_norm
+    best_score = 0
     for entry in (profile.get("category_strategy") or {}).get("gazetteer") or []:
         entry_id = str(entry.get("id") or "").strip().lower()
         if not entry_id:
             continue
-        if val_norm == entry_id:
-            return entry_id
-        labels = [str(x).strip().lower() for x in (entry.get("labels") or []) + (entry.get("normalized") or [])]
-        aliases = entry.get("aliases") or {}
-        alias_keys = (
-            [str(k).strip().lower() for k in aliases.keys()]
-            if isinstance(aliases, dict)
-            else []
-        )
-        if val_norm in labels or val_norm in alias_keys:
-            return entry_id
-        if any(val_norm in label or label in val_norm for label in labels if label):
-            return entry_id
-    return val_norm
+        score = _score_gazetteer_category_match(val_norm, entry)
+        if score > best_score:
+            best_score = score
+            best_id = entry_id
+    return best_id if best_score > 0 else val_norm
 
 
 def validate_structured_query(
@@ -58,7 +91,7 @@ def validate_structured_query(
         filtered_cats = []
         for val in validated.category.values:
             v_norm = _canonical_gazetteer_category(val, profile)
-            if not gazetteer_ids or v_norm in gazetteer_ids or any(v_norm in g for g in gazetteer_ids):
+            if not gazetteer_ids or v_norm in gazetteer_ids:
                 filtered_cats.append(v_norm)
         is_explicit = validated.category.confidence >= _EXPLICIT_CATEGORY_CONFIDENCE
         if is_explicit and not filtered_cats:
