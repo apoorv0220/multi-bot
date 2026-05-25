@@ -12,6 +12,7 @@ from retrieval.post_filter import (
     boost_results_by_facets,
     filter_results_by_category_hints,
     filter_results_by_category_tier,
+    filter_results_by_audience,
     filter_results_by_facet_excludes,
     filter_results_by_price,
     match_mode_for_tier,
@@ -153,6 +154,7 @@ async def _run_variant(
         hits = sort_results_by_category_tier(hits, category_hint_terms, profile)
         if _has_product_type_category(category_values or [], profile):
             hits = filter_results_by_category_tier(hits, category_hint_terms, profile=profile)
+        hits = filter_results_by_audience(hits, category_values)
     if price_min is not None or price_max is not None:
         hits = filter_results_by_price(hits, min_price=price_min, max_price=price_max)
     hits = boost_results_by_facets(hits, soft_facet_boosts)

@@ -39,6 +39,10 @@ def test_magento_adapter_emits_products_and_categories(monkeypatch):
             {"id": 5, "title": "Basins", "slug": "basins", "parent_id": 2},
         ],
     )
+    monkeypatch.setattr(
+        "sources.magento_adapter.MagentoFetcher.fetch_cms_pages",
+        lambda self: [],
+    )
     adapter = MagentoCatalogAdapter()
     ctx = SourceContext(
         tenant_id="tenant-m",

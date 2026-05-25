@@ -42,6 +42,17 @@ SHOPPING_VERBS = (
     "search for",
 )
 COLOUR_FINISH_FACET_KEYS = frozenset({"colour", "color", "finish"})
+_AUDIENCE_CATEGORY_STEMS = frozenset({"men", "women"})
+
+
+def _is_audience_category(cat_id: str) -> bool:
+    """Gender/department gazetteer ids (men, women, men_sale, …)."""
+    c = str(cat_id).strip().lower()
+    if not c:
+        return False
+    if c in _AUDIENCE_CATEGORY_STEMS:
+        return True
+    return any(c.startswith(f"{stem}_") or c.endswith(f"_{stem}") for stem in _AUDIENCE_CATEGORY_STEMS)
 
 
 def _normalize_label(value: str) -> str:
@@ -461,10 +472,18 @@ def rules_prepass(
 
     cat_values, cat_conf = _match_gazetteer(message, profile)
     product_type_values, product_type_conf = _match_category_product_type(message, profile)
+    audience_values = [v for v in cat_values if _is_audience_category(v)]
     if product_type_values and product_type_conf >= cat_conf:
-        cat_values, cat_conf = product_type_values, product_type_conf
+        cat_values = list(dict.fromkeys(product_type_values + audience_values))
+        cat_conf = product_type_conf
     elif product_type_values:
-        cat_values = list(dict.fromkeys(product_type_values + [v for v in cat_values if v != "erin_recommends"]))
+        cat_values = list(
+            dict.fromkeys(
+                product_type_values
+                + audience_values
+                + [v for v in cat_values if v != "erin_recommends"]
+            )
+        )
         cat_conf = max(cat_conf, product_type_conf)
     if cat_values and not explicit_category and cat_conf >= (result.category.confidence or 0.0):
         result.category.values = cat_values

@@ -15,6 +15,10 @@ logger = logging.getLogger("magento_fetcher")
 ENTITY_CATALOG_PRODUCT = 4
 ENTITY_CATALOG_CATEGORY = 3
 
+# Magento root/default nodes — excluded from product category paths (display names).
+_SKIP_CATEGORY_ENTITY_IDS = frozenset({1, 2})
+_SKIP_CATEGORY_LABELS = frozenset({"root catalog", "default category"})
+
 # facet_id -> EAV attribute_code candidates (SyncCatalog extractSelectAttribute alt codes)
 FACET_ATTRIBUTE_ALIASES: dict[str, list[str]] = {
     "brand": ["manufacturer"],
@@ -441,6 +445,85 @@ class MagentoFetcher:
                 aggregated[parent_id] = merged
         return aggregated
 
+    def _load_category_names_by_id(self, cursor) -> dict[int, str]:
+        cursor.execute(
+            f"""
+            SELECT
+                ce.entity_id AS id,
+                (
+                    SELECT v.value
+                    FROM {self._t("catalog_category_entity_varchar")} v
+                    WHERE v.entity_id = ce.entity_id
+                      AND v.attribute_id = (
+                        SELECT attribute_id FROM {self._t("eav_attribute")}
+                        WHERE attribute_code = 'name' AND entity_type_id = {ENTITY_CATALOG_CATEGORY}
+                        LIMIT 1
+                      )
+                      AND v.store_id IN (0, {self.store_id})
+                    ORDER BY v.store_id DESC
+                    LIMIT 1
+                ) AS title
+            FROM {self._t("catalog_category_entity")} ce
+            """
+        )
+        names: dict[int, str] = {}
+        for row in cursor.fetchall():
+            try:
+                cat_id = int(row.get("id"))
+            except (TypeError, ValueError):
+                continue
+            title = str(row.get("title") or "").strip()
+            if title:
+                names[cat_id] = title
+        return names
+
+    @staticmethod
+    def expand_category_path(path: str, id_to_name: dict[int, str]) -> list[str]:
+        """Resolve Magento ``path`` (e.g. 1/2/20/21/23) to ancestor display names."""
+        if not path or not id_to_name:
+            return []
+        labels: list[str] = []
+        seen: set[str] = set()
+        for segment in str(path).split("/"):
+            segment = segment.strip()
+            if not segment:
+                continue
+            try:
+                cat_id = int(segment)
+            except ValueError:
+                continue
+            if cat_id in _SKIP_CATEGORY_ENTITY_IDS:
+                continue
+            name = str(id_to_name.get(cat_id) or "").strip()
+            if not name:
+                continue
+            norm = name.lower()
+            if norm in _SKIP_CATEGORY_LABELS:
+                continue
+            if norm not in seen:
+                seen.add(norm)
+                labels.append(name)
+        return labels
+
+    @classmethod
+    def merge_product_category_paths(
+        cls,
+        paths_blob: str | None,
+        id_to_name: dict[int, str],
+    ) -> list[str]:
+        """Union ancestor names from all assigned category paths (||| separated)."""
+        if not paths_blob or not id_to_name:
+            return []
+        merged: list[str] = []
+        seen: set[str] = set()
+        for path in str(paths_blob).split("|||"):
+            for name in cls.expand_category_path(path.strip(), id_to_name):
+                key = name.lower()
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(name)
+        return merged
+
     def get_base_url(self) -> str:
         if self.fallback_site_url:
             return self.fallback_site_url.rstrip("/")
@@ -490,6 +573,7 @@ class MagentoFetcher:
                 ]
                 option_labels = self._load_option_labels(cursor, option_attr_ids)
                 website_id = self._load_website_id(cursor)
+                category_names_by_id = self._load_category_names_by_id(cursor)
 
                 attr_selects = [
                     self._eav_value_sql("name", "name", meta),
@@ -517,20 +601,12 @@ class MagentoFetcher:
                     cpe.type_id AS type_id,
                     {", ".join(attr_selects)},
                     stock.stock_status AS stock_status,
-                    GROUP_CONCAT(DISTINCT cat_name.value ORDER BY cat_name.value SEPARATOR '|||') AS categories
+                    GROUP_CONCAT(DISTINCT ce.path ORDER BY ce.path SEPARATOR '|||') AS category_paths
                 FROM {self._t("catalog_product_entity")} cpe
                 LEFT JOIN {self._t("cataloginventory_stock_status")} stock
                   ON stock.product_id = cpe.entity_id AND stock.website_id = 0
                 LEFT JOIN {self._t("catalog_category_product")} ccp ON ccp.product_id = cpe.entity_id
                 LEFT JOIN {self._t("catalog_category_entity")} ce ON ce.entity_id = ccp.category_id
-                LEFT JOIN {self._t("catalog_category_entity_varchar")} cat_name
-                  ON cat_name.entity_id = ce.entity_id
-                  AND cat_name.attribute_id = (
-                    SELECT attribute_id FROM {self._t("eav_attribute")}
-                    WHERE attribute_code = 'name' AND entity_type_id = {ENTITY_CATALOG_CATEGORY}
-                    LIMIT 1
-                  )
-                  AND cat_name.store_id IN (0, {self.store_id})
                 GROUP BY cpe.entity_id, cpe.sku, cpe.type_id, stock.stock_status
                 """
                 cursor.execute(query)
@@ -579,9 +655,14 @@ class MagentoFetcher:
                         if val not in bucket:
                             bucket.append(val)
 
+            categories = self.merge_product_category_paths(
+                row.get("category_paths"),
+                category_names_by_id,
+            )
             products.append(
                 {
                     **row,
+                    "categories": "|||".join(categories) if categories else None,
                     "facet_attributes": facet_attributes,
                 }
             )

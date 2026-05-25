@@ -70,6 +70,38 @@ def _category_boost(payload: dict[str, Any], hint_terms: list[str]) -> float:
     return best
 
 
+_AUDIENCE_CATEGORY_PAIR = {"men": "women", "women": "men"}
+
+
+def _audience_from_category_values(values: list[str] | None) -> str | None:
+    if not values:
+        return None
+    for val in values:
+        key = str(val).strip().lower()
+        if key in _AUDIENCE_CATEGORY_PAIR:
+            return key
+    return None
+
+
+def filter_results_by_audience(
+    results: list[Any],
+    category_values: list[str] | None,
+) -> list[Any]:
+    """When the query targets men or women, drop hits tagged with the opposite audience only."""
+    target = _audience_from_category_values(category_values)
+    if not target or not results:
+        return results
+    conflict = _AUDIENCE_CATEGORY_PAIR[target]
+    kept: list[Any] = []
+    for result in results:
+        payload = getattr(result, "payload", None) or {}
+        categories = [str(c).strip().lower() for c in (payload.get("categories") or []) if str(c).strip()]
+        if conflict in categories and target not in categories:
+            continue
+        kept.append(result)
+    return kept
+
+
 def filter_results_by_category_hints(
     results: list[Any],
     hint_terms: list[str],
