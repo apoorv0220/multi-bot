@@ -22,6 +22,60 @@ def _payload_price(payload: dict[str, Any]) -> float | None:
         return None
 
 
+def _payload_rating(payload: dict[str, Any]) -> float | None:
+    raw = payload.get("rating")
+    if raw in (None, ""):
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    # Magento review summaries are sometimes indexed as 0–100; normalize to 0–5 stars.
+    if value > 5.0:
+        return round(value / 20.0, 2)
+    return value
+
+
+def filter_results_by_min_rating(
+    results: list[Any],
+    *,
+    min_rating: float | None,
+) -> list[Any]:
+    if min_rating is None:
+        return results
+    kept: list[Any] = []
+    for result in results:
+        rating = _payload_rating(getattr(result, "payload", None) or {})
+        if rating is not None and rating >= min_rating:
+            kept.append(result)
+    return kept
+
+
+def filter_results_on_sale(
+    results: list[Any],
+    *,
+    on_sale_only: bool = False,
+) -> list[Any]:
+    if not on_sale_only:
+        return results
+    kept: list[Any] = []
+    for result in results:
+        payload = getattr(result, "payload", None) or {}
+        price = _payload_price(payload)
+        sale = payload.get("sale_price")
+        if sale in (None, ""):
+            continue
+        try:
+            sale_val = float(sale)
+        except (TypeError, ValueError):
+            continue
+        if price is not None and sale_val < price:
+            kept.append(result)
+        elif price is None and sale_val > 0:
+            kept.append(result)
+    return kept
+
+
 def filter_results_by_price(
     results: list[Any],
     *,

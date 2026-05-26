@@ -126,6 +126,9 @@ def build_filter_adherence(
             "max": structured_query.price.max,
             "min": structured_query.price.min,
         }
+    min_rating = getattr(structured_query, "min_rating", None)
+    if min_rating is not None:
+        notes["min_rating"] = float(min_rating)
 
     return notes or None
 
@@ -205,6 +208,12 @@ def filter_adherence_instruction(
     if (adherence or {}).get("category_hint_mixed") and not miss:
         parts.append(
             "Category was a soft hint; some items may be nearby styles. Mention that briefly if relevant."
+        )
+    min_rating = (adherence or {}).get("min_rating")
+    if min_rating is not None:
+        parts.append(
+            f"Only include products with customer rating at least {min_rating:g} stars. "
+            f"Do not list products below that rating or without a rating."
         )
     if (adherence or {}).get("imperfect_match") and not parts:
         parts.append(

@@ -187,6 +187,9 @@ def merge_prepass_and_llm(prepass: StructuredQuery, llm: StructuredQuery) -> Str
     if not prepass.stock_status and llm.stock_status:
         merged.stock_status = llm.stock_status
 
+    if prepass.min_rating is not None:
+        merged.min_rating = prepass.min_rating
+
     clear = dict(prepass.session.clear)
     llm_clear = llm.session.clear or {}
     for key in ("category", "price", "stock_status"):

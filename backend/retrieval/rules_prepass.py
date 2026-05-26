@@ -77,6 +77,41 @@ def _tokenize(query: str) -> list[str]:
     return [t for t in re.findall(r"[a-z0-9]+", normalized.lower()) if t]
 
 
+def _extract_min_rating(q_lower: str) -> float | None:
+    """Parse minimum star rating from natural phrases (hard filter at retrieval)."""
+    if not q_lower:
+        return None
+    patterns = (
+        r"\b(?:only\s+)?(\d)(?:\.\d+)?[\-\s]?stars?\s+(?:and\s+)?(?:above|or\s+higher|\+)\b",
+        r"\b(?:only\s+)?(\d)(?:\.\d+)?[\-\s]?stars?\s+(?:and\s+)?up\b",
+        r"\b(?:only\s+)?(?:those\s+)?(?:above|over|at\s+least)\s+(\d+(?:\.\d+)?)\s+rating\b",
+        r"\b(?:only\s+)?(?:above|over|at\s+least)\s+(\d+(?:\.\d+)?)\s+rating\b",
+        r"\brating\s+(?:above|over|at\s+least)\s+(\d+(?:\.\d+)?)\b",
+        r"\b(?:rated|rating)\s+(\d+(?:\.\d+)?)\s*(?:\+|and\s+above|or\s+higher)\b",
+        r"\b(?:minimum|min)\s+rating\s+(?:of\s+)?(\d+(?:\.\d+)?)\b",
+        r"\b(?:with\s+)?rating\s+(?:of\s+)?(?:at\s+least\s+)?(\d+(?:\.\d+)?)\b",
+        r"\b(?:5[\-\s]?star(?:\s+rated)?|five[\-\s]?star)\b",
+        r"\b(?:4[\-\s]?star(?:\s+rated)?|four[\-\s]?star)\b",
+        r"\b(?:3[\-\s]?star(?:\s+rated)?|three[\-\s]?star)\b",
+    )
+    for pattern in patterns[:8]:
+        match = re.search(pattern, q_lower)
+        if match:
+            try:
+                value = float(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if 0 < value <= 5:
+                return value
+    if re.search(patterns[8], q_lower):
+        return 5.0
+    if re.search(patterns[9], q_lower):
+        return 4.0
+    if re.search(patterns[10], q_lower):
+        return 3.0
+    return None
+
+
 def term_present_as_word(term: str, text: str) -> bool:
     """True when ``term`` appears as a whole word/phrase in ``text`` (avoids men ⊂ women)."""
     term = _normalize_label(term)
@@ -470,6 +505,10 @@ def rules_prepass(
     if over:
         result.price.min = float(over.group(1))
 
+    from retrieval.price_validation import apply_price_bounds_validation
+
+    result = apply_price_bounds_validation(result)
+
     explicit_category = False
     for match in ATTRIBUTE_PATTERN.finditer(message):
         key = match.group("key").lower().strip()
@@ -553,12 +592,38 @@ def rules_prepass(
     if any(word in q_lower for word in SUPPORT_PATH_KEYWORDS):
         if not has_shopping:
             intent = "support"
-    if re.search(r"\b(?:cheapest|lowest\s+price|budget[\-\s]?friendly)\b", q_lower):
+    if re.search(r"\b(?:cheapest|lowest\s+price|budget[\-\s]?friendly|affordable)\b", q_lower):
         result.sort = "price_asc"
-    if re.search(r"\b(?:premium|luxury|high[\-\s]?end)\b", q_lower) and re.search(r"\babove\b|\bover\b", q_lower):
+    if re.search(
+        r"\b(?:premium|luxury|high[\-\s]?end)\b",
+        q_lower,
+    ) and (re.search(r"\babove\b|\bover\b", q_lower) or "premium" in q_lower or "luxury" in q_lower):
+        result.sort = "price_desc"
+    if re.search(
+        r"\b(?:sort\s+by\s+)?price\s+(?:low\s+to\s+high|ascending|asc)\b|"
+        r"\blowest\s+price\s+first\b",
+        q_lower,
+    ):
+        result.sort = "price_asc"
+    if re.search(
+        r"\b(?:sort\s+by\s+)?price\s+(?:high\s+to\s+low|descending|desc)\b|"
+        r"\bhighest\s+price\s+first\b",
+        q_lower,
+    ):
         result.sort = "price_desc"
     if re.search(r"\b(?:best[\-\s]?rated|top[\-\s]?rated)\b", q_lower):
         result.sort = "rating_desc"
+    min_rating = _extract_min_rating(q_lower)
+    if min_rating is not None:
+        result.min_rating = min_rating
+    if re.search(r"\b(?:on\s+sale|clearance|discounted?|specials?)\b", q_lower):
+        result.on_sale_only = True
+        if profile:
+            gaz = (profile.get("category_strategy") or {}).get("gazetteer") or []
+            if any(str(e.get("id") or "").lower() == "sale" for e in gaz):
+                if "sale" not in result.category.values:
+                    result.category.values = list(dict.fromkeys([*result.category.values, "sale"]))
+                    result.category.confidence = max(result.category.confidence, 0.85)
     if re.search(r"\b(?:newest|latest|new\s+arrivals?)\b", q_lower):
         result.sort = "newest"
     if re.search(r"\b(?:best[\-\s]?selling|bestsellers?)\b", q_lower):

@@ -30,8 +30,7 @@ def extract_product_title_from_message(message: str) -> str | None:
     patterns = [
         r"(?:more\s+)?(?:description|details?)\s+for\s+(?:the\s+)?(?:product:?\s*)(.+?)(?:\?|$)",
         r"(?:product\s+)?details?\s+(?:for|on)\s+(?:the\s+)?(.+?)(?:\?|$)",
-        r"(?:tell\s+me\s+(?:more\s+)?about|description\s+for)\s+(?:the\s+)?(.+?)(?:\?|$)",
-        r"(?:for|about|product:)\s+(.+?)(?:\?|$)",
+        r"(?:tell\s+me\s+(?:more\s+)?about)\s+(?:the\s+)?(?:product\s+)?(.+?)(?:\?|$)",
         r"(?:what\s+is\s+the\s+price\s+of)\s+(?:the\s+)?(.+?)(?:\?|$)",
         r"(?:what are the )?specifications? (?:of|for) (?:the )?(.+?)(?:\?|$)",
         r"(?:show\s+product\s+details?\s+(?:for|on))\s+(?:the\s+)?(.+?)(?:\?|$)",
@@ -53,7 +52,10 @@ def is_product_detail_message(message: str) -> bool:
         return False
     if _PRODUCT_DETAIL_SIGNALS.search(msg):
         return True
-    if extract_product_title_from_message(msg) and re.search(r"\bproduct\b", msg, re.IGNORECASE):
+    title = extract_product_title_from_message(msg)
+    if title and re.search(r"\bproduct\b", msg, re.IGNORECASE):
+        if re.search(r"\b(?:show\s+me|find|search|browse|looking\s+for|recommend)\b", msg, re.IGNORECASE):
+            return False
         return True
     return False
 

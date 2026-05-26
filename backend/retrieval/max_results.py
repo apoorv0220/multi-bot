@@ -1,12 +1,39 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import TYPE_CHECKING, Optional
 
 from sources.config import normalize_source_provider
 
 if TYPE_CHECKING:
     from models import Tenant
+
+_TOP_N_PATTERN = re.compile(
+    r"\b(?:show\s+only\s+(?:the\s+)?)?(?:top|first)\s+(\d{1,2})\b",
+    re.IGNORECASE,
+)
+_ONLY_N_PRODUCTS = re.compile(
+    r"\bshow\s+only\s+(?:the\s+)?(\d{1,2})\s+products?\b",
+    re.IGNORECASE,
+)
+
+
+def parse_explicit_result_cap(message: str | None) -> int | None:
+    """Parse phrases like 'top 5' or 'show only 3 products' into a result cap."""
+    text = (message or "").strip()
+    if not text:
+        return None
+    for pattern in (_TOP_N_PATTERN, _ONLY_N_PRODUCTS):
+        match = pattern.search(text)
+        if match:
+            try:
+                value = int(match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if 1 <= value <= 50:
+                return value
+    return None
 
 
 def effective_chat_max_results(*, tenant: Optional["Tenant"], request_max: Optional[int]) -> int:

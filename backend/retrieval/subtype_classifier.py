@@ -6,6 +6,7 @@ from typing import Any
 
 from retrieval.response_contract import ResponseSubtype, SortMode
 from retrieval.catalog_coverage import resolve_catalog_block
+from retrieval.gibberish import is_gibberish_message
 from retrieval.tools.product_refs import extract_product_title_from_message, is_product_detail_message
 from retrieval.structured_query import StructuredQuery
 
@@ -39,7 +40,7 @@ _VARIANT = re.compile(
     re.IGNORECASE,
 )
 _COMPARE = re.compile(
-    r"\b(?:compare\s+(?:these\s+two\s+products?|prices?)|which\s+is\s+better)\b",
+    r"\b(?:compare\s+(?:these\s+two\s+products?|prices?|top\s+\d+\s+options?|the\s+top\s+\d+|top\s+\d+)|which\s+is\s+better)\b",
     re.IGNORECASE,
 )
 _SIMILAR = re.compile(
@@ -62,7 +63,18 @@ _CAPABILITIES = re.compile(
     r"\b(?:what\s+can\s+you\s+do|how\s+does\s+this\s+work)\b",
     re.IGNORECASE,
 )
-_GIBBERISH = re.compile(r"^[a-z]{6,}$", re.IGNORECASE)
+_SORT_PRICE_ASC = re.compile(
+    r"\b(?:sort\s+by\s+)?price\s+(?:low\s+to\s+high|ascending|asc)\b|"
+    r"\blowest\s+price\s+first\b",
+    re.IGNORECASE,
+)
+_SORT_PRICE_DESC = re.compile(
+    r"\b(?:sort\s+by\s+)?price\s+(?:high\s+to\s+low|descending|desc)\b|"
+    r"\bhighest\s+price\s+first\b",
+    re.IGNORECASE,
+)
+_AFFORDABLE = re.compile(r"\b(?:affordable|budget[\-\s]?friendly|something\s+cheap)\b", re.IGNORECASE)
+_PREMIUM = re.compile(r"\b(?:premium|luxury|high[\-\s]?end)\b", re.IGNORECASE)
 _RESUME_CATALOG = re.compile(
     r"\b(?:show\s+me\s+more\s+(?:of\s+)?(?:those|these)|more\s+(?:of\s+)?(?:those|these))\b",
     re.IGNORECASE,
@@ -99,13 +111,13 @@ def classify_response_subtype(
         return SubtypeClassification(response_subtype="general_chat")
     if _CAPABILITIES.search(msg):
         return SubtypeClassification(response_subtype="general_chat")
-    if len(msg) >= 6 and _GIBBERISH.match(msg) and " " not in msg:
+    if is_gibberish_message(msg):
         return SubtypeClassification(response_subtype="general_chat")
 
     if _GUIDED.search(msg):
         return SubtypeClassification(response_subtype="guided_discovery")
 
-    if is_product_detail_message(msg) or extract_product_title_from_message(msg):
+    if is_product_detail_message(msg):
         return SubtypeClassification(response_subtype="product_detail")
 
     if structured_query.intent == "support" or _SUPPORT.search(msg):
@@ -130,8 +142,10 @@ def classify_response_subtype(
         return SubtypeClassification(response_subtype="sort_browse", sort="bestseller")
     if _SORT_TREND.search(msg):
         return SubtypeClassification(response_subtype="sort_browse", sort="trending")
-    if _SORT_CHEAP.search(msg):
+    if _SORT_CHEAP.search(msg) or _AFFORDABLE.search(msg) or _SORT_PRICE_ASC.search(msg):
         return SubtypeClassification(response_subtype="sort_browse", sort="price_asc")
+    if _PREMIUM.search(msg) or _SORT_PRICE_DESC.search(msg):
+        return SubtypeClassification(response_subtype="sort_browse", sort="price_desc")
 
     if _COMPARE.search(msg):
         return SubtypeClassification(response_subtype="product_compare")

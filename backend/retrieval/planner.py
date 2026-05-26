@@ -124,6 +124,8 @@ class RetrievalPlan:
     content_kind: str | None = None
     price_min: float | None = None
     price_max: float | None = None
+    min_rating: float | None = None
+    on_sale_only: bool = False
     category_hint_terms: list[str] = field(default_factory=list)
     category_values: list[str] = field(default_factory=list)
     soft_facet_boosts: dict[str, list[str]] = field(default_factory=dict)
@@ -282,6 +284,8 @@ def build_retrieval_plan(
         content_kind=content_kind,
         price_min=query.price.min,
         price_max=query.price.max,
+        min_rating=query.min_rating,
+        on_sale_only=query.on_sale_only,
         category_hint_terms=category_hint_terms,
         category_values=list(query.category.values),
         soft_facet_boosts=soft_facet_boosts,

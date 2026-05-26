@@ -135,6 +135,15 @@ def compose_general_capabilities(*, brand: str) -> str:
     )
 
 
+def compose_invalid_price_fallback(*, currency_code: str | None = None) -> str:
+    code = currency_code or default_currency_code()
+    example = format_money(60, code)
+    return (
+        f"Please use a price above zero — for example: "
+        f'"Show me jackets under {example}".'
+    )
+
+
 def compose_gibberish_fallback(*, currency_code: str | None = None) -> str:
     code = currency_code or default_currency_code()
     example = format_money(60, code)

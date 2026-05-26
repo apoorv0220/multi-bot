@@ -14,6 +14,8 @@ from retrieval.post_filter import (
     filter_results_by_category_tier,
     filter_results_by_audience,
     filter_results_by_facet_excludes,
+    filter_results_by_min_rating,
+    filter_results_on_sale,
     filter_results_by_price,
     match_mode_for_tier,
     prefer_category_tier_hits,
@@ -125,6 +127,8 @@ async def _run_variant(
     *,
     price_min: float | None,
     price_max: float | None,
+    min_rating: float | None = None,
+    on_sale_only: bool = False,
     category_hint_terms: list[str],
     category_values: list[str] | None = None,
     profile: dict[str, Any] | None = None,
@@ -157,6 +161,10 @@ async def _run_variant(
         hits = filter_results_by_audience(hits, category_values)
     if price_min is not None or price_max is not None:
         hits = filter_results_by_price(hits, min_price=price_min, max_price=price_max)
+    if min_rating is not None:
+        hits = filter_results_by_min_rating(hits, min_rating=min_rating)
+    if on_sale_only:
+        hits = filter_results_on_sale(hits, on_sale_only=True)
     hits = boost_results_by_facets(hits, soft_facet_boosts)
     hits = filter_results_by_facet_excludes(hits, facet_excludes)
     if category_hint_terms and not (filters or {}).get("categories"):
@@ -178,6 +186,8 @@ async def execute_tiered_search(
             dict(plan.metadata_filters or {}),
             price_min=plan.price_min,
             price_max=plan.price_max,
+            min_rating=plan.min_rating,
+            on_sale_only=plan.on_sale_only,
             category_hint_terms=plan.category_hint_terms,
             category_values=plan.category_values,
             profile=profile,
@@ -216,6 +226,8 @@ async def execute_tiered_search(
                 filters,
                 price_min=price_min,
                 price_max=price_max,
+                min_rating=plan.min_rating,
+                on_sale_only=plan.on_sale_only,
                 category_hint_terms=plan.category_hint_terms,
                 category_values=plan.category_values,
                 profile=profile,
@@ -237,7 +249,7 @@ async def execute_tiered_search(
     if with_price is not None:
         return with_price
 
-    if plan.price_min is not None or plan.price_max is not None:
+    if (plan.price_min is not None or plan.price_max is not None) and plan.min_rating is None:
         without_price = await try_variants(None, None, price_relaxed=True)
         if without_price is not None:
             return without_price

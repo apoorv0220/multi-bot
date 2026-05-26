@@ -150,6 +150,8 @@ class StructuredQuery:
     price: PriceSpec = field(default_factory=PriceSpec)
     stock_status: str | None = None
     sort: str | None = None
+    min_rating: float | None = None
+    on_sale_only: bool = False
     session: SessionSpec = field(default_factory=SessionSpec)
     catalog_coverage: CatalogCoverageSpec = field(default_factory=CatalogCoverageSpec)
     validation_meta: dict[str, Any] = field(default_factory=dict)
@@ -167,6 +169,10 @@ class StructuredQuery:
         }
         if self.sort:
             blob["sort"] = self.sort
+        if self.min_rating is not None:
+            blob["min_rating"] = self.min_rating
+        if self.on_sale_only:
+            blob["on_sale_only"] = True
         if self.catalog_coverage.in_catalog is not None or self.catalog_coverage.missing_terms:
             blob["catalog_coverage"] = self.catalog_coverage.to_dict()
         if self.validation_meta:
@@ -191,6 +197,8 @@ class StructuredQuery:
             price=PriceSpec.from_dict(data.get("price")),
             stock_status=data.get("stock_status"),
             sort=data.get("sort"),
+            min_rating=float(data["min_rating"]) if data.get("min_rating") is not None else None,
+            on_sale_only=bool(data.get("on_sale_only")),
             session=SessionSpec.from_dict(data.get("session")),
             catalog_coverage=CatalogCoverageSpec.from_dict(data.get("catalog_coverage")),
             validation_meta=dict(data.get("validation_meta") or {}),

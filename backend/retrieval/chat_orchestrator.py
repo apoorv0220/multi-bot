@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from retrieval.match_quality import ProductMatchScore, classify_match_quality_for_results, finalize_response_subtype
+from retrieval.gibberish import is_gibberish_message
+from retrieval.price_validation import has_invalid_price
 from retrieval.response_composer import (
     compose_category_availability,
     compose_category_plp_intro,
     compose_general_capabilities,
     compose_gibberish_fallback,
     compose_guided_discovery,
+    compose_invalid_price_fallback,
     compose_list_categories_intro,
     compose_search_intro,
     loader_stage_for_subtype,
@@ -154,8 +158,16 @@ def build_static_response(
     subtype = classification.response_subtype
     site = (website_url or "").rstrip("/")
 
+    if has_invalid_price(structured_query):
+        return CommerceTurnExtras(
+            response_subtype="product_search",
+            intro_text=compose_invalid_price_fallback(currency_code=currency_from_profile(profile)),
+            skip_catalog_llm=True,
+            meta={"loader_stage": loader_stage_for_subtype("product_search"), "invalid_price": True},
+        )
+
     if subtype == "general_chat":
-        if len(message.strip()) >= 6 and message.strip().isalpha() and " " not in message.strip():
+        if is_gibberish_message(message):
             return CommerceTurnExtras(
                 response_subtype="general_chat",
                 intro_text=compose_gibberish_fallback(currency_code=currency_from_profile(profile)),
@@ -202,6 +214,40 @@ def build_static_response(
         )
 
     hits = card_results or search_results or []
+
+    if subtype == "similar_products" and hits:
+        ref = resolve_product_ref(message, session_state)
+        anchor = find_product_in_results(ref or {}, hits) if ref else None
+        if not anchor and session_state:
+            refs = session_state.get("last_product_refs") or []
+            if refs:
+                anchor = find_product_in_results(refs[0], hits) or refs[0]
+        anchor_cats = set(str(c).lower() for c in (anchor or {}).get("categories") or [])
+        anchor_url = (anchor or {}).get("url") or ""
+        similar: list[Any] = []
+        for row in hits:
+            payload = getattr(row, "payload", None) or (row if isinstance(row, dict) else {})
+            if not isinstance(payload, dict):
+                continue
+            url = payload.get("url") or ""
+            if anchor_url and url == anchor_url:
+                continue
+            cats = set(str(c).lower() for c in (payload.get("categories") or []))
+            if anchor_cats and cats.intersection(anchor_cats):
+                similar.append(row)
+            elif not anchor_cats:
+                similar.append(row)
+        showing = similar[:8] if similar else hits[:8]
+        label = (anchor or {}).get("title") or "that item"
+        return CommerceTurnExtras(
+            response_subtype="similar_products",
+            intro_text=f"Here are alternatives similar to {label}:",
+            skip_catalog_llm=True,
+            meta={
+                "loader_stage": loader_stage_for_subtype("similar_products"),
+                "showing": len(showing),
+            },
+        )
 
     if subtype == "product_detail":
         ref = resolve_product_ref(message, session_state)
@@ -259,20 +305,30 @@ def build_static_response(
         )
 
     if subtype == "product_compare":
+        from retrieval.tools.product_detail import format_product_compare_multi
+
+        payloads: list[dict[str, Any]] = []
         refs = (session_state or {}).get("last_product_refs") or []
         if len(refs) >= 2 and hits:
-            a = find_product_in_results(refs[0], hits) or refs[0]
-            b = find_product_in_results(refs[1], hits) or refs[1]
-            if isinstance(a, dict) and isinstance(b, dict) and a.get("title") and b.get("title"):
-                return CommerceTurnExtras(
-                    response_subtype="product_compare",
-                    intro_text=format_product_compare(
-                        a,
-                        b,
-                        currency_code=currency_from_profile(profile),
-                    ),
-                    skip_catalog_llm=True,
-                )
+            for ref in refs[:3]:
+                payload = find_product_in_results(ref, hits) or ref
+                if isinstance(payload, dict) and payload.get("title"):
+                    payloads.append(payload)
+        elif hits and re.search(r"\bcompare\b", message, re.IGNORECASE):
+            want = 3 if re.search(r"\btop\s+3\b|\bthree\b", message, re.IGNORECASE) else 2
+            for row in hits[:want]:
+                payload = getattr(row, "payload", None) or {}
+                if isinstance(payload, dict) and payload.get("title"):
+                    payloads.append(payload)
+        if len(payloads) >= 2:
+            return CommerceTurnExtras(
+                response_subtype="product_compare",
+                intro_text=format_product_compare_multi(
+                    payloads,
+                    currency_code=currency_from_profile(profile),
+                ),
+                skip_catalog_llm=True,
+            )
         return CommerceTurnExtras(
             response_subtype="product_compare",
             intro_text="Name two products to compare, or browse two items first.",

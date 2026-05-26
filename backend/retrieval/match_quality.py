@@ -80,6 +80,19 @@ def score_product_match(
             price_ok = False
             missed.append("price")
 
+    rating_ok = True
+    min_rating = getattr(structured_query, "min_rating", None)
+    if min_rating is not None:
+        from retrieval.post_filter import _payload_rating
+
+        stars = _payload_rating(payload)
+        if stars is None:
+            rating_ok = False
+            missed.append("rating")
+        elif stars < float(min_rating):
+            rating_ok = False
+            missed.append("rating")
+
     facet_ok = True
     for facet_id, values in _facet_constraints(structured_query, user_message).items():
         payload_vals = _payload_facet_values(payload, facet_id)
@@ -87,7 +100,7 @@ def score_product_match(
             facet_ok = False
             missed.append(facet_id)
 
-    if cat_ok and price_ok and facet_ok:
+    if cat_ok and price_ok and facet_ok and rating_ok:
         return ProductMatchScore(match_quality="full", missed_constraints=[])
 
     if retrieval_tier in ("semantic_catalog", "relaxed_price", "relaxed_facets", "relaxed_category"):
@@ -95,7 +108,7 @@ def score_product_match(
             return ProductMatchScore(match_quality="alternative", missed_constraints=missed)
         return ProductMatchScore(match_quality="alternative", missed_constraints=missed or ["filters"])
 
-    partial_score = sum([cat_ok, price_ok, facet_ok])
+    partial_score = sum([cat_ok, price_ok, facet_ok, rating_ok])
     if partial_score >= 2:
         return ProductMatchScore(match_quality="partial", missed_constraints=missed)
     if partial_score == 1:

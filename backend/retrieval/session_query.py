@@ -115,6 +115,24 @@ def is_price_only_follow_up(user_message: str, turn_query: StructuredQuery) -> b
     return bool(_PRICE_ONLY_PATTERN.match((user_message or "").strip()))
 
 
+_RATING_REFINE_PATTERN = re.compile(
+    r"\b(?:only\s+)?(?:those\s+)?(?:above|over|at\s+least)\s+(\d+(?:\.\d+)?)\s+rating\b",
+    re.IGNORECASE,
+)
+
+
+def is_rating_refinement_follow_up(user_message: str, turn_query: StructuredQuery) -> bool:
+    """Short follow-up that only tightens min star rating (keeps session category/facets/price)."""
+    if turn_query.min_rating is None:
+        return False
+    msg = (user_message or "").strip()
+    if not _RATING_REFINE_PATTERN.search(msg):
+        return False
+    if turn_query.category.values or any(spec.values for spec in turn_query.facets.values()):
+        return len(msg.split()) <= 6
+    return True
+
+
 def is_preference_turn(user_message: str) -> bool:
     return bool(_PREFERENCE_PATTERN.search((user_message or "").strip()))
 
@@ -177,6 +195,8 @@ def is_context_switch_turn(
         return False
     if is_price_only_follow_up(user_message, turn_query):
         return False
+    if is_rating_refinement_follow_up(user_message, turn_query):
+        return False
     if is_affirmation_follow_up(user_message):
         return False
     return not _category_sets_overlap(session_query.category.values, turn_query.category.values)
@@ -214,6 +234,8 @@ def classify_merge_action(
         return "category_refinement"
     if is_price_only_follow_up(user_message, turn_query):
         return "price_only_inherit"
+    if is_rating_refinement_follow_up(user_message, turn_query):
+        return "rating_refinement"
     if _facet_replace_turn(session_query, turn_query):
         return "facet_replace"
     return "inherit"
@@ -231,6 +253,8 @@ def _soft_context_switch_merge(
         merged.price.min = session_query.price.min
     if session_query.stock_status and not merged.stock_status:
         merged.stock_status = session_query.stock_status
+    if session_query.min_rating is not None and merged.min_rating is None:
+        merged.min_rating = session_query.min_rating
     for facet_id, spec in session_query.facets.items():
         if facet_id in merged.facets:
             continue
@@ -262,6 +286,13 @@ def merge_session_query(
     if is_context_switch_turn(session_query, turn_query, user_message=user_message):
         return _soft_context_switch_merge(session_query, turn_query)
 
+    if is_rating_refinement_follow_up(user_message, turn_query):
+        merged = session_query.copy()
+        merged.min_rating = turn_query.min_rating
+        if turn_query.on_sale_only:
+            merged.on_sale_only = True
+        return merged
+
     if is_affirmation_follow_up(user_message):
         merged = session_query.copy()
         if turn_query.price.min is not None:
@@ -270,6 +301,8 @@ def merge_session_query(
             merged.price.max = turn_query.price.max
         if turn_query.stock_status:
             merged.stock_status = turn_query.stock_status
+        if turn_query.min_rating is not None:
+            merged.min_rating = turn_query.min_rating
         if turn_query.intent in ("catalog", "support", "general"):
             merged.intent = turn_query.intent
         return merged
@@ -306,6 +339,15 @@ def merge_session_query(
         merged.stock_status = turn_query.stock_status
     elif merged.stock_status is None:
         merged.stock_status = session_query.stock_status
+
+    if turn_query.min_rating is not None:
+        merged.min_rating = turn_query.min_rating
+    elif session_query.min_rating is not None:
+        merged.min_rating = session_query.min_rating
+    if turn_query.on_sale_only:
+        merged.on_sale_only = True
+    elif session_query.on_sale_only:
+        merged.on_sale_only = True
 
     cleared_facets = set(clear.get("facets") or [])
     for facet_id, spec in session_query.facets.items():
