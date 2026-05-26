@@ -16,7 +16,6 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, EmailStr, Field
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from qdrant_client.http.models import Distance, VectorParams
@@ -115,6 +114,38 @@ from sources.config import (
 )
 from url_utils import validate_and_fix_url, get_base_url
 from tenant_assets import ensure_tenant_assets_dir, next_avatar_filename, remove_local_avatar_files_for_tenant, tenant_assets_dir
+from api.schemas import (
+    AdminCreateRequest,
+    AuthRequest,
+    AuthResponse,
+    BlockedCountryRequest,
+    BlockedIPRequest,
+    BlockWordCategoryRequest,
+    BlockWordRequest,
+    ChatAction,
+    ChatCategoryLink,
+    ChatProduct,
+    ChatRequest,
+    ChatResponse,
+    FeedbackRequest,
+    GazetteerEntryMatchFlagsPatch,
+    PublicSessionRatingRequest,
+    PublicVisitorProfileRequest,
+    QuickReplyCreateRequest,
+    QuickReplyUpdateRequest,
+    ReindexRequest,
+    ResetPasswordRequest,
+    RetrievalProfileGazetteerPatchRequest,
+    SearchResult,
+    TenantBrandingConfigRequest,
+    TenantCreateRequest,
+    TenantIdleRatingConfigRequest,
+    TenantQuotaConfigRequest,
+    TenantSourceConfigRequest,
+    UserStatusRequest,
+    UserTenantAssignRequest,
+    UserTenantSetRequest,
+)
 
 load_dotenv()
 
@@ -200,210 +231,6 @@ async def startup_event():
                 "DB-IP dataset detected: CC-BY 4.0 may require attribution where results are shown "
                 "(see https://db-ip.com/db/ip-to-country-lite)."
             )
-
-
-class AuthRequest(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class AuthResponse(BaseModel):
-    access_token: str
-    role: str
-    tenant_id: Optional[str] = None
-    tenant_ids: List[str] = []
-
-
-class SearchResult(BaseModel):
-    content: str
-    source: str
-    url: str
-    score: float
-
-
-class ChatProduct(BaseModel):
-    title: str
-    url: str
-    price: Optional[float] = None
-    brand: Optional[str] = None
-    image_url: Optional[str] = None
-    score: Optional[float] = None
-    rating: Optional[float] = None
-    review_count: Optional[int] = None
-    match_quality: Optional[str] = None
-    missed_constraints: Optional[List[str]] = None
-    currency: Optional[str] = None
-
-
-class ChatCategoryLink(BaseModel):
-    name: str
-    url: Optional[str] = None
-    product_count: Optional[int] = None
-
-
-class ChatAction(BaseModel):
-    type: str = "link"
-    label: str
-    url: str
-
-
-class ChatRequest(BaseModel):
-    message: str
-    session_id: Optional[str] = None
-    max_results: Optional[int] = Field(default=None, ge=1, le=100)
-
-
-class ChatResponse(BaseModel):
-    response: str
-    session_id: str
-    message_id: str
-    source: Optional[str] = None
-    confidence: Optional[float] = None
-    sources: Optional[List[SearchResult]] = None
-    products: Optional[List[ChatProduct]] = None
-    categories: Optional[List[ChatCategoryLink]] = None
-    actions: Optional[List[ChatAction]] = None
-    meta: Optional[Dict[str, Any]] = None
-    response_subtype: Optional[str] = None
-    retrieval_tier: Optional[str] = None
-    match_mode: Optional[str] = None
-    retrieval_debug: Optional[Dict[str, Any]] = None
-
-
-class PublicVisitorProfileRequest(BaseModel):
-    visitor_id: str
-    name: str
-    email: EmailStr
-
-
-class FeedbackRequest(BaseModel):
-    vote: FeedbackVote
-    reason: Optional[str] = ""
-
-
-class ReindexRequest(BaseModel):
-    tenant_id: Optional[str] = None
-
-
-class AdminCreateRequest(BaseModel):
-    email: EmailStr
-    password: str
-    tenant_id: Optional[str] = None
-    new_tenant_name: Optional[str] = None
-    role: Optional[str] = UserRole.admin.value
-
-
-class UserStatusRequest(BaseModel):
-    is_active: bool
-
-
-class ResetPasswordRequest(BaseModel):
-    new_password: str
-
-
-class UserTenantAssignRequest(BaseModel):
-    tenant_id: str
-
-
-class UserTenantSetRequest(BaseModel):
-    tenant_ids: list[str]
-
-
-class TenantCreateRequest(BaseModel):
-    name: str
-
-
-class TenantSourceConfigRequest(BaseModel):
-    source_db_url: Optional[str] = None
-    source_db_type: Optional[str] = None
-    source_table_prefix: Optional[str] = None
-    source_url_table: Optional[str] = None
-    source_mode: Optional[str] = None
-    source_static_urls_json: Optional[str] = None
-    source_domain_aliases: Optional[str] = None
-    source_canonical_base_url: Optional[str] = None
-
-
-class TenantQuotaConfigRequest(BaseModel):
-    monthly_message_limit: Optional[int] = None
-    quota_reached_message: Optional[str] = None
-
-
-class BlockedIPRequest(BaseModel):
-    ip_address: str
-    reason: Optional[str] = ""
-
-
-class BlockedCountryRequest(BaseModel):
-    country_code: str
-    reason: Optional[str] = ""
-
-
-class GazetteerEntryMatchFlagsPatch(BaseModel):
-    id: str
-    hard_filter: Optional[bool] = None
-    demote_accessory_substrings: Optional[bool] = None
-    fixture_stem: Optional[str] = None
-    accessory_keywords: Optional[list[str]] = None
-
-
-class RetrievalProfileGazetteerPatchRequest(BaseModel):
-    entries: list[GazetteerEntryMatchFlagsPatch]
-
-
-class TenantBrandingConfigRequest(BaseModel):
-    brand_name: Optional[str] = None
-    widget_primary_color: Optional[str] = None
-    widget_website_url: Optional[str] = None
-    widget_source_type: Optional[str] = None
-    widget_user_message_color: Optional[str] = None
-    widget_bot_message_color: Optional[str] = None
-    widget_user_message_text_color: Optional[str] = None
-    widget_bot_message_text_color: Optional[str] = None
-    widget_header_title: Optional[str] = None
-    widget_welcome_message: Optional[str] = None
-    privacy_policy_url: Optional[str] = None
-    avatar_url: Optional[str] = None
-    cors_allowed_origins: Optional[str] = None
-    chat_max_results: Optional[int] = Field(default=None, ge=1, le=50)
-    chat_max_results_catalog: Optional[int] = Field(default=None, ge=1, le=50)
-
-
-class BlockWordCategoryRequest(BaseModel):
-    name: str
-    match_mode: str
-    response_message: str
-
-
-class BlockWordRequest(BaseModel):
-    word: str
-
-
-class QuickReplyCreateRequest(BaseModel):
-    category: str = "general"
-    trigger_phrase: str
-    response_template: str
-    similarity_threshold: Optional[int] = None
-    priority: int = 0
-    enabled: bool = True
-
-
-class QuickReplyUpdateRequest(BaseModel):
-    category: Optional[str] = None
-    trigger_phrase: Optional[str] = None
-    response_template: Optional[str] = None
-    similarity_threshold: Optional[int] = None
-    priority: Optional[int] = None
-    enabled: Optional[bool] = None
-
-
-class TenantIdleRatingConfigRequest(BaseModel):
-    idle_rating_wait_seconds: int
-
-
-class PublicSessionRatingRequest(BaseModel):
-    session_id: str
-    rating: int
 
 
 def db_session():
