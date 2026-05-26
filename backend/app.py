@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import main as legacy_main
 from api.routers import admin, auth, chat, health, public, reindex
+from core.middleware import exception_handling_middleware, tenant_cors_enforcement_middleware
 from core.settings import get_settings
 
 
@@ -21,8 +22,8 @@ app.add_middleware(
 )
 
 app.add_event_handler("startup", legacy_main.startup_event)
-app.middleware("http")(legacy_main.tenant_cors_enforcement_middleware)
-app.middleware("http")(legacy_main.exception_handling_middleware)
+app.middleware("http")(tenant_cors_enforcement_middleware)
+app.middleware("http")(exception_handling_middleware)
 
 app.include_router(auth.router)
 app.include_router(chat.router)
