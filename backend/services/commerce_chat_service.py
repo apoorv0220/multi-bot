@@ -511,12 +511,6 @@ def _record_usage_event(
     )
 
 
-def _ensure_manage_tenant(db, user_ctx: dict, tenant_id: str, allow_admin: bool = True):
-    allowed_roles = [UserRole.superadmin.value, UserRole.admin.value, UserRole.manager.value] if allow_admin else [UserRole.superadmin.value]
-    require_role(user_ctx, allowed_roles)
-    if user_ctx["role"] != UserRole.superadmin.value and tenant_id not in get_accessible_tenant_ids(db, user_ctx):
-        raise HTTPException(status_code=403, detail="Forbidden")
-
 
 def _find_block_word_match(db, tenant_id: str, message: str) -> Optional[dict]:
     categories = db.execute(

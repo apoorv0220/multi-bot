@@ -1,4 +1,4 @@
-import main as legacy_main
+from api import legacy_handlers as legacy_main
 
 
 async def usage_summary(*, user_ctx, db, tenant_id=None):

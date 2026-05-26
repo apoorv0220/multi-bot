@@ -1,4 +1,4 @@
-import main as legacy_main
+from api import legacy_handlers as legacy_main
 
 
 async def list_chats(*, user_ctx, db, q=None, tenant_id=None, page=1, page_size=20):

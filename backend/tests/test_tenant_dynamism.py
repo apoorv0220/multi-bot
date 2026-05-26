@@ -6,7 +6,7 @@ from embedder import Embedder, LEGACY_VECTOR_PRIMARY_SOURCE_LABEL, LEGACY_VECTOR
 
 
 def test_tenant_chat_brand_label_fallback():
-    from main import _tenant_chat_brand_label
+    from services.commerce_chat_service import _tenant_chat_brand_label
 
     assert _tenant_chat_brand_label(None) == "MRN Web Designs"
     assert _tenant_chat_brand_label(SimpleNamespace(brand_name="", name="Acme")) == "Acme"
@@ -32,7 +32,7 @@ def test_embedder_vector_payload_defaults():
 
 
 def test_normalize_source_static_urls_json_dedupes_and_strips_tracking():
-    from main import _normalize_source_static_urls_json
+    from api.legacy_handlers import _normalize_source_static_urls_json
 
     raw = """
 https://www.chilliapple.newsoftdemo.info/about?utm_source=abc

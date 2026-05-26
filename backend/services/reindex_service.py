@@ -1,4 +1,4 @@
-import main as legacy_main
+from api import legacy_handlers as legacy_main
 
 
 async def trigger_reindex(*, request, user_ctx, db):
