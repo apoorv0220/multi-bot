@@ -3,6 +3,26 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 
 import main as legacy_main
+from api.deps import db_session, get_current_user
+from api.schemas import (
+    AdminCreateRequest,
+    BlockedCountryRequest,
+    BlockedIPRequest,
+    BlockWordCategoryRequest,
+    BlockWordRequest,
+    QuickReplyCreateRequest,
+    QuickReplyUpdateRequest,
+    ResetPasswordRequest,
+    RetrievalProfileGazetteerPatchRequest,
+    TenantBrandingConfigRequest,
+    TenantCreateRequest,
+    TenantIdleRatingConfigRequest,
+    TenantQuotaConfigRequest,
+    TenantSourceConfigRequest,
+    UserStatusRequest,
+    UserTenantAssignRequest,
+    UserTenantSetRequest,
+)
 from services import admin_service, usage_service
 
 
@@ -11,8 +31,8 @@ router = APIRouter(tags=["admin"])
 
 @router.get("/api/admin/chats")
 async def admin_chats(
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
     q: Optional[str] = Query(default=None),
     tenant_id: Optional[str] = Query(default=None),
     page: int = Query(default=1),
@@ -29,14 +49,14 @@ async def admin_chats(
 
 
 @router.get("/api/admin/chats/{session_id}")
-async def admin_chat_detail(session_id: str, user_ctx=Depends(legacy_main.get_current_user), db=Depends(legacy_main.db_session)):
+async def admin_chat_detail(session_id: str, user_ctx=Depends(get_current_user), db=Depends(db_session)):
     return await admin_service.chat_detail(session_id=session_id, user_ctx=user_ctx, db=db)
 
 
 @router.get("/api/admin/users")
 async def admin_users(
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
     page: int = Query(default=1),
     page_size: int = Query(default=20),
@@ -46,8 +66,8 @@ async def admin_users(
 
 @router.get("/api/admin/visitors")
 async def admin_visitors(
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
     page: int = Query(default=1),
     page_size: int = Query(default=20),
@@ -58,8 +78,8 @@ async def admin_visitors(
 @router.get("/api/admin/visitors/{visitor_id}/chats")
 async def admin_visitor_chats(
     visitor_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
     page: int = Query(default=1),
     page_size: int = Query(default=20),
@@ -75,15 +95,15 @@ async def admin_visitor_chats(
 
 
 @router.get("/api/admin/tenants")
-async def admin_tenants(user_ctx=Depends(legacy_main.get_current_user), db=Depends(legacy_main.db_session)):
+async def admin_tenants(user_ctx=Depends(get_current_user), db=Depends(db_session)):
     return await admin_service.list_tenants(user_ctx=user_ctx, db=db)
 
 
 @router.post("/api/admin/tenants")
 async def create_tenant(
-    payload: legacy_main.TenantCreateRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: TenantCreateRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.create_tenant(payload=payload, user_ctx=user_ctx, db=db)
 
@@ -91,9 +111,9 @@ async def create_tenant(
 @router.patch("/api/admin/tenants/{tenant_id}/source-config")
 async def update_tenant_source_config(
     tenant_id: str,
-    payload: legacy_main.TenantSourceConfigRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: TenantSourceConfigRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.update_tenant_source_config(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -101,9 +121,9 @@ async def update_tenant_source_config(
 @router.patch("/api/admin/tenants/{tenant_id}/branding")
 async def update_tenant_branding(
     tenant_id: str,
-    payload: legacy_main.TenantBrandingConfigRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: TenantBrandingConfigRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.update_tenant_branding(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -112,8 +132,8 @@ async def update_tenant_branding(
 async def upload_tenant_avatar(
     tenant_id: str,
     file: UploadFile = File(...),
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.upload_tenant_avatar(tenant_id=tenant_id, file=file, user_ctx=user_ctx, db=db)
 
@@ -121,8 +141,8 @@ async def upload_tenant_avatar(
 @router.get("/api/admin/tenants/{tenant_id}/retrieval-profile")
 async def get_tenant_retrieval_profile(
     tenant_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.get_tenant_retrieval_profile(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
@@ -130,9 +150,9 @@ async def get_tenant_retrieval_profile(
 @router.patch("/api/admin/tenants/{tenant_id}/retrieval-profile/gazetteer")
 async def patch_tenant_retrieval_profile_gazetteer(
     tenant_id: str,
-    payload: legacy_main.RetrievalProfileGazetteerPatchRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: RetrievalProfileGazetteerPatchRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await legacy_main.patch_tenant_retrieval_profile_gazetteer(
         tenant_id=tenant_id,
@@ -143,15 +163,15 @@ async def patch_tenant_retrieval_profile_gazetteer(
 
 
 @router.get("/api/admin/reference/countries")
-async def list_reference_countries(user_ctx=Depends(legacy_main.get_current_user)):
+async def list_reference_countries(user_ctx=Depends(get_current_user)):
     return await admin_service.list_reference_countries(user_ctx=user_ctx)
 
 
 @router.get("/api/admin/tenants/{tenant_id}/security")
 async def get_tenant_security_settings(
     tenant_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.get_tenant_security_settings(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
@@ -159,9 +179,9 @@ async def get_tenant_security_settings(
 @router.patch("/api/admin/tenants/{tenant_id}/quota")
 async def update_tenant_quota_settings(
     tenant_id: str,
-    payload: legacy_main.TenantQuotaConfigRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: TenantQuotaConfigRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.update_tenant_quota_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -169,9 +189,9 @@ async def update_tenant_quota_settings(
 @router.patch("/api/admin/tenants/{tenant_id}/idle-rating")
 async def update_tenant_idle_rating_settings(
     tenant_id: str,
-    payload: legacy_main.TenantIdleRatingConfigRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: TenantIdleRatingConfigRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.update_tenant_idle_rating_settings(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -179,9 +199,9 @@ async def update_tenant_idle_rating_settings(
 @router.post("/api/admin/tenants/{tenant_id}/blocked-ips")
 async def add_tenant_blocked_ip(
     tenant_id: str,
-    payload: legacy_main.BlockedIPRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: BlockedIPRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.add_tenant_blocked_ip(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -190,8 +210,8 @@ async def add_tenant_blocked_ip(
 async def remove_tenant_blocked_ip(
     tenant_id: str,
     blocked_ip_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.remove_tenant_blocked_ip(
         tenant_id=tenant_id,
@@ -204,9 +224,9 @@ async def remove_tenant_blocked_ip(
 @router.post("/api/admin/tenants/{tenant_id}/blocked-countries")
 async def add_tenant_blocked_country(
     tenant_id: str,
-    payload: legacy_main.BlockedCountryRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: BlockedCountryRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.add_tenant_blocked_country(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -215,8 +235,8 @@ async def add_tenant_blocked_country(
 async def remove_tenant_blocked_country(
     tenant_id: str,
     blocked_country_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.remove_tenant_blocked_country(
         tenant_id=tenant_id,
@@ -229,8 +249,8 @@ async def remove_tenant_blocked_country(
 @router.get("/api/admin/tenants/{tenant_id}/block-word-categories")
 async def list_block_word_categories(
     tenant_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.list_block_word_categories(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
@@ -238,9 +258,9 @@ async def list_block_word_categories(
 @router.post("/api/admin/tenants/{tenant_id}/block-word-categories")
 async def create_block_word_category(
     tenant_id: str,
-    payload: legacy_main.BlockWordCategoryRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: BlockWordCategoryRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.create_block_word_category(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -249,9 +269,9 @@ async def create_block_word_category(
 async def update_block_word_category(
     tenant_id: str,
     category_id: str,
-    payload: legacy_main.BlockWordCategoryRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: BlockWordCategoryRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.update_block_word_category(
         tenant_id=tenant_id,
@@ -266,8 +286,8 @@ async def update_block_word_category(
 async def delete_block_word_category(
     tenant_id: str,
     category_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.delete_block_word_category(tenant_id=tenant_id, category_id=category_id, user_ctx=user_ctx, db=db)
 
@@ -276,9 +296,9 @@ async def delete_block_word_category(
 async def add_block_word(
     tenant_id: str,
     category_id: str,
-    payload: legacy_main.BlockWordRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: BlockWordRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.add_block_word(
         tenant_id=tenant_id,
@@ -294,8 +314,8 @@ async def delete_block_word(
     tenant_id: str,
     category_id: str,
     word_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.delete_block_word(
         tenant_id=tenant_id,
@@ -309,8 +329,8 @@ async def delete_block_word(
 @router.get("/api/admin/tenants/{tenant_id}/quick-replies")
 async def list_quick_replies(
     tenant_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.list_quick_replies(tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
@@ -318,9 +338,9 @@ async def list_quick_replies(
 @router.post("/api/admin/tenants/{tenant_id}/quick-replies")
 async def create_quick_reply(
     tenant_id: str,
-    payload: legacy_main.QuickReplyCreateRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: QuickReplyCreateRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.create_quick_reply(tenant_id=tenant_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -329,9 +349,9 @@ async def create_quick_reply(
 async def update_quick_reply(
     tenant_id: str,
     quick_reply_id: str,
-    payload: legacy_main.QuickReplyUpdateRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: QuickReplyUpdateRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.update_quick_reply(
         tenant_id=tenant_id,
@@ -346,8 +366,8 @@ async def update_quick_reply(
 async def delete_quick_reply(
     tenant_id: str,
     quick_reply_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.delete_quick_reply(
         tenant_id=tenant_id,
@@ -358,16 +378,16 @@ async def delete_quick_reply(
 
 
 @router.post("/api/admin/users")
-async def create_admin_user(payload: legacy_main.AdminCreateRequest, user_ctx=Depends(legacy_main.get_current_user), db=Depends(legacy_main.db_session)):
+async def create_admin_user(payload: AdminCreateRequest, user_ctx=Depends(get_current_user), db=Depends(db_session)):
     return await admin_service.create_admin_user(payload=payload, user_ctx=user_ctx, db=db)
 
 
 @router.post("/api/admin/users/{user_id}/status")
 async def update_user_status(
     user_id: str,
-    payload: legacy_main.UserStatusRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: UserStatusRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.update_user_status(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -375,9 +395,9 @@ async def update_user_status(
 @router.post("/api/admin/users/{user_id}/reset-password")
 async def reset_user_password(
     user_id: str,
-    payload: legacy_main.ResetPasswordRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: ResetPasswordRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.reset_user_password(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -385,8 +405,8 @@ async def reset_user_password(
 @router.get("/api/admin/users/{user_id}/tenants")
 async def list_user_tenants(
     user_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.list_user_tenants(user_id=user_id, user_ctx=user_ctx, db=db)
 
@@ -394,9 +414,9 @@ async def list_user_tenants(
 @router.post("/api/admin/users/{user_id}/tenants")
 async def add_user_tenant(
     user_id: str,
-    payload: legacy_main.UserTenantAssignRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: UserTenantAssignRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.add_user_tenant(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
 
@@ -405,8 +425,8 @@ async def add_user_tenant(
 async def remove_user_tenant(
     user_id: str,
     tenant_id: str,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.remove_user_tenant(user_id=user_id, tenant_id=tenant_id, user_ctx=user_ctx, db=db)
 
@@ -414,17 +434,17 @@ async def remove_user_tenant(
 @router.put("/api/admin/users/{user_id}/tenants")
 async def set_user_tenants(
     user_id: str,
-    payload: legacy_main.UserTenantSetRequest,
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    payload: UserTenantSetRequest,
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
 ):
     return await admin_service.set_user_tenants(user_id=user_id, payload=payload, user_ctx=user_ctx, db=db)
 
 
 @router.get("/api/admin/usage/summary")
 async def admin_usage_summary(
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
 ):
     return await usage_service.usage_summary(user_ctx=user_ctx, db=db, tenant_id=tenant_id)
@@ -432,8 +452,8 @@ async def admin_usage_summary(
 
 @router.get("/api/admin/overview")
 async def admin_overview(
-    user_ctx=Depends(legacy_main.get_current_user),
-    db=Depends(legacy_main.db_session),
+    user_ctx=Depends(get_current_user),
+    db=Depends(db_session),
     tenant_id: Optional[str] = Query(default=None),
 ):
     return await usage_service.overview(user_ctx=user_ctx, db=db, tenant_id=tenant_id)

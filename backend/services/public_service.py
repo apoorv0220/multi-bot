@@ -1,13 +1,26 @@
+import uuid
+
+from fastapi import HTTPException
+
 import main as legacy_main
+from api.deps import (
+    get_visitor_profile,
+    get_visitor_profile_by_email,
+    normalize_visitor_email,
+    normalize_visitor_id,
+    resolve_embed_tenant_id,
+    resolve_tenant_actor_user_id,
+)
+from models import ChatVisitor, Tenant
 
 
 async def get_visitor_profile(*, db, x_widget_key, x_visitor_id, origin, request_obj=None):
-    tenant_id = legacy_main._resolve_embed_tenant_id(x_widget_key)
-    tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
+    tenant_id = resolve_embed_tenant_id(x_widget_key)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not legacy_main._tenant_origin_allowed(
         tenant, legacy_main._effective_widget_origin(request_obj, origin)
     ):
-        raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     legacy_main._enforce_public_security_and_quota(
         db=db,
         tenant_id=tenant_id,
@@ -15,18 +28,18 @@ async def get_visitor_profile(*, db, x_widget_key, x_visitor_id, origin, request
         apply_ip_country_blocks=False,
         apply_message_quota=False,
     )
-    visitor_id = legacy_main._normalize_visitor_id(x_visitor_id)
-    visitor = legacy_main._get_visitor_profile(db, tenant_id, visitor_id)
+    visitor_id = normalize_visitor_id(x_visitor_id)
+    visitor = get_visitor_profile(db, tenant_id, visitor_id)
     return {"profile_exists": bool(visitor)}
 
 
 async def upsert_visitor_profile(*, payload, db, x_widget_key, origin, request_obj=None):
-    tenant_id = legacy_main._resolve_embed_tenant_id(x_widget_key)
-    tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
+    tenant_id = resolve_embed_tenant_id(x_widget_key)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not legacy_main._tenant_origin_allowed(
         tenant, legacy_main._effective_widget_origin(request_obj, origin)
     ):
-        raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     legacy_main._enforce_public_security_and_quota(
         db=db,
         tenant_id=tenant_id,
@@ -34,26 +47,26 @@ async def upsert_visitor_profile(*, payload, db, x_widget_key, origin, request_o
         apply_ip_country_blocks=False,
         apply_message_quota=False,
     )
-    visitor_id = legacy_main._normalize_visitor_id(payload.visitor_id)
+    visitor_id = normalize_visitor_id(payload.visitor_id)
     name = payload.name.strip()
     if not name:
-        raise legacy_main.HTTPException(status_code=400, detail="name is required")
-    email_trimmed, email_normalized = legacy_main._normalize_visitor_email(str(payload.email))
-    visitor = legacy_main._get_visitor_profile(db, tenant_id, visitor_id)
+        raise HTTPException(status_code=400, detail="name is required")
+    email_trimmed, email_normalized = normalize_visitor_email(str(payload.email))
+    visitor = get_visitor_profile(db, tenant_id, visitor_id)
     if visitor:
         visitor.name = name
         visitor.email = email_trimmed
         resolved_visitor_id = visitor.visitor_id
     else:
-        canonical = legacy_main._get_visitor_profile_by_email(db, tenant_id, email_normalized)
+        canonical = get_visitor_profile_by_email(db, tenant_id, email_normalized)
         if canonical:
             canonical.name = name
             canonical.email = email_trimmed
             resolved_visitor_id = canonical.visitor_id
         else:
             db.add(
-                legacy_main.ChatVisitor(
-                    tenant_id=legacy_main.uuid.UUID(tenant_id),
+                ChatVisitor(
+                    tenant_id=uuid.UUID(tenant_id),
                     visitor_id=visitor_id,
                     name=name,
                     email=email_trimmed,
@@ -65,12 +78,12 @@ async def upsert_visitor_profile(*, payload, db, x_widget_key, origin, request_o
 
 
 async def add_public_feedback(*, message_id, payload, db, x_widget_key, origin, request_obj=None):
-    tenant_id = legacy_main._resolve_embed_tenant_id(x_widget_key)
-    tenant = db.get(legacy_main.Tenant, legacy_main.uuid.UUID(tenant_id))
+    tenant_id = resolve_embed_tenant_id(x_widget_key)
+    tenant = db.get(Tenant, uuid.UUID(tenant_id))
     if not legacy_main._tenant_origin_allowed(
         tenant, legacy_main._effective_widget_origin(request_obj, origin)
     ):
-        raise legacy_main.HTTPException(status_code=403, detail="Origin not allowed for widget")
+        raise HTTPException(status_code=403, detail="Origin not allowed for widget")
     legacy_main._enforce_public_security_and_quota(
         db=db,
         tenant_id=tenant_id,
@@ -84,7 +97,7 @@ async def add_public_feedback(*, message_id, payload, db, x_widget_key, origin, 
     if str(message.tenant_id) != tenant_id:
         raise legacy_main.HTTPException(status_code=403, detail="Forbidden")
     session = db.get(legacy_main.ChatSession, message.session_id)
-    actor_user_id = session.created_by_user_id if session else legacy_main._resolve_tenant_actor_user_id(db, tenant_id)
+    actor_user_id = session.created_by_user_id if session else resolve_tenant_actor_user_id(db, tenant_id)
     feedback = db.execute(
         legacy_main.select(legacy_main.MessageFeedback).where(
             legacy_main.MessageFeedback.message_id == message.id,

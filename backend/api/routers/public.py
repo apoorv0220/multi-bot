@@ -3,17 +3,25 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, Request
 
 import main as legacy_main
+from api.deps import db_session
+from api.schemas import (
+    ChatRequest,
+    ChatResponse,
+    FeedbackRequest,
+    PublicSessionRatingRequest,
+    PublicVisitorProfileRequest,
+)
 from services import chat_service, public_service
 
 
 router = APIRouter(tags=["public"])
 
 
-@router.post("/api/public/chat", response_model=legacy_main.ChatResponse)
+@router.post("/api/public/chat", response_model=ChatResponse)
 async def public_chat(
-    request: legacy_main.ChatRequest,
+    request: ChatRequest,
     request_obj: Request,
-    db=Depends(legacy_main.db_session),
+    db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
     origin: Optional[str] = Header(default=None),
@@ -31,7 +39,7 @@ async def public_chat(
 @router.get("/api/public/visitor-profile")
 async def get_public_visitor_profile(
     request_obj: Request,
-    db=Depends(legacy_main.db_session),
+    db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
     origin: Optional[str] = Header(default=None),
@@ -48,7 +56,7 @@ async def get_public_visitor_profile(
 @router.get("/api/public/config")
 async def get_public_config(
     request_obj: Request,
-    db=Depends(legacy_main.db_session),
+    db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
 ):
@@ -62,9 +70,9 @@ async def get_public_config(
 
 @router.post("/api/public/visitor-profile")
 async def upsert_public_visitor_profile(
-    payload: legacy_main.PublicVisitorProfileRequest,
+    payload: PublicVisitorProfileRequest,
     request_obj: Request,
-    db=Depends(legacy_main.db_session),
+    db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
 ):
@@ -80,9 +88,9 @@ async def upsert_public_visitor_profile(
 @router.post("/api/public/messages/{message_id}/feedback")
 async def add_public_feedback(
     message_id: str,
-    payload: legacy_main.FeedbackRequest,
+    payload: FeedbackRequest,
     request_obj: Request,
-    db=Depends(legacy_main.db_session),
+    db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     origin: Optional[str] = Header(default=None),
 ):
@@ -100,7 +108,7 @@ async def add_public_feedback(
 async def get_public_session_rating_status(
     session_id: str,
     request_obj: Request,
-    db=Depends(legacy_main.db_session),
+    db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
     origin: Optional[str] = Header(default=None),
@@ -117,9 +125,9 @@ async def get_public_session_rating_status(
 
 @router.post("/api/public/session-rating")
 async def submit_public_session_rating(
-    payload: legacy_main.PublicSessionRatingRequest,
+    payload: PublicSessionRatingRequest,
     request_obj: Request,
-    db=Depends(legacy_main.db_session),
+    db=Depends(db_session),
     x_widget_key: Optional[str] = Header(default=None, alias="X-Widget-Key"),
     x_visitor_id: Optional[str] = Header(default=None, alias="X-Visitor-Id"),
     origin: Optional[str] = Header(default=None),
