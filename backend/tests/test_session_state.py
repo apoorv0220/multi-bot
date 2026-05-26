@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from main import _get_chat_session_state, _set_chat_session_state
+from services.commerce_chat_service import _get_chat_session_state, _set_chat_session_state
 
 
 def test_chat_session_state_roundtrip():

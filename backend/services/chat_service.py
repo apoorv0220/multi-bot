@@ -3,7 +3,6 @@ from typing import Any, Dict
 
 from fastapi import HTTPException
 
-import main as legacy_main
 from api.deps import (
     get_visitor_profile,
     normalize_visitor_id,
@@ -12,13 +11,14 @@ from api.deps import (
 )
 from models import Tenant
 from services import public_security
+from services.commerce_chat_service import run_chat_for_tenant
 
 
 async def run_authenticated_chat(request, user_ctx, db) -> Dict[str, Any]:
     tenant_id = user_ctx["tenant_id"]
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Tenant context missing")
-    return await legacy_main._run_chat_for_tenant(request, tenant_id, user_ctx["user"].id, db)
+    return await run_chat_for_tenant(request, tenant_id, user_ctx["user"].id, db)
 
 
 async def run_public_chat(request, db, x_widget_key, x_visitor_id, origin, request_obj=None):
@@ -34,7 +34,7 @@ async def run_public_chat(request, db, x_widget_key, x_visitor_id, origin, reque
     if not visitor:
         raise HTTPException(status_code=428, detail="Public visitor profile is required")
     actor_user_id = resolve_tenant_actor_user_id(db, tenant_id)
-    return await legacy_main._run_chat_for_tenant(
+    return await run_chat_for_tenant(
         request,
         tenant_id,
         actor_user_id,
