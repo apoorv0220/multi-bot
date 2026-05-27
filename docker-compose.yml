@@ -17,6 +17,10 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.12.5
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     ports:
       - "${QDRANT_HTTP_PORT:-6043}:6333"
       - "${QDRANT_GRPC_PORT:-6044}:6334"
