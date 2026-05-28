@@ -6,10 +6,16 @@ from dialogue.turn_understanding import (
     PolicyAction,
     TurnUnderstanding,
 )
+from dialogue.registry import ExecutionMode, IntentDef, Registry, get_registry, load_registry
 
 __all__ = [
+    "ExecutionMode",
     "IntentCandidate",
+    "IntentDef",
     "MergeAction",
     "PolicyAction",
+    "Registry",
     "TurnUnderstanding",
+    "get_registry",
+    "load_registry",
 ]

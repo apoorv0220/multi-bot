@@ -1,0 +1,355 @@
+# Intent registry — global taxonomy for semantic NLU/DST pivot
+#
+# NLU is global (one intent_examples index in Qdrant).
+# Execution is per-tenant via retrieval_profile + product collections.
+#
+# REGISTRY CONSTRUCTION (authoritative policy):
+#   Canonical intent IDs from Bitext mapping + catalog extensions + acceptance matrix.
+#   Do NOT copy legacy orchestrator/Crew labels as taxonomy.
+#
+# RAG EXAMPLE SOURCES (utterances embedded in Qdrant intent_examples):
+#   Primary (expected sufficient):
+#     1. Bitext retail CSV — sample 50–100 utts/intent; map via bitext_to_canonical
+#     2. commerce-feedback golden rows — required phrasing + confused pairs
+#     3. Generated gold — LLM/manual paraphrases for gaps and clarify triggers
+#   Optional top-up (architecture-neutral CSVs only, remapped to our ids):
+#     CLINC150/SNIPS retail subsets, other open (text, label) corpora
+#   NOT required: Rasa "community e-commerce pack" (nlu.yml) — optional utterance
+#   donor only; same treatment as any CSV after remapping. See ADR clarification.
+#
+# NLU BREADTH ≠ EXECUTION BREADTH:
+#   Every canonical intent is indexed and evaluated in golden tests.
+#   execution: working | support → real tools + tiered_search
+#   execution: coming_soon → honest WIP template; NLU still classifies (no Qdrant/BFF)
+#
+# Training / index: utterances embedded into Qdrant collection `intent_examples`.
+# Updates: upsert via scripts/upsert-intent-example.py (Phase 1) or admin UI (Phase 3) — no retrain.
+
+version: 1
+updated: 2026-05-25
+schema: semantic-nlu-dst
+
+sources:
+  bitext:
+    path: data/geoip/bitext-retail-ecommerce-llm-chatbot-training-dataset.csv
+    columns: [instruction, intent, category, tags, response]
+    role: Primary bulk utterances for RAG index + eval; map → canonical_id
+  acceptance:
+    path: docs/commerce-feedback-and-acceptance.md
+    role: Golden eval phrasing + catalog-specific rows
+  generated:
+    role: LLM/manual paraphrases for confused pairs, clarify, merge follow-ups
+  optional_open_corpora:
+    role: Architecture-neutral utterance CSVs if Bitext + generation insufficient; always remap
+    examples: [CLINC150 retail subset, SNIPS shopping subset]
+  rasa_community_pack:
+    role: Optional utterance donor only — NOT taxonomy authority; extract strings, remap to canonical ids
+    reference: Rasa-NLU-ECommerce-Chatbot (or similar)
+    note: Prefer Bitext + generated gold first; skip if redundant
+
+execution_modes:
+  working: Catalog path — tiered_search, product detail, variant tools
+  support: FAQ/policy/CMS — SupportFaq; no product search unless hybrid
+  coming_soon: Static template — NLU may classify; no Qdrant/BFF until Track 03
+
+policy_actions:
+  - proceed
+  - clarify
+  - confirm
+  - reset
+
+merge_actions:
+  - inherit
+  - replace
+  - append
+  - clear
+  - backtrack
+
+bitext_to_canonical:
+  add_product: cart_management
+  remove_product: cart_management
+  pay: checkout_facilitation
+  cancel_order: order_cancellation
+  change_order: order_modification
+  track_order: order_tracking
+  track_delivery: delivery_tracking
+  order_history: order_tracking
+  availability: variant_availability
+  availability_online: variant_availability
+  availability_in_store: variant_availability
+  product_information: product_detail
+  return_policy: support_faq
+  refund_policy: support_faq
+  refund_status: support_faq
+  return_product: returns
+  return_product_online: returns
+  return_product_in_store: returns
+  exchange_product: returns
+  exchange_product_in_store: returns
+  request_refund: returns
+  damaged_delivery: delivery_issue
+  delivery_issue: delivery_issue
+  delivery_time: delivery_issue
+  missing_item: delivery_issue
+  wrong_item: delivery_issue
+  payment_issue: payment_support
+  payment_methods: payment_support
+  customer_service: support_faq
+  human_agent: support_faq
+  technical_issue: support_faq
+  recover_password: account_support
+  open_account: account_support
+  close_account: account_support
+  change_account: account_support
+  request_invoice: account_support
+  request_right_to_rectification: account_support
+  store_location: store_info
+  store_opening_hours: store_info
+  shipping_costs: store_info
+  sales_period: store_info
+  use_app: store_info
+  submit_feedback: feedback
+  submit_product_feedback: feedback
+  submit_product_idea: feedback
+  product_issue: product_issue
+
+catalog_extensions:
+  - id: new_search
+    execution: working
+    tool: UnifiedProductSearch
+  - id: refine_search
+    execution: working
+    tool: UnifiedProductSearch
+  - id: expand_search
+    execution: working
+    tool: UnifiedProductSearch
+  - id: list_categories
+    execution: working
+    tool: CategoryList
+  - id: deals_browse
+    execution: working
+    tool: UnifiedProductSearch
+    flags: [on_sale_only]
+  - id: in_stock_only
+    execution: working
+    tool: UnifiedProductSearch
+    flags: [stock_status_in_stock]
+  - id: variant_availability
+    execution: working
+    tool: VariantAvailability
+    required_slots: [product_name]
+  - id: not_in_catalog
+    execution: working
+    tool: UnifiedProductSearch
+
+intents:
+  - id: greeting
+    execution: working
+    tool: NoTool
+    subtype: general_chat
+    required_slots: []
+
+  - id: clarification
+    execution: working
+    tool: NoTool
+    subtype: general_chat
+    required_slots: []
+    notes: User confused; distinct from policy_action clarify (bot asks back)
+
+  - id: new_search
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: product_search
+    required_slots: []
+
+  - id: refine_search
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: product_search
+    required_slots: []
+
+  - id: expand_search
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: category_plp_sample
+    required_slots: []
+
+  - id: deals_browse
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: product_search
+    required_slots: []
+    flags: [on_sale_only]
+
+  - id: in_stock_only
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: product_search
+    required_slots: []
+    flags: [stock_status_in_stock]
+
+  - id: variant_availability
+    execution: working
+    tool: VariantAvailability
+    subtype: product_detail
+    required_slots: [product_name]
+
+  - id: product_detail
+    execution: working
+    tool: ProductDetail
+    subtype: product_detail
+    required_slots: [product_name]
+
+  - id: variant_list
+    execution: working
+    tool: ProductDetail
+    subtype: variant_facets
+    required_slots: [product_name]
+
+  - id: list_categories
+    execution: working
+    tool: CategoryList
+    subtype: list_categories
+    required_slots: []
+
+  - id: similar_products
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: similar_products
+    required_slots: []
+
+  - id: comparison
+    execution: working
+    tool: ProductDetail
+    subtype: product_compare
+    required_slots: []
+
+  - id: support_faq
+    execution: support
+    tool: SupportFaq
+    subtype: support_faq
+    required_slots: []
+
+  - id: size_guide
+    execution: support
+    tool: SupportFaq
+    subtype: support_faq
+    required_slots: []
+
+  - id: delivery_before_buy
+    execution: support
+    tool: SupportFaq
+    subtype: support_faq
+    required_slots: []
+
+  - id: not_in_catalog
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: not_in_catalog
+    required_slots: []
+
+  - id: backtrack
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: product_search
+    required_slots: []
+    merge_action: backtrack
+
+  - id: pivot
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: product_search
+    required_slots: []
+    merge_action: replace
+
+  - id: affirmation
+    execution: working
+    tool: UnifiedProductSearch
+    subtype: product_search
+    required_slots: []
+    notes: Valid when pending_clarification or bot asked a question
+
+  - id: order_tracking
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: [order_id, customer_email]
+
+  - id: cart_management
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: checkout_facilitation
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: order_cancellation
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: order_modification
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: returns
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: delivery_tracking
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: delivery_issue
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: payment_support
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: account_support
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: store_info
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: feedback
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: product_issue
+    execution: coming_soon
+    tool: ComingSoon
+    subtype: general_chat
+    required_slots: []
+
+  - id: nlu_fallback
+    execution: working
+    tool: NoTool
+    subtype: general_chat
+    required_slots: []
+    notes: Low confidence or out-of-domain; policy may clarify
