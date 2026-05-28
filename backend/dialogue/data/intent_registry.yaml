@@ -31,7 +31,7 @@ schema: semantic-nlu-dst
 
 sources:
   bitext:
-    path: data/geoip/bitext-retail-ecommerce-llm-chatbot-training-dataset.csv
+    path: data/bitext-retail-ecommerce-llm-chatbot-training-dataset.csv
     columns: [instruction, intent, category, tags, response]
     role: Primary bulk utterances for RAG index + eval; map → canonical_id
   acceptance:
